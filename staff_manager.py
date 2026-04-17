@@ -529,11 +529,11 @@ if menu == "Ταμπλό Gantt":
                 add_date = st.date_input("Ημερομηνία", value=selected_date)
                 
                 proj_choice = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], 
-                                         format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id'] == x))
+                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                 
                 # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
                 emp_choices = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
-                                           format_func=lambda x: next(e['name'] for e in st.session_state.employees if e['id'] == x))
+                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
                 
                 c_color, c_notes = st.columns(2)
                 with c_color:
@@ -632,9 +632,13 @@ if menu == "Ταμπλό Gantt":
                     
                     with st.form("quick_edit"):
                         edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
-                        edit_proj = st.selectbox("Αλλαγή Έργου", options=[p['id'] for p in st.session_state.projects], 
-                                                 index=[p['id'] for p in st.session_state.projects].index(target_group['ProjectId']),
-                                                 format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id'] == x))
+                        
+                        proj_ids = [p['id'] for p in st.session_state.projects]
+                        default_proj_idx = proj_ids.index(target_group['ProjectId']) if target_group['ProjectId'] in proj_ids else 0
+                        
+                        edit_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
+                                                 index=default_proj_idx,
+                                                 format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                         
                         # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
                         edit_options = list(set(active_employee_ids + target_group['EmployeeIds']))
@@ -720,11 +724,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
         
         with r_col1:
             r_proj = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], 
-                                     format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id'] == x), key="new_r_proj")
+                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key="new_r_proj")
             
             # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
             r_emps = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
-                                       format_func=lambda x: next(e['name'] for e in st.session_state.employees if e['id'] == x), key="new_r_emps")
+                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key="new_r_emps")
             
             c_r_color, c_r_notes = st.columns(2)
             with c_r_color:
@@ -876,9 +880,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     
                     e_col1, e_col2 = st.columns(2)
                     with e_col1:
-                        e_proj = st.selectbox("Αλλαγή Έργου", options=[p['id'] for p in st.session_state.projects], 
-                                                index=[p['id'] for p in st.session_state.projects].index(pat['projectId']),
-                                                format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id'] == x))
+                        proj_ids = [p['id'] for p in st.session_state.projects]
+                        default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
+                        e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
+                                                index=default_proj_idx,
+                                                format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                         
                         edit_options_r = list(set(active_employee_ids + pat['employeeIds']))
                         e_emps = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r,
@@ -1080,7 +1086,7 @@ elif menu == "Ομάδα Προσωπικού":
         else:
             emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
-                                          format_func=lambda x: next(e['name'] for e in st.session_state.employees if e['id'] == x))
+                                          format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
             
             emp_to_edit = next(e for e in st.session_state.employees if e['id'] == emp_to_edit_id)
             
@@ -1163,7 +1169,7 @@ elif menu == "Άδειες":
     st.title("🏖️ Διαχείριση Αδειών")
     with st.form("new_leave"):
         l_emp = st.selectbox("Υπάλληλος (Μόνο Ενεργοί)", options=active_employee_ids, 
-                             format_func=lambda x: next(e['name'] for e in st.session_state.employees if e['id'] == x))
+                             format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
         l_start = st.date_input("Από")
         l_end = st.date_input("Έως")
         
