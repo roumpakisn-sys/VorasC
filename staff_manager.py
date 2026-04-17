@@ -35,6 +35,47 @@ def init_supabase():
 
 supabase = init_supabase()
 
+@st.cache_data(ttl=15)
+def fetch_all_data_from_db():
+    """
+    Αντλεί όλα τα δεδομένα από το Supabase. 
+    Διατηρείται στη μνήμη (cache) για 15 δευτερόλεπτα για να μην καθυστερεί η εφαρμογή στα απανωτά κλικ, 
+    αλλά να φέρνει συχνά τις αλλαγές των άλλων χρηστών.
+    """
+    if not supabase:
+        return None
+    try:
+        emps = supabase.table("employees").select("*").execute().data
+        projs = supabase.table("projects").select("*").execute().data
+        
+        assigns = supabase.table("assignments").select("*").execute().data
+        for a in assigns:
+            if isinstance(a.get('date'), str):
+                a['date'] = datetime.strptime(a['date'], "%Y-%m-%d").date()
+                
+        leaves = supabase.table("leaves").select("*").execute().data
+        for l in leaves:
+            if isinstance(l.get('startDate'), str):
+                l['startDate'] = datetime.strptime(l['startDate'], "%Y-%m-%d").date()
+            if isinstance(l.get('endDate'), str):
+                l['endDate'] = datetime.strptime(l['endDate'], "%Y-%m-%d").date()
+                
+        patterns = supabase.table("recurring_patterns").select("*").execute().data
+        for p in patterns:
+            if isinstance(p.get('startDate'), str):
+                p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
+                
+        return {
+            "employees": emps,
+            "projects": projs,
+            "assignments": assigns,
+            "leaves": leaves,
+            "recurring_patterns": patterns
+        }
+    except Exception as e:
+        print(f"Σφάλμα ανάγνωσης από Supabase: {e}")
+        return None
+
 def serialize_dates(data):
     """Μετατρέπει τα ημερολογιακά objects σε string για να μπουν σωστά στη βάση (Supabase/JSON)."""
     if isinstance(data, list):
@@ -48,6 +89,7 @@ def db_insert(table, data):
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
+            fetch_all_data_from_db.clear() # Άδειασμα της cache για άμεση ανανέωση δεδομένων!
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
 
@@ -56,6 +98,7 @@ def db_delete(table, column, value):
     if supabase:
         try:
             supabase.table(table).delete().eq(column, value).execute()
+            fetch_all_data_from_db.clear()
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
@@ -64,6 +107,7 @@ def db_delete_in(table, column, values):
     if supabase and values:
         try:
             supabase.table(table).delete().in_(column, values).execute()
+            fetch_all_data_from_db.clear()
         except Exception as e:
             st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
@@ -72,6 +116,7 @@ def db_update(table, id_val, new_data):
     if supabase:
         try:
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
+            fetch_all_data_from_db.clear()
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
@@ -89,48 +134,21 @@ BASIC_COLORS = {
     "Γκρι": "#999999"
 }
 
-# --- Αρχικοποίηση State (Με Δυνατότητα Cloud Sync) ---
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = True
-    st.session_state.is_cloud = False
-    
-    if supabase:
-        try:
-            # Φόρτωση από το Cloud (Supabase)
-            st.session_state.employees = supabase.table("employees").select("*").execute().data
-            st.session_state.projects = supabase.table("projects").select("*").execute().data
-            
-            # Assignments: μετατροπή date-strings πίσω σε object date
-            assignments_data = supabase.table("assignments").select("*").execute().data
-            for a in assignments_data:
-                if isinstance(a.get('date'), str):
-                    a['date'] = datetime.strptime(a['date'], "%Y-%m-%d").date()
-            st.session_state.assignments = assignments_data
-            
-            # Leaves
-            leaves_data = supabase.table("leaves").select("*").execute().data
-            for l in leaves_data:
-                if isinstance(l.get('startDate'), str):
-                    l['startDate'] = datetime.strptime(l['startDate'], "%Y-%m-%d").date()
-                if isinstance(l.get('endDate'), str):
-                    l['endDate'] = datetime.strptime(l['endDate'], "%Y-%m-%d").date()
-            st.session_state.leaves = leaves_data
-            
-            # Recurring Patterns
-            patterns_data = supabase.table("recurring_patterns").select("*").execute().data
-            for p in patterns_data:
-                if isinstance(p.get('startDate'), str):
-                    p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
-            st.session_state.recurring_patterns = patterns_data
-            
-            st.session_state.is_cloud = True
-            
-        except Exception as e:
-            st.error(f"⚠️ Αποτυχία φόρτωσης από Supabase: {e}")
-            supabase = None # Επιστροφή στα τοπικά/δοκιμαστικά δεδομένα αν αποτύχει
+# --- Συνεχής Φόρτωση Δεδομένων (Real-time Sync Logic) ---
+db_data = fetch_all_data_from_db()
 
-    # Αν ΔΕΝ βρέθηκε Supabase φορτώνουμε τα MOCK δεδομένα (Local mode)
-    if not supabase:
+if db_data is not None:
+    st.session_state.employees = db_data["employees"]
+    st.session_state.projects = db_data["projects"]
+    st.session_state.assignments = db_data["assignments"]
+    st.session_state.leaves = db_data["leaves"]
+    st.session_state.recurring_patterns = db_data["recurring_patterns"]
+    st.session_state.is_cloud = True
+else:
+    # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
+    if 'local_data_loaded' not in st.session_state:
+        st.session_state.local_data_loaded = True
+        st.session_state.is_cloud = False
         st.session_state.employees = [
             {'id': '1', 'name': 'Γιάννης Παπαδόπουλος', 'position': 'ΕΡΓΑΤΗΣ', 'id_number': 'ΑΙ123456', 'phone': '6912345678', 'status': 'Ενεργός'},
             {'id': '2', 'name': 'Μαρία Παππά', 'position': 'ΕΠΟΠΤΗΣ', 'id_number': 'ΑΚ654321', 'phone': '6987654321', 'status': 'Ενεργός'},
@@ -206,9 +224,9 @@ st.sidebar.subheader("Κατάσταση Συστήματος")
 
 # Διαγνωστικός Έλεγχος
 if st.session_state.get('is_cloud'):
-    st.sidebar.success("✅ Συνδεδεμένο στο Cloud")
-    if st.sidebar.button("🔄 Ανανέωση Δεδομένων", use_container_width=True):
-        del st.session_state['data_loaded']
+    st.sidebar.success("✅ Cloud Sync (Ανανέωση 15s)")
+    if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+        fetch_all_data_from_db.clear()
         st.rerun()
 else:
     st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
