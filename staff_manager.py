@@ -4,6 +4,7 @@ import plotly.express as px
 from datetime import datetime, date, timedelta
 import uuid
 import calendar
+import io
 
 try:
     from supabase import create_client
@@ -242,6 +243,7 @@ if menu == "Ταμπλό Gantt":
         presentation_mode = st.checkbox("🖥️ Λειτουργία Πλήρους Προβολής")
     
     data = []
+    export_data = [] # Λίστα για τα δεδομένα που θα εξαχθούν στο Excel
     color_map = {}
     y_category_order = []
     tickvals = []
@@ -379,6 +381,18 @@ if menu == "Ταμπλό Gantt":
                 'LegendGroup': g['LegendGroup'],
                 'ColorHex': g['ColorHex']
             })
+            
+            # Προσθήκη δεδομένων για το αρχείο Excel
+            export_data.append({
+                'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
+                'Ημέρα': day_names_gr[i],
+                'Έργο': g['Project'],
+                'Προσωπικό': ", ".join(g['Employees']),
+                'Ώρα Έναρξης': g['StartTime'],
+                'Ώρα Λήξης': g['EndTime'],
+                'Παρατηρήσεις': g['Notes']
+            })
+            
             color_map[g['LegendGroup']] = g['ColorHex']
         
     df = pd.DataFrame(data)
@@ -483,7 +497,26 @@ if menu == "Ταμπλό Gantt":
     st.markdown(f"### 🗓️ Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} έως {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}")
     st.plotly_chart(fig, use_container_width=True)
     
-    st.caption("💡 *Συμβουλές Προβολής:* **1)** Σύρετε το διάγραμμα με το ποντίκι ή την **κάτω μπάρα κύλισης**. **2)** Χρησιμοποιήστε το ροδάκι για Zoom. **3)** Διπλό κλικ για επαναφορά.")
+    # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
+    if export_data:
+        col_hint, col_btn = st.columns([3, 1])
+        with col_hint:
+            st.caption("💡 *Συμβουλές Προβολής:* **1)** Σύρετε το διάγραμμα με το ποντίκι ή την **κάτω μπάρα κύλισης**. **2)** Χρησιμοποιήστε το ροδάκι για Zoom. **3)** Διπλό κλικ για επαναφορά.")
+        with col_btn:
+            df_export = pd.DataFrame(export_data)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='Πρόγραμμα')
+            
+            st.download_button(
+                label="📥 Εξαγωγή Προγράμματος (Excel)",
+                data=buffer.getvalue(),
+                file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+    else:
+        st.caption("💡 *Συμβουλές Προβολής:* **1)** Σύρετε το διάγραμμα με το ποντίκι ή την **κάτω μπάρα κύλισης**. **2)** Χρησιμοποιήστε το ροδάκι για Zoom. **3)** Διπλό κλικ για επαναφορά.")
 
     if not presentation_mode:
         st.divider()
