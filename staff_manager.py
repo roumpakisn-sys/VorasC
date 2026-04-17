@@ -15,6 +15,33 @@ except ImportError:
 # --- Ρύθμιση σελίδας ---
 st.set_page_config(page_title="Staff Manager Pro", layout="wide")
 
+# --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("<h1 style='text-align: center; margin-top: 10vh;'>🔒 Staff Manager Pro</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ εισάγετε τον κωδικό πρόσβασης για να συνεχίσετε.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        with st.form("login_form"):
+            password = st.text_input("Κωδικός Πρόσβασης", type="password")
+            submit = st.form_submit_button("Είσοδος", use_container_width=True)
+            
+            if submit:
+                # Έλεγχος κωδικού (Από secrets ή προεπιλογή το admin123)
+                correct_password = st.secrets.get("APP_PASSWORD", "admin123")
+                if password == correct_password:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
+    
+    # Σταματάει την εκτέλεση του υπόλοιπου κώδικα αν δεν γίνει σύνδεση
+    st.stop()
+
+
 # Check if secrets exist safely
 try:
     HAS_SECRETS = "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets
@@ -222,7 +249,7 @@ menu = st.sidebar.radio("Μενού", [
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
 
-# Διαγνωστικός Έλεγχος
+# Διαγνωστικός Έλεγχος & Έλεγχος Αποσύνδεσης
 if st.session_state.get('is_cloud'):
     st.sidebar.success("✅ Cloud Sync (Ανανέωση 15s)")
     if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
@@ -236,6 +263,11 @@ else:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
     else:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
+
+st.sidebar.write("---")
+if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
+    st.session_state.authenticated = False
+    st.rerun()
 
 # --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ (Για τις φόρμες επιλογής) ---
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
