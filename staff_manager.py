@@ -5,8 +5,74 @@ from datetime import datetime, date, timedelta
 import uuid
 import calendar
 
+try:
+    from supabase import create_client
+    SUPABASE_INSTALLED = True
+except ImportError:
+    SUPABASE_INSTALLED = False
+
 # --- Ρύθμιση σελίδας ---
 st.set_page_config(page_title="Staff Manager Pro", layout="wide")
+
+# Check if secrets exist safely
+try:
+    HAS_SECRETS = "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets
+except Exception:
+    HAS_SECRETS = False
+
+# --- SUPABASE CONNECTION & HELPERS ---
+@st.cache_resource
+def init_supabase():
+    if not SUPABASE_INSTALLED:
+        return None
+    if HAS_SECRETS:
+        try:
+            return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        except Exception:
+            pass
+    return None
+
+supabase = init_supabase()
+
+def serialize_dates(data):
+    """Μετατρέπει τα ημερολογιακά objects σε string για να μπουν σωστά στη βάση (Supabase/JSON)."""
+    if isinstance(data, list):
+        return [serialize_dates(item) for item in data]
+    elif isinstance(data, dict):
+        return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
+    return data
+
+def db_insert(table, data):
+    """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση."""
+    if supabase:
+        try:
+            supabase.table(table).insert(serialize_dates(data)).execute()
+        except Exception as e:
+            st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
+
+def db_delete(table, column, value):
+    """Διαγράφει εγγραφές με βάση μια συνθήκη."""
+    if supabase:
+        try:
+            supabase.table(table).delete().eq(column, value).execute()
+        except Exception as e:
+            st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
+
+def db_delete_in(table, column, values):
+    """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
+    if supabase and values:
+        try:
+            supabase.table(table).delete().in_(column, values).execute()
+        except Exception as e:
+            st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
+
+def db_update(table, id_val, new_data):
+    """Ενημερώνει μια εγγραφή με βάση το ID της."""
+    if supabase:
+        try:
+            supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
+        except Exception as e:
+            st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
 # --- 10 Βασικά Χρώματα ---
 BASIC_COLORS = {
@@ -22,28 +88,60 @@ BASIC_COLORS = {
     "Γκρι": "#999999"
 }
 
-# --- Αρχικοποίηση State ---
-if 'employees' not in st.session_state:
-    st.session_state.employees = [
-        {'id': '1', 'name': 'Γιάννης Παπαδόπουλος', 'position': 'ΕΡΓΑΤΗΣ', 'id_number': 'ΑΙ123456', 'phone': '6912345678', 'status': 'Ενεργός'},
-        {'id': '2', 'name': 'Μαρία Παππά', 'position': 'ΕΠΟΠΤΗΣ', 'id_number': 'ΑΚ654321', 'phone': '6987654321', 'status': 'Ενεργός'},
-        {'id': '3', 'name': 'Νίκος Νικολάου', 'position': 'ΟΔΗΓΟΣ', 'id_number': 'ΑΜ987654', 'phone': '6900000000', 'status': 'Ενεργός'},
-    ]
+# --- Αρχικοποίηση State (Με Δυνατότητα Cloud Sync) ---
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = True
+    st.session_state.is_cloud = False
+    
+    if supabase:
+        try:
+            # Φόρτωση από το Cloud (Supabase)
+            st.session_state.employees = supabase.table("employees").select("*").execute().data
+            st.session_state.projects = supabase.table("projects").select("*").execute().data
+            
+            # Assignments: μετατροπή date-strings πίσω σε object date
+            assignments_data = supabase.table("assignments").select("*").execute().data
+            for a in assignments_data:
+                if isinstance(a.get('date'), str):
+                    a['date'] = datetime.strptime(a['date'], "%Y-%m-%d").date()
+            st.session_state.assignments = assignments_data
+            
+            # Leaves
+            leaves_data = supabase.table("leaves").select("*").execute().data
+            for l in leaves_data:
+                if isinstance(l.get('startDate'), str):
+                    l['startDate'] = datetime.strptime(l['startDate'], "%Y-%m-%d").date()
+                if isinstance(l.get('endDate'), str):
+                    l['endDate'] = datetime.strptime(l['endDate'], "%Y-%m-%d").date()
+            st.session_state.leaves = leaves_data
+            
+            # Recurring Patterns
+            patterns_data = supabase.table("recurring_patterns").select("*").execute().data
+            for p in patterns_data:
+                if isinstance(p.get('startDate'), str):
+                    p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
+            st.session_state.recurring_patterns = patterns_data
+            
+            st.session_state.is_cloud = True
+            
+        except Exception as e:
+            st.error(f"⚠️ Αποτυχία φόρτωσης από Supabase: {e}")
+            supabase = None # Επιστροφή στα τοπικά/δοκιμαστικά δεδομένα αν αποτύχει
 
-if 'projects' not in st.session_state:
-    st.session_state.projects = [
-        {'id': 'p1', 'name': 'Ανακαίνιση Γραφείων', 'color': '#4a86e8'},
-        {'id': 'p2', 'name': 'Συντήρηση Δικτύου', 'color': '#e69138'},
-    ]
-
-if 'assignments' not in st.session_state:
-    st.session_state.assignments = []
-
-if 'recurring_patterns' not in st.session_state:
-    st.session_state.recurring_patterns = []
-
-if 'leaves' not in st.session_state:
-    st.session_state.leaves = []
+    # Αν ΔΕΝ βρέθηκε Supabase φορτώνουμε τα MOCK δεδομένα (Local mode)
+    if not supabase:
+        st.session_state.employees = [
+            {'id': '1', 'name': 'Γιάννης Παπαδόπουλος', 'position': 'ΕΡΓΑΤΗΣ', 'id_number': 'ΑΙ123456', 'phone': '6912345678', 'status': 'Ενεργός'},
+            {'id': '2', 'name': 'Μαρία Παππά', 'position': 'ΕΠΟΠΤΗΣ', 'id_number': 'ΑΚ654321', 'phone': '6987654321', 'status': 'Ενεργός'},
+            {'id': '3', 'name': 'Νίκος Νικολάου', 'position': 'ΟΔΗΓΟΣ', 'id_number': 'ΑΜ987654', 'phone': '6900000000', 'status': 'Ενεργός'},
+        ]
+        st.session_state.projects = [
+            {'id': 'p1', 'name': 'Ανακαίνιση Γραφείων', 'color': '#4a86e8'},
+            {'id': 'p2', 'name': 'Συντήρηση Δικτύου', 'color': '#e69138'},
+        ]
+        st.session_state.assignments = []
+        st.session_state.recurring_patterns = []
+        st.session_state.leaves = []
 
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
@@ -101,6 +199,24 @@ menu = st.sidebar.radio("Μενού", [
     "Επαναλαμβανόμενες Εργασίες",
     "Ώρες Εργασιών"
 ])
+
+st.sidebar.write("---")
+st.sidebar.subheader("Κατάσταση Συστήματος")
+
+# Διαγνωστικός Έλεγχος
+if st.session_state.get('is_cloud'):
+    st.sidebar.success("✅ Συνδεδεμένο στο Cloud")
+    if st.sidebar.button("🔄 Ανανέωση Δεδομένων", use_container_width=True):
+        del st.session_state['data_loaded']
+        st.rerun()
+else:
+    st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
+    if not SUPABASE_INSTALLED:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
+    elif not HAS_SECRETS:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
+    else:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
 
 # --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ (Για τις φόρμες επιλογής) ---
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
@@ -420,7 +536,7 @@ if menu == "Ταμπλό Gantt":
                                 st.error(err)
                         else:
                             for eid in emp_choices:
-                                st.session_state.assignments.append({
+                                new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'employeeId': eid,
                                     'projectId': proj_choice,
@@ -431,7 +547,10 @@ if menu == "Ταμπλό Gantt":
                                     'colorHex': BASIC_COLORS[color_choice],
                                     'notes': add_notes,
                                     'recurring_id': None
-                                })
+                                }
+                                st.session_state.assignments.append(new_assign)
+                                db_insert("assignments", new_assign)
+                            
                             st.success("Η ανάθεση ολοκληρώθηκε!")
                             st.rerun()
 
@@ -511,6 +630,7 @@ if menu == "Ταμπλό Gantt":
                             
                         if del_edit:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                            db_delete_in('assignments', 'id', target_group['AssignmentIds'])
                             st.rerun()
                             
                         if save_edit:
@@ -535,8 +655,10 @@ if menu == "Ταμπλό Gantt":
                                         st.error(err)
                                 else:
                                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                                    db_delete_in('assignments', 'id', target_group['AssignmentIds'])
+                                    
                                     for eid in edit_emps:
-                                        st.session_state.assignments.append({
+                                        new_a = {
                                             'id': str(uuid.uuid4()),
                                             'employeeId': eid,
                                             'projectId': edit_proj,
@@ -547,7 +669,9 @@ if menu == "Ταμπλό Gantt":
                                             'colorHex': BASIC_COLORS[edit_color],
                                             'notes': edit_notes,
                                             'recurring_id': None 
-                                        })
+                                        }
+                                        st.session_state.assignments.append(new_a)
+                                        db_insert('assignments', new_a)
                                     st.rerun()
 
 # --- VIEW: RECURRING TASKS ---
@@ -613,6 +737,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                 selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
                 
+                new_assignments_batch = []
+                
                 with st.spinner('Υπολογισμός και καταχώρηση βαρδιών...'):
                     while curr_date <= r_end_date:
                         if r_type == "Εβδομαδιαία":
@@ -651,7 +777,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 conflict_count += 1
                                 conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                             else:
-                                st.session_state.assignments.append({
+                                new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'recurring_id': pattern_id,
                                     'employeeId': eid,
@@ -662,11 +788,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'colorName': r_color,
                                     'colorHex': BASIC_COLORS[r_color],
                                     'notes': r_notes
-                                })
+                                }
+                                new_assignments_batch.append(new_assign)
                                 success_count += 1
                     
-                    # Αποθήκευση του pattern
-                    st.session_state.recurring_patterns.append({
+                    new_pattern = {
                         'id': pattern_id,
                         'projectId': r_proj,
                         'employeeIds': r_emps,
@@ -677,7 +803,16 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         'startDate': r_start_date,
                         'startTime': str_start,
                         'endTime': str_end
-                    })
+                    }
+                    
+                    # Update Memory & DB
+                    st.session_state.recurring_patterns.append(new_pattern)
+                    db_insert('recurring_patterns', new_pattern)
+                    
+                    if new_assignments_batch:
+                        st.session_state.assignments.extend(new_assignments_batch)
+                        # Χρησιμοποιούμε μαζική εισαγωγή για ταχύτητα
+                        db_insert('assignments', new_assignments_batch)
                     
                 if success_count > 0:
                     st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών για τα επόμενα 3 χρόνια!")
@@ -753,6 +888,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         # Διαγράφουμε όλες τις βάρδιες και το pattern
                         st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                         st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
+                        db_delete('assignments', 'recurring_id', selected_pattern_id)
+                        db_delete('recurring_patterns', 'id', selected_pattern_id)
                         st.rerun()
                         
                     if save_rec:
@@ -768,6 +905,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         else:
                             # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
+                            db_delete('assignments', 'recurring_id', selected_pattern_id)
                             
                             # 2. Παράγουμε τις νέες
                             r_end_date = e_start_date + timedelta(days=365 * 3)
@@ -775,6 +913,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             curr_date = e_start_date
                             day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                             selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
+                            
+                            new_assignments_batch = []
                             
                             with st.spinner('Ενημέρωση και καταχώρηση βαρδιών...'):
                                 while curr_date <= r_end_date:
@@ -803,7 +943,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 for d in dates_to_assign:
                                     for eid in e_emps:
                                         if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
-                                            st.session_state.assignments.append({
+                                            new_assign = {
                                                 'id': str(uuid.uuid4()),
                                                 'recurring_id': selected_pattern_id,
                                                 'employeeId': eid,
@@ -814,7 +954,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 'colorName': e_color,
                                                 'colorHex': BASIC_COLORS[e_color],
                                                 'notes': e_notes
-                                            })
+                                            }
+                                            new_assignments_batch.append(new_assign)
                                 
                                 # 3. Ενημερώνουμε τα δεδομένα του Pattern
                                 pat['projectId'] = e_proj
@@ -826,6 +967,12 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 pat['startTime'] = str_start
                                 pat['endTime'] = str_end
                                 
+                                db_update('recurring_patterns', selected_pattern_id, pat)
+                                
+                                if new_assignments_batch:
+                                    st.session_state.assignments.extend(new_assignments_batch)
+                                    db_insert('assignments', new_assignments_batch)
+                                
                             st.rerun()
 
 # --- VIEW: PROJECTS ---
@@ -835,7 +982,9 @@ elif menu == "Διαχείριση Έργων":
         p_name = st.text_input("Όνομα Έργου")
         p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
         if st.button("Δημιουργία"):
-            st.session_state.projects.append({'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color})
+            new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
+            st.session_state.projects.append(new_p)
+            db_insert('projects', new_p)
             st.rerun()
             
     for p in st.session_state.projects:
@@ -843,6 +992,7 @@ elif menu == "Διαχείριση Έργων":
         col1.write(f"**{p['name']}**")
         if col2.button("Διαγραφή", key=p['id']):
             st.session_state.projects = [proj for proj in st.session_state.projects if proj['id'] != p['id']]
+            db_delete('projects', 'id', p['id'])
             st.rerun()
 
 # --- VIEW: EMPLOYEES ---
@@ -879,16 +1029,17 @@ elif menu == "Ομάδα Προσωπικού":
                             break
 
                     if not is_duplicate:
-                        st.session_state.employees.append({
+                        new_e = {
                             'id': str(uuid.uuid4()), 
                             'name': e_name.strip(), 
                             'position': e_pos.strip(),
                             'id_number': e_id_num.strip(),
                             'phone': e_phone.strip(),
                             'status': e_status
-                        })
+                        }
+                        st.session_state.employees.append(new_e)
+                        db_insert('employees', new_e)
                         st.success(f"Ο/Η '{e_name.strip()}' προστέθηκε με επιτυχία!")
-                        # Δεν χρειάζεται st.rerun() επειδή η φόρμα έχει clear_on_submit=True και θα καθαρίσει, ανανεώνοντας τη σελίδα.
     
     with tab_edit:
         if not st.session_state.employees:
@@ -939,6 +1090,8 @@ elif menu == "Ομάδα Προσωπικού":
                             emp_to_edit['id_number'] = ed_id_num.strip()
                             emp_to_edit['phone'] = ed_phone.strip()
                             emp_to_edit['status'] = ed_status
+                            
+                            db_update('employees', emp_to_edit_id, emp_to_edit)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
                             st.rerun()
 
@@ -969,6 +1122,7 @@ elif menu == "Ομάδα Προσωπικού":
             
             if col6.button("❌", key=f"del_emp_{e['id']}"):
                 st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] != e['id']]
+                db_delete('employees', 'id', e['id'])
                 st.rerun()
 
 # --- VIEW: LEAVES ---
@@ -1003,7 +1157,9 @@ elif menu == "Άδειες":
                     for err in conflict_errors:
                         st.error(err)
                 else:
-                    st.session_state.leaves.append({'id': str(uuid.uuid4()), 'employeeId': l_emp, 'startDate': l_start, 'endDate': l_end})
+                    new_l = {'id': str(uuid.uuid4()), 'employeeId': l_emp, 'startDate': l_start, 'endDate': l_end}
+                    st.session_state.leaves.append(new_l)
+                    db_insert('leaves', new_l)
                     st.success("Η άδεια καταχωρήθηκε με επιτυχία!")
                     st.rerun()
             
@@ -1026,6 +1182,7 @@ elif menu == "Άδειες":
             col3.write(l['endDate'].strftime('%d/%m/%Y'))
             if col4.button("❌", key=f"del_leave_{l['id']}"):
                 st.session_state.leaves = [leave for leave in st.session_state.leaves if leave['id'] != l['id']]
+                db_delete('leaves', 'id', l['id'])
                 st.rerun()
     else:
         st.info("Δεν υπάρχουν καταχωρημένες άδειες.")
