@@ -749,7 +749,7 @@ if menu == "Ταμπλό Gantt":
                         with c_canc1:
                             e_is_cancelled = st.checkbox("Επισήμανση ως Ακυρωμένη", value=target_group.get('is_cancelled', False))
                         with c_canc2:
-                            e_cancel_reason = st.text_input("Λόγος Ακύρωσης (Εμφανίζεται δίπλα)", value=target_group.get('cancel_reason', ''), disabled=not e_is_cancelled)
+                            e_cancel_reason = st.text_input("Λόγος Ακύρωσης (Συμπληρώστε αν ακυρώνετε)", value=target_group.get('cancel_reason', ''))
                         st.markdown("---")
                         
                         col_btn1, col_btn2 = st.columns(2)
@@ -983,7 +983,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
     # --- ΚΑΡΤΕΛΑ 2: ΔΙΑΧΕΙΡΙΣΗ / ΕΠΕΞΕΡΓΑΣΙΑ ---
     with tab_edit:
         if not st.session_state.recurring_patterns:
-            st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
+            st.info("Δεν υπάρχ ενεργές επαναλαμβανόμενες εργασίες.")
         else:
             pattern_options = {}
             for p in st.session_state.recurring_patterns:
