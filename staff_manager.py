@@ -331,7 +331,8 @@ if menu == "Ταμπλό Gantt":
                 'Παρατηρήσεις': '',
                 'Ετικέτα': '',
                 'LegendGroup': 'Κενό',
-                'ColorHex': 'rgba(0,0,0,0)'
+                'ColorHex': 'rgba(0,0,0,0)',
+                'GroupKey': 'Empty'
             })
             color_map['Κενό'] = 'rgba(0,0,0,0)'
             continue
@@ -346,10 +347,12 @@ if menu == "Ταμπλό Gantt":
             is_canc = a.get('is_cancelled', False)
             c_reason = a.get('cancel_reason', '')
             
-            key = f"{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
+            # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
+            key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
             if key not in groups:
                 legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
                 groups[key] = {
+                    'Key': key,
                     'Project': proj['name'] if proj else "Άγνωστο",
                     'StartTime': a['startTime'],
                     'EndTime': a['endTime'],
@@ -440,7 +443,8 @@ if menu == "Ταμπλό Gantt":
                 'Παρατηρήσεις': g['Notes'],
                 'Ετικέτα': label_text,
                 'LegendGroup': g['LegendGroup'],
-                'ColorHex': g['ColorHex']
+                'ColorHex': g['ColorHex'],
+                'GroupKey': g['Key']
             })
             
             # Προσθήκη δεδομένων για το αρχείο Excel
@@ -472,6 +476,7 @@ if menu == "Ταμπλό Gantt":
         y="Y_Axis", 
         color="LegendGroup",
         color_discrete_map=color_map,
+        custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
         hover_data=["Έργο", "Προσωπικό", "Παρατηρήσεις"],
         text="Ετικέτα"
     )
@@ -558,13 +563,37 @@ if menu == "Ταμπλό Gantt":
             )
 
     st.markdown(f"### 🗓️ Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} έως {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}")
-    st.plotly_chart(fig, use_container_width=True)
+    
+    # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
+    clicked_key = None
+    try:
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+        if event:
+            pts = []
+            if isinstance(event, dict) and "selection" in event:
+                pts = event["selection"].get("points", [])
+            elif hasattr(event, "selection"):
+                if isinstance(event.selection, dict):
+                    pts = event.selection.get("points", [])
+                else:
+                    pts = getattr(event.selection, "points", [])
+            
+            if pts:
+                customdata = pts[0].get("customdata", [])
+                for item in customdata:
+                    # Ψάχνουμε να βρούμε το κλειδί που περιέχει τα δεδομένα μας
+                    if isinstance(item, str) and "_" in item and ":" in item:
+                        clicked_key = item
+                        break
+    except Exception:
+        # Ασφαλής εναλλακτική αν το Streamlit δεν υποστηρίζει click events
+        st.plotly_chart(fig, use_container_width=True)
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
         with col_hint:
-            st.caption("💡 *Συμβουλές Προβολής:* **1)** Σύρετε το διάγραμμα με το ποντίκι ή την **κάτω μπάρα κύλισης**. **2)** Χρησιμοποιήστε το ροδάκι για Zoom. **3)** Διπλό κλικ για επαναφορά.")
+            st.caption("💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ πάνω σε μια μπάρα** για να την επεξεργαστείτε αμέσως παρακάτω! **2)** Σύρετε το διάγραμμα με το ποντίκι ή την κάτω μπάρα κύλισης.")
         with col_btn:
             df_export = pd.DataFrame(export_data)
             buffer = io.BytesIO()
@@ -579,7 +608,7 @@ if menu == "Ταμπλό Gantt":
                 use_container_width=True
             )
     else:
-        st.caption("💡 *Συμβουλές Προβολής:* **1)** Σύρετε το διάγραμμα με το ποντίκι ή την **κάτω μπάρα κύλισης**. **2)** Χρησιμοποιήστε το ροδάκι για Zoom. **3)** Διπλό κλικ για επαναφορά.")
+        st.caption("💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ πάνω σε μια μπάρα** για να την επεξεργαστείτε αμέσως παρακάτω! **2)** Σύρετε το διάγραμμα με το ποντίκι ή την κάτω μπάρα κύλισης.")
 
     if not presentation_mode:
         st.divider()
@@ -703,9 +732,14 @@ if menu == "Ταμπλό Gantt":
                 group_keys = list(weekly_groups.keys())
                 group_keys.sort(key=lambda k: (weekly_groups[k]['Date'], weekly_groups[k]['StartTime']))
                 
+                default_idx = 0
+                if clicked_key and clicked_key in group_keys:
+                    default_idx = group_keys.index(clicked_key) + 1
+                
                 selected_key = st.selectbox(
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
                     options=[""] + group_keys,
+                    index=default_idx,
                     format_func=lambda x: "Επιλέξτε..." if x == "" else f"{weekly_groups[x]['Date'].strftime('%d/%m')} - {weekly_groups[x]['Project']} ({weekly_groups[x]['StartTime']}-{weekly_groups[x]['EndTime']})"
                 )
                 
