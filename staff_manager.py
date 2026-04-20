@@ -578,8 +578,10 @@ if menu == "Ταμπλό Gantt":
             with st.form("quick_add", clear_on_submit=True):
                 add_date = st.date_input("Ημερομηνία", value=selected_date)
                 
-                proj_choice = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], 
+                proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
                                          format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                
+                custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)")
                 
                 # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
                 emp_choices = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
@@ -605,6 +607,8 @@ if menu == "Ταμπλό Gantt":
                         st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                     elif not emp_choices:
                         st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
+                    elif not custom_proj_name.strip() and not proj_choice:
+                        st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                     else:
                         errors = []
                         for eid in emp_choices:
@@ -618,11 +622,20 @@ if menu == "Ταμπλό Gantt":
                             for err in errors:
                                 st.error(err)
                         else:
+                            # Διαχείριση νέου έργου
+                            if custom_proj_name.strip():
+                                final_proj_id = str(uuid.uuid4())
+                                new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
+                                st.session_state.projects.append(new_p)
+                                db_insert('projects', new_p)
+                            else:
+                                final_proj_id = proj_choice
+                                
                             for eid in emp_choices:
                                 new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'employeeId': eid,
-                                    'projectId': proj_choice,
+                                    'projectId': final_proj_id,
                                     'date': add_date,
                                     'startTime': str_start,
                                     'endTime': str_end,
@@ -686,9 +699,11 @@ if menu == "Ταμπλό Gantt":
                         proj_ids = [p['id'] for p in st.session_state.projects]
                         default_proj_idx = proj_ids.index(target_group['ProjectId']) if target_group['ProjectId'] in proj_ids else 0
                         
-                        edit_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
+                        edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                  index=default_proj_idx,
                                                  format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                 
+                        edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                         
                         # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
                         edit_options = list(set(active_employee_ids + target_group['EmployeeIds']))
@@ -728,6 +743,8 @@ if menu == "Ταμπλό Gantt":
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                             elif not edit_emps:
                                 st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
+                            elif not edit_custom_proj_name.strip() and not edit_proj:
+                                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                             else:
                                 errors = []
                                 for eid in edit_emps:
@@ -741,6 +758,15 @@ if menu == "Ταμπλό Gantt":
                                     for err in errors:
                                         st.error(err)
                                 else:
+                                    # Διαχείριση νέου έργου κατά την επεξεργασία
+                                    if edit_custom_proj_name.strip():
+                                        final_edit_proj_id = str(uuid.uuid4())
+                                        new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
+                                        st.session_state.projects.append(new_p)
+                                        db_insert('projects', new_p)
+                                    else:
+                                        final_edit_proj_id = edit_proj
+                                        
                                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                                     db_delete_in('assignments', 'id', target_group['AssignmentIds'])
                                     
@@ -748,7 +774,7 @@ if menu == "Ταμπλό Gantt":
                                         new_a = {
                                             'id': str(uuid.uuid4()),
                                             'employeeId': eid,
-                                            'projectId': edit_proj,
+                                            'projectId': final_edit_proj_id,
                                             'date': edit_date,
                                             'startTime': str_start,
                                             'endTime': str_end,
@@ -773,8 +799,10 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
         r_col1, r_col2 = st.columns(2)
         
         with r_col1:
-            r_proj = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], 
+            r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
                                      format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key="new_r_proj")
+                                     
+            r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key="new_r_custom_proj")
             
             # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
             r_emps = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
@@ -815,7 +843,18 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
             elif r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not selected_weekdays:
                 st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας τικάροντας το αντίστοιχο κουτάκι.")
+            elif not r_custom_proj_name.strip() and not r_proj:
+                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
             else:
+                # Διαχείριση νέου έργου
+                if r_custom_proj_name.strip():
+                    final_r_proj_id = str(uuid.uuid4())
+                    new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': BASIC_COLORS[r_color]}
+                    st.session_state.projects.append(new_p)
+                    db_insert('projects', new_p)
+                else:
+                    final_r_proj_id = r_proj
+                    
                 pattern_id = str(uuid.uuid4())
                 r_end_date = r_start_date + timedelta(days=365 * 3)
                 
@@ -868,7 +907,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'id': str(uuid.uuid4()),
                                     'recurring_id': pattern_id,
                                     'employeeId': eid,
-                                    'projectId': r_proj,
+                                    'projectId': final_r_proj_id,
                                     'date': d,
                                     'startTime': str_start,
                                     'endTime': str_end,
@@ -881,7 +920,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     
                     new_pattern = {
                         'id': pattern_id,
-                        'projectId': r_proj,
+                        'projectId': final_r_proj_id,
                         'employeeIds': r_emps,
                         'colorName': r_color,
                         'notes': r_notes,
@@ -935,6 +974,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
                                                 index=default_proj_idx,
                                                 format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                
+                        e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key="edit_r_custom_proj")
                         
                         edit_options_r = list(set(active_employee_ids + pat['employeeIds']))
                         e_emps = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r,
@@ -991,7 +1032,18 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
                         elif e_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays:
                             st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
+                        elif not e_custom_proj_name.strip() and not e_proj:
+                            st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                         else:
+                            # Διαχείριση νέου έργου κατά την επεξεργασία
+                            if e_custom_proj_name.strip():
+                                final_e_proj_id = str(uuid.uuid4())
+                                new_p = {'id': final_e_proj_id, 'name': e_custom_proj_name.strip(), 'color': BASIC_COLORS[e_color]}
+                                st.session_state.projects.append(new_p)
+                                db_insert('projects', new_p)
+                            else:
+                                final_e_proj_id = e_proj
+                                
                             # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                             db_delete('assignments', 'recurring_id', selected_pattern_id)
@@ -1036,7 +1088,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 'id': str(uuid.uuid4()),
                                                 'recurring_id': selected_pattern_id,
                                                 'employeeId': eid,
-                                                'projectId': e_proj,
+                                                'projectId': final_e_proj_id,
                                                 'date': d,
                                                 'startTime': str_start,
                                                 'endTime': str_end,
@@ -1047,7 +1099,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             new_assignments_batch.append(new_assign)
                                 
                                 # 3. Ενημερώνουμε τα δεδομένα του Pattern
-                                pat['projectId'] = e_proj
+                                pat['projectId'] = final_e_proj_id
                                 pat['employeeIds'] = e_emps
                                 pat['colorName'] = e_color
                                 pat['notes'] = e_notes
