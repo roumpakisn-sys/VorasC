@@ -343,8 +343,10 @@ if menu == "Ταμπλό Gantt":
             c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
             c_name = a.get('colorName', "Προεπιλογή")
             notes = a.get('notes', '')
+            is_canc = a.get('is_cancelled', False)
+            c_reason = a.get('cancel_reason', '')
             
-            key = f"{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}"
+            key = f"{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
             if key not in groups:
                 legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
                 groups[key] = {
@@ -356,6 +358,8 @@ if menu == "Ταμπλό Gantt":
                     'Employees': [],
                     'ColorHex': c_hex,
                     'Notes': notes,
+                    'is_cancelled': is_canc,
+                    'cancel_reason': c_reason,
                     'LegendGroup': legend_val
                 }
             
@@ -416,7 +420,14 @@ if menu == "Ταμπλό Gantt":
             proj_name = g['Project'].upper()
             times_str = f"{g['StartTime']}-{g['EndTime']}"
             
-            label_text = f"{times_str} {proj_name} // {emps_str}"
+            # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
+            if g['is_cancelled']:
+                label_text = f"<s>{times_str} {proj_name} // {emps_str}</s>"
+                if g['cancel_reason']:
+                    label_text += f" <span style='color:#dc2626;'><b>[{g['cancel_reason'].upper()}]</b></span>"
+            else:
+                label_text = f"{times_str} {proj_name} // {emps_str}"
+                
             if g['Notes']:
                 label_text += f" ({g['Notes'].upper()})"
                 
@@ -440,7 +451,9 @@ if menu == "Ταμπλό Gantt":
                 'Προσωπικό': ", ".join(g['Employees']),
                 'Ώρα Έναρξης': g['StartTime'],
                 'Ώρα Λήξης': g['EndTime'],
-                'Παρατηρήσεις': g['Notes']
+                'Παρατηρήσεις': g['Notes'],
+                'Ακυρωμένο': 'ΝΑΙ' if g['is_cancelled'] else 'ΟΧΙ',
+                'Λόγος Ακύρωσης': g['cancel_reason']
             })
             
             color_map[g['LegendGroup']] = g['ColorHex']
@@ -642,6 +655,8 @@ if menu == "Ταμπλό Gantt":
                                     'colorName': color_choice,
                                     'colorHex': BASIC_COLORS[color_choice],
                                     'notes': add_notes,
+                                    'is_cancelled': False,
+                                    'cancel_reason': "",
                                     'recurring_id': None
                                 }
                                 st.session_state.assignments.append(new_assign)
@@ -661,8 +676,10 @@ if menu == "Ταμπλό Gantt":
                 c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
                 c_name = a.get('colorName', "Προεπιλογή")
                 notes = a.get('notes', '')
+                is_canc = a.get('is_cancelled', False)
+                c_reason = a.get('cancel_reason', '')
                 
-                key = f"{a['date']}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}"
+                key = f"{a['date']}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
                 if key not in weekly_groups:
                     weekly_groups[key] = {
                         'Date': a['date'],
@@ -673,7 +690,9 @@ if menu == "Ταμπλό Gantt":
                         'EmployeeIds': [],
                         'AssignmentIds': [],
                         'ColorName': c_name,
-                        'Notes': notes
+                        'Notes': notes,
+                        'is_cancelled': is_canc,
+                        'cancel_reason': c_reason
                     }
                 weekly_groups[key]['EmployeeIds'].append(a['employeeId'])
                 weekly_groups[key]['AssignmentIds'].append(a['id'])
@@ -723,12 +742,21 @@ if menu == "Ταμπλό Gantt":
                             new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'], "%H:%M").time(), key="edit_s")
                         with e_end:
                             new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(target_group['EndTime'], "%H:%M").time(), key="edit_e")
+                            
+                        st.markdown("---")
+                        st.write("🛑 **Ακύρωση / Διαγραφή Βάρδιας (Διαγράμμιση)**")
+                        c_canc1, c_canc2 = st.columns([1, 2])
+                        with c_canc1:
+                            e_is_cancelled = st.checkbox("Επισήμανση ως Ακυρωμένη", value=target_group.get('is_cancelled', False))
+                        with c_canc2:
+                            e_cancel_reason = st.text_input("Λόγος Ακύρωσης (Εμφανίζεται δίπλα)", value=target_group.get('cancel_reason', ''), disabled=not e_is_cancelled)
+                        st.markdown("---")
                         
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
                             save_edit = st.form_submit_button("💾 Αποθήκευση")
                         with col_btn2:
-                            del_edit = st.form_submit_button("🗑️ Διαγραφή Μπάρας")
+                            del_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή Μπάρας")
                             
                         if del_edit:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
@@ -781,6 +809,8 @@ if menu == "Ταμπλό Gantt":
                                             'colorName': edit_color,
                                             'colorHex': BASIC_COLORS[edit_color],
                                             'notes': edit_notes,
+                                            'is_cancelled': e_is_cancelled,
+                                            'cancel_reason': e_cancel_reason if e_is_cancelled else "",
                                             'recurring_id': None 
                                         }
                                         st.session_state.assignments.append(new_a)
@@ -913,7 +943,9 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'endTime': str_end,
                                     'colorName': r_color,
                                     'colorHex': BASIC_COLORS[r_color],
-                                    'notes': r_notes
+                                    'notes': r_notes,
+                                    'is_cancelled': False,
+                                    'cancel_reason': ""
                                 }
                                 new_assignments_batch.append(new_assign)
                                 success_count += 1
@@ -1094,7 +1126,9 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 'endTime': str_end,
                                                 'colorName': e_color,
                                                 'colorHex': BASIC_COLORS[e_color],
-                                                'notes': e_notes
+                                                'notes': e_notes,
+                                                'is_cancelled': False,
+                                                'cancel_reason': ""
                                             }
                                             new_assignments_batch.append(new_assign)
                                 
