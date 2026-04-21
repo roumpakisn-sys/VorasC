@@ -93,12 +93,19 @@ def fetch_all_data_from_db():
             if isinstance(p.get('startDate'), str):
                 p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
                 
+        # Safe fallback για τις Αξιολογήσεις, σε περίπτωση που δεν έχει δημιουργηθεί ακόμα ο πίνακας
+        try:
+            evals = supabase.table("evaluations").select("*").execute().data
+        except Exception:
+            evals = []
+                
         return {
             "employees": emps,
             "projects": projs,
             "assignments": assigns,
             "leaves": leaves,
-            "recurring_patterns": patterns
+            "recurring_patterns": patterns,
+            "evaluations": evals
         }
     except Exception as e:
         print(f"Σφάλμα ανάγνωσης από Supabase: {e}")
@@ -171,6 +178,7 @@ if db_data is not None:
     st.session_state.assignments = db_data["assignments"]
     st.session_state.leaves = db_data["leaves"]
     st.session_state.recurring_patterns = db_data["recurring_patterns"]
+    st.session_state.evaluations = db_data.get("evaluations", [])
     st.session_state.is_cloud = True
 else:
     # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
@@ -189,6 +197,7 @@ else:
         st.session_state.assignments = []
         st.session_state.recurring_patterns = []
         st.session_state.leaves = []
+        st.session_state.evaluations = []
 
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
@@ -244,7 +253,8 @@ menu = st.sidebar.radio("Μενού", [
     "Άδειες",
     "Σύνολο Αδειών",
     "Επαναλαμβανόμενες Εργασίες",
-    "Ώρες Εργασιών"
+    "Ώρες Εργασιών",
+    "Αξιολόγηση Προσωπικού"
 ])
 
 st.sidebar.write("---")
@@ -1630,3 +1640,129 @@ elif menu == "Ώρες Εργασιών":
         use_container_width=True,
         hide_index=True
     )
+
+# --- VIEW: ΑΞΙΟΛΟΓΗΣΗ ΠΡΟΣΩΠΙΚΟΥ ---
+elif menu == "Αξιολόγηση Προσωπικού":
+    st.title("⭐ Αξιολόγηση Προσωπικού")
+
+    months = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", 
+              "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"]
+    current_month_index = date.today().month - 1
+    current_year = date.today().year
+    years = list(range(2020, 2036))
+
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_month_name = st.selectbox("Επιλογή Μήνα", months, index=current_month_index, key="eval_month")
+        eval_month = months.index(selected_month_name) + 1
+    with col2:
+        eval_year = st.selectbox("Επιλογή Έτους", years, index=years.index(current_year), key="eval_year")
+
+    st.divider()
+
+    # --- Υπολογισμός "Υπάλληλος του Μήνα" ---
+    month_evals = [e for e in st.session_state.evaluations if e['month'] == eval_month and e['year'] == eval_year]
+
+    if month_evals:
+        # Υπολογισμός μέσου όρου για κάθε αξιολόγηση
+        for ev in month_evals:
+            ev['avg'] = (ev.get('cooperation', 0) + ev.get('willingness', 0) + ev.get('behavior', 0)) / 3.0
+
+        max_avg = max([ev['avg'] for ev in month_evals])
+
+        # Εύρεση όλων των υπαλλήλων με τη μέγιστη βαθμολογία (για ισοβαθμίες)
+        top_evals = [ev for ev in month_evals if ev['avg'] == max_avg]
+
+        st.markdown("### 🏆 Υπάλληλος του Μήνα")
+        if max_avg > 0:
+            for ev in top_evals:
+                emp_name = get_employee_name(ev['employeeId'])
+                st.success(f"🌟 **{emp_name}** — Υψηλότερος Μέσος Όρος: **{max_avg:.2f} / 5** 🌟")
+        else:
+            st.info("Οι βαθμολογίες για αυτόν τον μήνα είναι στο 0.")
+    else:
+        st.info("Δεν υπάρχουν ακόμα αποθηκευμένες βαθμολογίες για τον επιλεγμένο μήνα.")
+
+    st.divider()
+    st.write("### 📝 Φόρμα Βαθμολόγησης")
+
+    with st.form("evaluations_form"):
+        # Επικεφαλίδες
+        hc1, hc2, hc3, hc4, hc5 = st.columns([2, 1.5, 1.5, 1.5, 1])
+        hc1.write("**Ονοματεπώνυμο**")
+        hc2.write("**Συνεργασία (1-5)**")
+        hc3.write("**Προθυμία (1-5)**")
+        hc4.write("**Συμπεριφορά (1-5)**")
+        hc5.write("**Μ.Ό.**")
+        st.markdown("---")
+
+        eval_inputs = {}
+
+        # Εμφάνιση μόνο των Ενεργών υπαλλήλων
+        for emp in active_employee_ids:
+            emp_info = next(e for e in st.session_state.employees if e['id'] == emp)
+            
+            # Εύρεση αν υπάρχει ήδη αξιολόγηση για αυτόν τον μήνα
+            existing_eval = next((e for e in month_evals if e['employeeId'] == emp), None)
+
+            default_coop = existing_eval['cooperation'] if existing_eval else 3
+            default_will = existing_eval['willingness'] if existing_eval else 3
+            default_behav = existing_eval['behavior'] if existing_eval else 3
+
+            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 1.5, 1])
+            c1.write(f"\n**{emp_info['name']}**")
+
+            eval_inputs[emp] = {
+                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}", label_visibility="collapsed"),
+                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}", label_visibility="collapsed"),
+                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}", label_visibility="collapsed"),
+                'existing_id': existing_eval['id'] if existing_eval else None
+            }
+
+            # Υπολογισμός τρέχοντος εμφανιζόμενου Μ.Ο.
+            current_avg = (default_coop + default_will + default_behav) / 3.0
+            c5.write(f"\n**{current_avg:.2f}**")
+
+        st.markdown("---")
+        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary")
+
+        if submit_eval:
+            updates_made = False
+            
+            with st.spinner("Αποθήκευση αξιολογήσεων..."):
+                for emp_id, data in eval_inputs.items():
+                    new_coop = data['coop']
+                    new_will = data['will']
+                    new_behav = data['behav']
+                    existing_id = data['existing_id']
+
+                    if existing_id:
+                        # Υπάρχει ήδη, ελέγχουμε αν άλλαξε κάτι για να το κάνουμε update
+                        ev_to_update = next(e for e in st.session_state.evaluations if e['id'] == existing_id)
+                        if ev_to_update['cooperation'] != new_coop or ev_to_update['willingness'] != new_will or ev_to_update['behavior'] != new_behav:
+                            ev_to_update['cooperation'] = new_coop
+                            ev_to_update['willingness'] = new_will
+                            ev_to_update['behavior'] = new_behav
+                            db_update('evaluations', existing_id, ev_to_update)
+                            updates_made = True
+                    else:
+                        # Νέα εγγραφή για αυτόν τον υπάλληλο και τον μήνα
+                        new_eval_id = str(uuid.uuid4())
+                        new_eval = {
+                            'id': new_eval_id,
+                            'employeeId': emp_id,
+                            'month': eval_month,
+                            'year': eval_year,
+                            'cooperation': new_coop,
+                            'willingness': new_will,
+                            'behavior': new_behav
+                        }
+                        st.session_state.evaluations.append(new_eval)
+                        db_insert('evaluations', new_eval)
+                        updates_made = True
+
+            if updates_made:
+                st.success("Οι αξιολογήσεις αποθηκεύτηκαν επιτυχώς!")
+                st.rerun()
+            else:
+                st.info("Δεν υπήρξαν αλλαγές για αποθήκευση.")
