@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 import uuid
 import calendar
 import io
+import time
 
 try:
     from supabase import create_client
@@ -1307,7 +1308,7 @@ elif menu == "Ομάδα Προσωπικού":
     with tab_import:
         st.write("### 📥 Μαζική Εισαγωγή Υπαλλήλων")
         st.write("Κατεβάστε το Google Sheet σας ως αρχείο Excel (.xlsx) ή CSV και ανεβάστε το εδώ.")
-        st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
+        st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό', 'Κατάσταση') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
         
         uploaded_file = st.file_uploader("Επιλέξτε αρχείο Excel ή CSV", type=['csv', 'xlsx'])
         
@@ -1326,12 +1327,12 @@ elif menu == "Ομάδα Προσωπικού":
                     error_count = 0
                     
                     # Κανονικοποίηση ονομάτων στηλών (μικρά γράμματα, χωρίς κενά)
-                    cols = [str(c).lower().strip() for c in df_import.columns]
+                    cols = [str(c).lower().strip().replace(".", "").replace("_", " ") for c in df_import.columns]
                     
                     # Αναζήτηση στήλης Ονόματος
                     name_col = None
                     for orig_col, c in zip(df_import.columns, cols):
-                        if c in ['ονοματεπωνυμο', 'ονοματεπώνυμο', 'όνομα', 'ονομα', 'name']:
+                        if 'ονομα' in c or 'name' in c or 'υπαλλ' in c or 'υπάλλ' in c:
                             name_col = orig_col
                             break
                             
@@ -1339,16 +1340,17 @@ elif menu == "Ομάδα Προσωπικού":
                         st.error("❌ Δεν βρέθηκε στήλη για το Ονοματεπώνυμο. Βεβαιωθείτε ότι γράφεται 'Ονοματεπώνυμο' στην πρώτη γραμμή του Excel.")
                     else:
                         # Αναζήτηση άλλων στηλών
-                        pos_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['θεση', 'θέση', 'position', 'ειδικοτητα', 'ειδικότητα']), None)
-                        id_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['ταυτοτητα', 'ταυτότητα', 'αριθμος ταυτοτητας', 'id_number']), None)
-                        phone_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['τηλεφωνο', 'τηλέφωνο', 'κινητο', 'phone']), None)
+                        pos_col = next((orig for orig, c in zip(df_import.columns, cols) if 'θεσ' in c or 'θέσ' in c or 'ειδικ' in c or 'ρολο' in c or 'ρόλο' in c or 'position' in c), None)
+                        id_col = next((orig for orig, c in zip(df_import.columns, cols) if 'ταυτοτ' in c or 'ταυτότ' in c or 'αδτ' in c or 'id' in c), None)
+                        phone_col = next((orig for orig, c in zip(df_import.columns, cols) if 'τηλ' in c or 'κινητ' in c or 'phone' in c), None)
+                        status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c), None)
                         
                         new_employees_batch = []
                         
                         with st.spinner("Εισαγωγή Δεδομένων..."):
                             for index, row in df_import.iterrows():
                                 e_name = str(row[name_col]).strip() if pd.notna(row[name_col]) else ""
-                                if not e_name or e_name == 'nan':
+                                if not e_name or e_name.lower() == 'nan':
                                     continue
                                     
                                 e_pos = str(row[pos_col]).strip().upper() if pos_col and pd.notna(row[pos_col]) else "ΕΡΓΑΤΗΣ"
@@ -1356,9 +1358,18 @@ elif menu == "Ομάδα Προσωπικού":
                                     e_pos = "ΕΡΓΑΤΗΣ" # Default αν δεν αναγνωριστεί η θέση
                                     
                                 e_id_num = str(row[id_col]).strip() if id_col and pd.notna(row[id_col]) else ""
-                                if e_id_num == 'nan': e_id_num = ""
+                                if e_id_num.lower() == 'nan': e_id_num = ""
+                                if e_id_num.endswith('.0'): e_id_num = e_id_num[:-2] # Διορθώνει νούμερα που διαβάζονται με δεκαδικά πχ 12345.0
+                                
                                 e_phone = str(row[phone_col]).strip() if phone_col and pd.notna(row[phone_col]) else ""
-                                if e_phone == 'nan': e_phone = ""
+                                if e_phone.lower() == 'nan': e_phone = ""
+                                if e_phone.endswith('.0'): e_phone = e_phone[:-2]
+                                
+                                e_status = "Ενεργός"
+                                if status_col and pd.notna(row[status_col]):
+                                    val = str(row[status_col]).strip().lower()
+                                    if val in ["ανενεργος", "ανενεργός", "inactive", "false", "0", "οχι", "όχι"]:
+                                        e_status = "Ανενεργός"
                                 
                                 # Έλεγχος αν υπάρχει ήδη ο υπάλληλος
                                 is_duplicate = False
@@ -1377,7 +1388,7 @@ elif menu == "Ομάδα Προσωπικού":
                                         'position': e_pos,
                                         'id_number': e_id_num,
                                         'phone': e_phone,
-                                        'status': 'Ενεργός'
+                                        'status': e_status
                                     }
                                     new_employees_batch.append(new_e)
                                     st.session_state.employees.append(new_e)
@@ -1388,10 +1399,13 @@ elif menu == "Ομάδα Προσωπικού":
                             if new_employees_batch:
                                 db_insert('employees', new_employees_batch)
                                 
-                            if success_count > 0:
-                                st.success(f"Εισήχθησαν επιτυχώς {success_count} υπάλληλοι!")
                             if error_count > 0:
                                 st.warning(f"Παραλείφθηκαν {error_count} υπάλληλοι επειδή υπήρχαν ήδη στη λίστα (ίδιο όνομα ή ταυτότητα).")
+                                
+                            if success_count > 0:
+                                st.success(f"Εισήχθησαν επιτυχώς {success_count} υπάλληλοι! Η σελίδα ανανεώνεται...")
+                                time.sleep(1.5) # Αναμονή για να διαβάσει ο χρήστης το μήνυμα
+                                st.rerun() # Ανανέωση ώστε να φανούν αμέσως στην καρτέλα Επεξεργασίας!
                                 
             except Exception as e:
                 st.error(f"Υπήρξε πρόβλημα με την ανάγνωση του αρχείου: {e}")
@@ -1431,8 +1445,8 @@ elif menu == "Ομάδα Προσωπικού":
             col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1.5, 1])
             col1.write(e['name'])
             col2.write(f"*{e['position']}*")
-            col3.write(e.get('id_number', '-'))
-            col4.write(e.get('phone', '-'))
+            col3.write(e.get('id_number') or '-')
+            col4.write(e.get('phone') or '-')
             
             status_val = e.get('status', 'Ενεργός')
             status_color = "#16a34a" if status_val == 'Ενεργός' else "#dc2626"
