@@ -1715,7 +1715,19 @@ elif menu == "Αξιολόγηση Προσωπικού":
         st.info("Δεν υπάρχουν ακόμα αποθηκευμένες βαθμολογίες για τον επιλεγμένο μήνα.")
 
     st.divider()
-    st.write("### 📝 Φόρμα Βαθμολόγησης")
+    
+    col_title, col_reset = st.columns([3, 1])
+    with col_title:
+        st.write("### 📝 Φόρμα Βαθμολόγησης")
+    with col_reset:
+        if st.button("🔄 Επαναφορά Βαθμολογιών", use_container_width=True):
+            evals_to_delete = [e['id'] for e in month_evals]
+            if evals_to_delete:
+                st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
+                db_delete_in('evaluations', 'id', evals_to_delete)
+                st.rerun()
+            else:
+                st.warning("Δεν υπάρχουν αξιολογήσεις για μηδενισμό αυτόν τον μήνα.")
 
     with st.form("evaluations_form"):
         # Επικεφαλίδες
