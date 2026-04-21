@@ -1743,7 +1743,10 @@ elif menu == "Αξιολόγηση Προσωπικού":
                             ev_to_update['cooperation'] = new_coop
                             ev_to_update['willingness'] = new_will
                             ev_to_update['behavior'] = new_behav
-                            db_update('evaluations', existing_id, ev_to_update)
+                            
+                            # Στέλνουμε στη βάση μόνο τα πεδία που υπάρχουν στον πίνακα (αφαιρούμε το 'avg')
+                            payload = {k: v for k, v in ev_to_update.items() if k != 'avg'}
+                            db_update('evaluations', existing_id, payload)
                             updates_made = True
                     else:
                         # Νέα εγγραφή για αυτόν τον υπάλληλο και τον μήνα
