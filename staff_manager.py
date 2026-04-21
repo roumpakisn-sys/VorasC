@@ -1025,7 +1025,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 p_name = p_info['name'] if p_info else 'Άγνωστο Έργο'
                 pattern_options[p['id']] = f"{p_name} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})"
             
-            selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
+            selected_pattern_id = st.selectbox("Επιλέξ Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
             
             if selected_pattern_id:
                 pat = next(p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id)
@@ -1398,6 +1398,23 @@ elif menu == "Ομάδα Προσωπικού":
 
     with tab_list:
         st.write("### Συνολική Λίστα Υπαλλήλων")
+        
+        with st.expander("🗑️ Μαζική Διαγραφή"):
+            emps_to_delete = st.multiselect(
+                "Επιλέξτε τους υπαλλήλους που θέλετε να διαγράψετε:",
+                options=[e['id'] for e in st.session_state.employees],
+                format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"),
+                key="bulk_delete_emps"
+            )
+            if st.button("Οριστική Διαγραφή", type="primary", key="btn_bulk_del"):
+                if emps_to_delete:
+                    st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] not in emps_to_delete]
+                    db_delete_in('employees', 'id', emps_to_delete)
+                    st.rerun()
+                else:
+                    st.warning("Δεν έχετε επιλέξει κανέναν υπάλληλο.")
+        
+        st.divider()
         
         # Επικεφαλίδες Στηλών
         hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2, 2, 2, 1.5, 1])
