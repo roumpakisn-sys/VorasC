@@ -1343,7 +1343,7 @@ elif menu == "Ομάδα Προσωπικού":
                         pos_col = next((orig for orig, c in zip(df_import.columns, cols) if 'θεσ' in c or 'θέσ' in c or 'ειδικ' in c or 'ρολο' in c or 'ρόλο' in c or 'position' in c), None)
                         id_col = next((orig for orig, c in zip(df_import.columns, cols) if 'ταυτοτ' in c or 'ταυτότ' in c or 'αδτ' in c or 'id' in c), None)
                         phone_col = next((orig for orig, c in zip(df_import.columns, cols) if 'τηλ' in c or 'κινητ' in c or 'phone' in c), None)
-                        status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c), None)
+                        status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c or 'ενεργ' in c or 'active' in c), None)
                         
                         new_employees_batch = []
                         
@@ -1368,7 +1368,7 @@ elif menu == "Ομάδα Προσωπικού":
                                 e_status = "Ενεργός"
                                 if status_col and pd.notna(row[status_col]):
                                     val = str(row[status_col]).strip().lower()
-                                    if val in ["ανενεργος", "ανενεργός", "inactive", "false", "0", "οχι", "όχι"]:
+                                    if any(kw in val for kw in ["ανενεργ", "inactive", "false", "0", "οχι", "όχι", "no", "αποχωρ", "παραιτ"]):
                                         e_status = "Ανενεργός"
                                 
                                 # Έλεγχος αν υπάρχει ήδη ο υπάλληλος
