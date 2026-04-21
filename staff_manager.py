@@ -869,7 +869,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
     
     tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "✏️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
     
-    # --- ΚΑΡΤΕΛΑ 1: ΝΕΑ ΚΑΤΑΧΩΡΗΣΗ ---
+    # --- ΚΑΡΤΕΛΑ 1: ΝΕΑ Καταχώρηση ---
     with tab_new:
         r_col1, r_col2 = st.columns(2)
         
@@ -1643,6 +1643,27 @@ elif menu == "Ώρες Εργασιών":
 
 # --- VIEW: ΑΞΙΟΛΟΓΗΣΗ ΠΡΟΣΩΠΙΚΟΥ ---
 elif menu == "Αξιολόγηση Προσωπικού":
+    # Προσθήκη CSS μόνο για αυτήν τη σελίδα ώστε το κουμπί να μένει κολλημένο κάτω
+    st.markdown("""
+        <style>
+        /* Κάνει το κουμπί αποθήκευσης της φόρμας "sticky" στο κάτω μέρος της οθόνης */
+        div[data-testid="stFormSubmitButton"] {
+            position: -webkit-sticky;
+            position: sticky;
+            bottom: 20px;
+            z-index: 999;
+        }
+        div[data-testid="stFormSubmitButton"] button {
+            box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.3);
+            border: 2px solid #16a34a;
+            font-weight: bold;
+        }
+        div[data-testid="stForm"] {
+            padding-bottom: 60px; /* Προσθέτει λίγο χώρο στο τέλος της λίστας για να μη κρύβει την τελευταία γραμμή το κουμπί */
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.title("⭐ Αξιολόγηση Προσωπικού")
 
     months = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", 
@@ -1725,12 +1746,8 @@ elif menu == "Αξιολόγηση Προσωπικού":
 
         st.markdown("---")
         
-        c_sub1, c_sub2 = st.columns([1, 3])
-        with c_sub1:
-            submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary")
-        with c_sub2:
-            # Το πεδίο αυτό λειτουργεί ως «παγίδα» για το Enter, διατηρώντας ταυτόχρονα το drop down menu στα πεδία
-            st.text_input("Enter Catcher", placeholder="💡 Κάντε κλικ σε αυτό το κουτάκι και πατήστε 'Enter' για αποθήκευση ↵", label_visibility="collapsed")
+        # Το κουμπί πιάνει όλο το πλάτος και αιωρείται!
+        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary", use_container_width=True)
 
         if submit_eval:
             updates_made = False
