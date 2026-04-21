@@ -1724,7 +1724,13 @@ elif menu == "Αξιολόγηση Προσωπικού":
             c5.write(f"\n**{current_avg:.2f}**")
 
         st.markdown("---")
-        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary")
+        
+        c_sub1, c_sub2 = st.columns([1, 3])
+        with c_sub1:
+            submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary")
+        with c_sub2:
+            # Το πεδίο αυτό λειτουργεί ως «παγίδα» για το Enter, διατηρώντας ταυτόχρονα το drop down menu στα πεδία
+            st.text_input("Enter Catcher", placeholder="💡 Κάντε κλικ σε αυτό το κουτάκι και πατήστε 'Enter' για αποθήκευση ↵", label_visibility="collapsed")
 
         if submit_eval:
             updates_made = False
