@@ -1646,20 +1646,30 @@ elif menu == "Αξιολόγηση Προσωπικού":
     # Προσθήκη CSS μόνο για αυτήν τη σελίδα ώστε το κουμπί να μένει κολλημένο κάτω
     st.markdown("""
         <style>
-        /* Κάνει το κουμπί αποθήκευσης της φόρμας "sticky" στο κάτω μέρος της οθόνης */
+        /* Απόλυτα αιωρούμενο (floating) κουμπί σε όλη την οθόνη */
         div[data-testid="stFormSubmitButton"] {
-            position: -webkit-sticky;
-            position: sticky;
-            bottom: 20px;
-            z-index: 999;
+            position: fixed !important;
+            bottom: 40px !important;
+            right: 40px !important;
+            z-index: 99999 !important;
         }
         div[data-testid="stFormSubmitButton"] button {
-            box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.3);
-            border: 2px solid #16a34a;
-            font-weight: bold;
+            box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4) !important;
+            border: 3px solid #16a34a !important;
+            border-radius: 50px !important;
+            font-weight: bold !important;
+            padding: 15px 30px !important;
+            background-color: white !important;
+            color: #16a34a !important;
+            transition: all 0.2s ease-in-out !important;
+        }
+        div[data-testid="stFormSubmitButton"] button:hover {
+            background-color: #16a34a !important;
+            color: white !important;
+            transform: scale(1.05) !important;
         }
         div[data-testid="stForm"] {
-            padding-bottom: 60px; /* Προσθέτει λίγο χώρο στο τέλος της λίστας για να μη κρύβει την τελευταία γραμμή το κουμπί */
+            padding-bottom: 120px !important;
         }
         </style>
     """, unsafe_allow_html=True)
