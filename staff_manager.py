@@ -1208,7 +1208,7 @@ elif menu == "Διαχείριση Έργων":
 elif menu == "Ομάδα Προσωπικού":
     st.title("👥 Προσωπικό")
     
-    tab_list, tab_add, tab_edit = st.tabs(["📋 Λίστα Υπαλλήλων", "➕ Προσθήκη Υπαλλήλου", "✏️ Επεξεργασία"])
+    tab_list, tab_add, tab_edit, tab_import = st.tabs(["📋 Λίστα Υπαλλήλων", "➕ Προσθήκη Υπαλλήλου", "✏️ Επεξεργασία", "📥 Εισαγωγή από Αρχείο"])
     
     with tab_add:
         with st.form("new_emp", clear_on_submit=True):
@@ -1303,6 +1303,98 @@ elif menu == "Ομάδα Προσωπικού":
                             db_update('employees', emp_to_edit_id, emp_to_edit)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
                             st.rerun()
+
+    with tab_import:
+        st.write("### 📥 Μαζική Εισαγωγή Υπαλλήλων")
+        st.write("Κατεβάστε το Google Sheet σας ως αρχείο Excel (.xlsx) ή CSV και ανεβάστε το εδώ.")
+        st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
+        
+        uploaded_file = st.file_uploader("Επιλέξτε αρχείο Excel ή CSV", type=['csv', 'xlsx'])
+        
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df_import = pd.read_csv(uploaded_file)
+                else:
+                    df_import = pd.read_excel(uploaded_file)
+                
+                st.write("Προεπισκόπηση Δεδομένων:")
+                st.dataframe(df_import.head())
+                
+                if st.button("Εκτέλεση Εισαγωγής", type="primary"):
+                    success_count = 0
+                    error_count = 0
+                    
+                    # Κανονικοποίηση ονομάτων στηλών (μικρά γράμματα, χωρίς κενά)
+                    cols = [str(c).lower().strip() for c in df_import.columns]
+                    
+                    # Αναζήτηση στήλης Ονόματος
+                    name_col = None
+                    for orig_col, c in zip(df_import.columns, cols):
+                        if c in ['ονοματεπωνυμο', 'ονοματεπώνυμο', 'όνομα', 'ονομα', 'name']:
+                            name_col = orig_col
+                            break
+                            
+                    if not name_col:
+                        st.error("❌ Δεν βρέθηκε στήλη για το Ονοματεπώνυμο. Βεβαιωθείτε ότι γράφεται 'Ονοματεπώνυμο' στην πρώτη γραμμή του Excel.")
+                    else:
+                        # Αναζήτηση άλλων στηλών
+                        pos_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['θεση', 'θέση', 'position', 'ειδικοτητα', 'ειδικότητα']), None)
+                        id_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['ταυτοτητα', 'ταυτότητα', 'αριθμος ταυτοτητας', 'id_number']), None)
+                        phone_col = next((orig for orig, c in zip(df_import.columns, cols) if c in ['τηλεφωνο', 'τηλέφωνο', 'κινητο', 'phone']), None)
+                        
+                        new_employees_batch = []
+                        
+                        with st.spinner("Εισαγωγή Δεδομένων..."):
+                            for index, row in df_import.iterrows():
+                                e_name = str(row[name_col]).strip() if pd.notna(row[name_col]) else ""
+                                if not e_name or e_name == 'nan':
+                                    continue
+                                    
+                                e_pos = str(row[pos_col]).strip().upper() if pos_col and pd.notna(row[pos_col]) else "ΕΡΓΑΤΗΣ"
+                                if e_pos not in ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"]:
+                                    e_pos = "ΕΡΓΑΤΗΣ" # Default αν δεν αναγνωριστεί η θέση
+                                    
+                                e_id_num = str(row[id_col]).strip() if id_col and pd.notna(row[id_col]) else ""
+                                if e_id_num == 'nan': e_id_num = ""
+                                e_phone = str(row[phone_col]).strip() if phone_col and pd.notna(row[phone_col]) else ""
+                                if e_phone == 'nan': e_phone = ""
+                                
+                                # Έλεγχος αν υπάρχει ήδη ο υπάλληλος
+                                is_duplicate = False
+                                for emp in st.session_state.employees:
+                                    if emp['name'].strip().lower() == e_name.lower():
+                                        is_duplicate = True
+                                        break
+                                    if e_id_num and emp.get('id_number', '').strip().lower() == e_id_num.lower():
+                                        is_duplicate = True
+                                        break
+                                        
+                                if not is_duplicate:
+                                    new_e = {
+                                        'id': str(uuid.uuid4()), 
+                                        'name': e_name, 
+                                        'position': e_pos,
+                                        'id_number': e_id_num,
+                                        'phone': e_phone,
+                                        'status': 'Ενεργός'
+                                    }
+                                    new_employees_batch.append(new_e)
+                                    st.session_state.employees.append(new_e)
+                                    success_count += 1
+                                else:
+                                    error_count += 1
+                                    
+                            if new_employees_batch:
+                                db_insert('employees', new_employees_batch)
+                                
+                            if success_count > 0:
+                                st.success(f"Εισήχθησαν επιτυχώς {success_count} υπάλληλοι!")
+                            if error_count > 0:
+                                st.warning(f"Παραλείφθηκαν {error_count} υπάλληλοι επειδή υπήρχαν ήδη στη λίστα (ίδιο όνομα ή ταυτότητα).")
+                                
+            except Exception as e:
+                st.error(f"Υπήρξε πρόβλημα με την ανάγνωση του αρχείου: {e}")
 
     with tab_list:
         st.write("### Συνολική Λίστα Υπαλλήλων")
