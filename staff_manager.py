@@ -1725,9 +1725,17 @@ elif menu == "Αξιολόγηση Προσωπικού":
             if evals_to_delete:
                 st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
                 db_delete_in('evaluations', 'id', evals_to_delete)
-                st.rerun()
-            else:
-                st.warning("Δεν υπάρχουν αξιολογήσεις για μηδενισμό αυτόν τον μήνα.")
+            
+            # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
+            for emp in active_employee_ids:
+                if f"coop_{emp}" in st.session_state:
+                    del st.session_state[f"coop_{emp}"]
+                if f"will_{emp}" in st.session_state:
+                    del st.session_state[f"will_{emp}"]
+                if f"behav_{emp}" in st.session_state:
+                    del st.session_state[f"behav_{emp}"]
+                    
+            st.rerun()
 
     with st.form("evaluations_form"):
         # Επικεφαλίδες
