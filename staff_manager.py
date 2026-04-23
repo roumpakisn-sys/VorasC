@@ -224,6 +224,8 @@ if 'view_week_date' not in st.session_state:
 
 # --- Helpers ---
 def get_employee_name(emp_id):
+    if not emp_id:
+        return "Χωρίς Προσωπικό"
     for emp in st.session_state.employees:
         if emp['id'] == emp_id:
             return emp['name']
@@ -236,12 +238,14 @@ def get_project_info(proj_id):
     return None
 
 def is_on_leave(emp_id, check_date):
+    if not emp_id: return False
     for l in st.session_state.leaves:
         if l['employeeId'] == emp_id and l['startDate'] <= check_date <= l['endDate']:
             return True
     return False
 
 def has_time_conflict(emp_id, check_date, t_start, t_end, exclude_ids=None):
+    if not emp_id: return False
     if exclude_ids is None:
         exclude_ids = []
         
@@ -398,14 +402,17 @@ if menu == "Ταμπλό Gantt":
                 }
             
             # Μορφοποίηση ονόματος: Επώνυμο + Αρχικό Ονόματος (π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.)
-            full_name = get_employee_name(a['employeeId'])
-            name_parts = full_name.split()
-            if len(name_parts) > 1:
-                first_name_initial = name_parts[0][0] + "."
-                last_name = name_parts[-1]
-                formatted_name = f"{last_name} {first_name_initial}"
+            if not a.get('employeeId'):
+                formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
             else:
-                formatted_name = full_name
+                full_name = get_employee_name(a['employeeId'])
+                name_parts = full_name.split()
+                if len(name_parts) > 1:
+                    first_name_initial = name_parts[0][0] + "."
+                    last_name = name_parts[-1]
+                    formatted_name = f"{last_name} {first_name_initial}"
+                else:
+                    formatted_name = full_name
                 
             groups[key]['Employees'].append(formatted_name)
 
@@ -656,8 +663,8 @@ if menu == "Ταμπλό Gantt":
                 
                 custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)")
                 
-                # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
-                emp_choices = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
+                # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
+                emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
                                            format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
                 
                 c_color, c_notes = st.columns(2)
@@ -678,18 +685,18 @@ if menu == "Ταμπλό Gantt":
                     
                     if str_start >= str_end:
                         st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                    elif not emp_choices:
-                        st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
                     elif not custom_proj_name.strip() and not proj_choice:
                         st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                     else:
+                        emps_to_process = emp_choices if emp_choices else [""]
                         errors = []
-                        for eid in emp_choices:
-                            emp_name = get_employee_name(eid)
-                            if is_on_leave(eid, add_date):
-                                errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
-                            elif has_time_conflict(eid, add_date, str_start, str_end):
-                                errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει στις {add_date.strftime('%d/%m')}.")
+                        for eid in emps_to_process:
+                            if eid:
+                                emp_name = get_employee_name(eid)
+                                if is_on_leave(eid, add_date):
+                                    errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
+                                elif has_time_conflict(eid, add_date, str_start, str_end):
+                                    errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει στις {add_date.strftime('%d/%m')}.")
                         
                         if errors:
                             for err in errors:
@@ -704,7 +711,7 @@ if menu == "Ταμπλό Gantt":
                             else:
                                 final_proj_id = proj_choice
                                 
-                            for eid in emp_choices:
+                            for eid in emps_to_process:
                                 new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'employeeId': eid,
@@ -789,10 +796,11 @@ if menu == "Ταμπλό Gantt":
                                                  
                         edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                         
-                        # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
-                        edit_options = list(set(active_employee_ids + target_group['EmployeeIds']))
-                        edit_emps = st.multiselect("Αλλαγή Προσωπικού", options=edit_options,
-                                                   default=target_group['EmployeeIds'],
+                        # Φιλτράρισμα κενών υπαλλήλων για να μην κρασάρει το multiselect
+                        valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
+                        edit_options = list(set(active_employee_ids + valid_emp_ids))
+                        edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options,
+                                                   default=valid_emp_ids,
                                                    format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
                         
                         e_color_col, e_notes_col = st.columns(2)
@@ -834,18 +842,18 @@ if menu == "Ταμπλό Gantt":
                             
                             if str_start >= str_end:
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                            elif not edit_emps:
-                                st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
                             elif not edit_custom_proj_name.strip() and not edit_proj:
                                 st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                             else:
+                                emps_to_process = edit_emps if edit_emps else [""]
                                 errors = []
-                                for eid in edit_emps:
-                                    emp_name = get_employee_name(eid)
-                                    if is_on_leave(eid, edit_date):
-                                        errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
-                                    elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
-                                        errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
+                                for eid in emps_to_process:
+                                    if eid:
+                                        emp_name = get_employee_name(eid)
+                                        if is_on_leave(eid, edit_date):
+                                            errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
+                                        elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
+                                            errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
                                         
                                 if errors:
                                     for err in errors:
@@ -863,7 +871,7 @@ if menu == "Ταμπλό Gantt":
                                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                                     db_delete_in('assignments', 'id', target_group['AssignmentIds'])
                                     
-                                    for eid in edit_emps:
+                                    for eid in emps_to_process:
                                         new_a = {
                                             'id': str(uuid.uuid4()),
                                             'employeeId': eid,
@@ -899,8 +907,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                      
             r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key="new_r_custom_proj")
             
-            # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι
-            r_emps = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids,
+            # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
+            r_emps = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
                                        format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key="new_r_emps")
             
             c_r_color, c_r_notes = st.columns(2)
@@ -934,8 +942,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             
             if str_start >= str_end:
                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-            elif not r_emps:
-                st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
             elif r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not selected_weekdays:
                 st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας τικάροντας το αντίστοιχο κουτάκι.")
             elif not r_custom_proj_name.strip() and not r_proj:
@@ -959,6 +965,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
                 
                 new_assignments_batch = []
+                emps_to_process = r_emps if r_emps else [""]
                 
                 with st.spinner('Υπολογισμός και καταχώρηση βαρδιών...'):
                     while curr_date <= r_end_date:
@@ -989,19 +996,38 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     conflict_details = []
                     
                     for d in dates_to_assign:
-                        for eid in r_emps:
-                            emp_name = get_employee_name(eid)
-                            if is_on_leave(eid, d):
-                                conflict_count += 1
-                                conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
-                            elif has_time_conflict(eid, d, str_start, str_end):
-                                conflict_count += 1
-                                conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                        for eid in emps_to_process:
+                            if eid:
+                                emp_name = get_employee_name(eid)
+                                if is_on_leave(eid, d):
+                                    conflict_count += 1
+                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
+                                elif has_time_conflict(eid, d, str_start, str_end):
+                                    conflict_count += 1
+                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                                else:
+                                    new_assign = {
+                                        'id': str(uuid.uuid4()),
+                                        'recurring_id': pattern_id,
+                                        'employeeId': eid,
+                                        'projectId': final_r_proj_id,
+                                        'date': d,
+                                        'startTime': str_start,
+                                        'endTime': str_end,
+                                        'colorName': r_color,
+                                        'colorHex': BASIC_COLORS[r_color],
+                                        'notes': r_notes,
+                                        'is_cancelled': False,
+                                        'cancel_reason': ""
+                                    }
+                                    new_assignments_batch.append(new_assign)
+                                    success_count += 1
                             else:
+                                # Καταχώρηση βάρδιας χωρίς προσωπικό (χωρίς έλεγχο επικάλυψης)
                                 new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'recurring_id': pattern_id,
-                                    'employeeId': eid,
+                                    'employeeId': "",
                                     'projectId': final_r_proj_id,
                                     'date': d,
                                     'startTime': str_start,
@@ -1078,9 +1104,10 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 
                         e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key="edit_r_custom_proj")
                         
-                        edit_options_r = list(set(active_employee_ids + pat['employeeIds']))
-                        e_emps = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r,
-                                                  default=pat['employeeIds'],
+                        valid_emp_ids = [eid for eid in pat['employeeIds'] if eid]
+                        edit_options_r = list(set(active_employee_ids + valid_emp_ids))
+                        e_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options_r,
+                                                  default=valid_emp_ids,
                                                   format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
                         
                         e_color_col, e_notes_col = st.columns(2)
@@ -1129,8 +1156,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         
                         if str_start >= str_end:
                             st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                        elif not e_emps:
-                            st.error("Επιλέξτε τουλάχιστον έναν εργαζόμενο.")
                         elif e_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays:
                             st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
                         elif not e_custom_proj_name.strip() and not e_proj:
@@ -1157,6 +1182,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
                             
                             new_assignments_batch = []
+                            emps_to_process = e_emps if e_emps else [""]
                             
                             with st.spinner('Ενημέρωση και καταχώρηση βαρδιών...'):
                                 while curr_date <= r_end_date:
@@ -1183,12 +1209,29 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         curr_date += timedelta(days=1)
                                 
                                 for d in dates_to_assign:
-                                    for eid in e_emps:
-                                        if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
+                                    for eid in emps_to_process:
+                                        if eid:
+                                            if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
+                                                new_assign = {
+                                                    'id': str(uuid.uuid4()),
+                                                    'recurring_id': selected_pattern_id,
+                                                    'employeeId': eid,
+                                                    'projectId': final_e_proj_id,
+                                                    'date': d,
+                                                    'startTime': str_start,
+                                                    'endTime': str_end,
+                                                    'colorName': e_color,
+                                                    'colorHex': BASIC_COLORS[e_color],
+                                                    'notes': e_notes,
+                                                    'is_cancelled': False,
+                                                    'cancel_reason': ""
+                                                }
+                                                new_assignments_batch.append(new_assign)
+                                        else:
                                             new_assign = {
                                                 'id': str(uuid.uuid4()),
                                                 'recurring_id': selected_pattern_id,
-                                                'employeeId': eid,
+                                                'employeeId': "",
                                                 'projectId': final_e_proj_id,
                                                 'date': d,
                                                 'startTime': str_start,
