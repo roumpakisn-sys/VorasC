@@ -69,33 +69,34 @@ def fetch_all_data_from_db():
     Αντλεί όλα τα δεδομένα από το Supabase. 
     Διατηρείται στη μνήμη (cache) για 15 δευτερόλεπτα για να μην καθυστερεί η εφαρμογή στα απανωτά κλικ, 
     αλλά να φέρνει συχνά τις αλλαγές των άλλων χρηστών.
+    ΠΡΟΣΘΗΚΗ: Χρήση του .limit() για αποφυγή του προεπιλεγμένου ορίου (1000 γραμμές) του PostgREST.
     """
     if not supabase:
         return None
     try:
-        emps = supabase.table("employees").select("*").execute().data
-        projs = supabase.table("projects").select("*").execute().data
+        emps = supabase.table("employees").select("*").limit(10000).execute().data
+        projs = supabase.table("projects").select("*").limit(10000).execute().data
         
-        assigns = supabase.table("assignments").select("*").execute().data
+        assigns = supabase.table("assignments").select("*").limit(50000).execute().data
         for a in assigns:
             if isinstance(a.get('date'), str):
                 a['date'] = datetime.strptime(a['date'], "%Y-%m-%d").date()
                 
-        leaves = supabase.table("leaves").select("*").execute().data
+        leaves = supabase.table("leaves").select("*").limit(10000).execute().data
         for l in leaves:
             if isinstance(l.get('startDate'), str):
                 l['startDate'] = datetime.strptime(l['startDate'], "%Y-%m-%d").date()
             if isinstance(l.get('endDate'), str):
                 l['endDate'] = datetime.strptime(l['endDate'], "%Y-%m-%d").date()
                 
-        patterns = supabase.table("recurring_patterns").select("*").execute().data
+        patterns = supabase.table("recurring_patterns").select("*").limit(10000).execute().data
         for p in patterns:
             if isinstance(p.get('startDate'), str):
                 p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
                 
         # Safe fallback για τις Αξιολογήσεις, σε περίπτωση που δεν έχει δημιουργηθεί ακόμα ο πίνακας
         try:
-            evals = supabase.table("evaluations").select("*").execute().data
+            evals = supabase.table("evaluations").select("*").limit(50000).execute().data
         except Exception:
             evals = []
                 
@@ -1014,11 +1015,15 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     
                     if new_assignments_batch:
                         st.session_state.assignments.extend(new_assignments_batch)
-                        # Χρησιμοποιούμε μαζική εισαγωγή για ταχύτητα
-                        db_insert('assignments', new_assignments_batch)
+                        # Χρησιμοποιούμε batch insert σε κομμάτια (chunks) για ασφάλεια
+                        chunk_size = 500
+                        for i in range(0, len(new_assignments_batch), chunk_size):
+                            db_insert('assignments', new_assignments_batch[i:i+chunk_size])
                     
                 if success_count > 0:
-                    st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών για τα επόμενα 3 χρόνια!")
+                    st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών για τα επόμενα 3 χρόνια! Η σελίδα ανανεώνεται...")
+                    time.sleep(1.5)
+                    st.rerun()
                 if conflict_count > 0:
                     st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
                     with st.expander("Δείτε τις συγκρούσεις"):
@@ -1191,8 +1196,12 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 
                                 if new_assignments_batch:
                                     st.session_state.assignments.extend(new_assignments_batch)
-                                    db_insert('assignments', new_assignments_batch)
+                                    chunk_size = 500
+                                    for i in range(0, len(new_assignments_batch), chunk_size):
+                                        db_insert('assignments', new_assignments_batch[i:i+chunk_size])
                                 
+                            st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
+                            time.sleep(1.5)
                             st.rerun()
 
 # --- VIEW: PROJECTS ---
