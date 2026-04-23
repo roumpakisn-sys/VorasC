@@ -67,36 +67,55 @@ supabase = init_supabase()
 def fetch_all_data_from_db():
     """
     Αντλεί όλα τα δεδομένα από το Supabase. 
-    Διατηρείται στη μνήμη (cache) για 15 δευτερόλεπτα για να μην καθυστερεί η εφαρμογή στα απανωτά κλικ, 
-    αλλά να φέρνει συχνά τις αλλαγές των άλλων χρηστών.
-    ΠΡΟΣΘΗΚΗ: Χρήση του .limit() για αποφυγή του προεπιλεγμένου ορίου (1000 γραμμές) του PostgREST.
+    Χρησιμοποιεί Pagination (σελιδοποίηση) για να παρακάμψει τον περιορισμό των 1000 γραμμών του Supabase
+    και να κατεβάσει ΟΛΕΣ τις βάρδιες, ανεξάρτητα από το πόσες είναι.
     """
     if not supabase:
         return None
-    try:
-        emps = supabase.table("employees").select("*").limit(10000).execute().data
-        projs = supabase.table("projects").select("*").limit(10000).execute().data
         
-        assigns = supabase.table("assignments").select("*").limit(50000).execute().data
+    def fetch_paginated(table):
+        all_rows = []
+        offset = 0
+        limit = 1000
+        while True:
+            try:
+                # Το Supabase range() περιλαμβάνει και το start και το end (γι' αυτό offset + limit - 1)
+                data = supabase.table(table).select("*").range(offset, offset + limit - 1).execute().data
+                if data:
+                    all_rows.extend(data)
+                if not data or len(data) < limit:
+                    break
+                offset += limit
+            except Exception as e:
+                print(f"Σφάλμα ανάγνωσης από τον πίνακα {table}: {e}")
+                break
+        return all_rows
+
+    try:
+        emps = fetch_paginated("employees")
+        projs = fetch_paginated("projects")
+        
+        assigns = fetch_paginated("assignments")
         for a in assigns:
             if isinstance(a.get('date'), str):
-                a['date'] = datetime.strptime(a['date'], "%Y-%m-%d").date()
+                # Ασφαλής μετατροπή ακόμα κι αν επιστραφεί time part
+                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
                 
-        leaves = supabase.table("leaves").select("*").limit(10000).execute().data
+        leaves = fetch_paginated("leaves")
         for l in leaves:
             if isinstance(l.get('startDate'), str):
-                l['startDate'] = datetime.strptime(l['startDate'], "%Y-%m-%d").date()
+                l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
             if isinstance(l.get('endDate'), str):
-                l['endDate'] = datetime.strptime(l['endDate'], "%Y-%m-%d").date()
+                l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
                 
-        patterns = supabase.table("recurring_patterns").select("*").limit(10000).execute().data
+        patterns = fetch_paginated("recurring_patterns")
         for p in patterns:
             if isinstance(p.get('startDate'), str):
-                p['startDate'] = datetime.strptime(p['startDate'], "%Y-%m-%d").date()
+                p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
                 
         # Safe fallback για τις Αξιολογήσεις, σε περίπτωση που δεν έχει δημιουργηθεί ακόμα ο πίνακας
         try:
-            evals = supabase.table("evaluations").select("*").limit(50000).execute().data
+            evals = fetch_paginated("evaluations")
         except Exception:
             evals = []
                 
