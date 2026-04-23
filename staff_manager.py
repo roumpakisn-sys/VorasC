@@ -6,6 +6,7 @@ import uuid
 import calendar
 import io
 import time
+import copy
 
 try:
     from supabase import create_client
@@ -48,6 +49,19 @@ try:
     HAS_SECRETS = "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets
 except Exception:
     HAS_SECRETS = False
+
+# --- ΣΥΣΤΗΜΑ UNDO / REDO ---
+if "undo_stack" not in st.session_state:
+    st.session_state.undo_stack = []
+if "redo_stack" not in st.session_state:
+    st.session_state.redo_stack = []
+
+def add_transaction(actions):
+    """Καταγράφει μια λίστα ενεργειών για το Undo"""
+    st.session_state.undo_stack.append(actions)
+    st.session_state.redo_stack.clear()
+    if len(st.session_state.undo_stack) > 30: # Κρατάει ιστορικό 30 κινήσεων
+        st.session_state.undo_stack.pop(0)
 
 # --- SUPABASE CONNECTION & HELPERS ---
 @st.cache_resource
@@ -139,41 +153,101 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
-def db_insert(table, data):
+def db_insert(table, data, track=True):
     """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση."""
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
-            fetch_all_data_from_db.clear() # Άδειασμα της cache για άμεση ανανέωση δεδομένων!
+            fetch_all_data_from_db.clear()
+            if track:
+                records = data if isinstance(data, list) else [data]
+                add_transaction([{'type': 'insert', 'table': table, 'records': records}])
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
 
-def db_delete(table, column, value):
+def db_delete(table, column, value, deleted_records=None, track=True):
     """Διαγράφει εγγραφές με βάση μια συνθήκη."""
     if supabase:
         try:
+            if track and not deleted_records:
+                table_data = st.session_state.get(table, [])
+                deleted_records = [r for r in table_data if r.get(column) == value]
+                
             supabase.table(table).delete().eq(column, value).execute()
             fetch_all_data_from_db.clear()
+            
+            if track and deleted_records:
+                add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
-def db_delete_in(table, column, values):
+def db_delete_in(table, column, values, deleted_records=None, track=True):
     """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
     if supabase and values:
         try:
+            if track and not deleted_records:
+                table_data = st.session_state.get(table, [])
+                deleted_records = [r for r in table_data if r.get(column) in values]
+                
             supabase.table(table).delete().in_(column, values).execute()
             fetch_all_data_from_db.clear()
+            
+            if track and deleted_records:
+                add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         except Exception as e:
             st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
-def db_update(table, id_val, new_data):
+def db_update(table, id_val, new_data, old_data=None, track=True):
     """Ενημερώνει μια εγγραφή με βάση το ID της."""
     if supabase:
         try:
+            if track and not old_data:
+                table_data = st.session_state.get(table, [])
+                old_data = next((r for r in table_data if r.get('id') == id_val), None)
+                
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
             fetch_all_data_from_db.clear()
+            
+            if track and old_data:
+                add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
+
+def perform_undo():
+    """Εκτελεί αναίρεση της τελευταίας καταγεγραμμένης συναλλαγής."""
+    if not st.session_state.undo_stack: return
+    transaction = st.session_state.undo_stack.pop()
+    st.session_state.redo_stack.append(transaction)
+    
+    for act in reversed(transaction):
+        if act['type'] == 'insert':
+            ids = [r['id'] for r in act['records']]
+            db_delete_in(act['table'], 'id', ids, track=False)
+        elif act['type'] == 'delete':
+            db_insert(act['table'], act['records'], track=False)
+        elif act['type'] == 'update':
+            for old_r in act['old_records']:
+                db_update(act['table'], old_r['id'], old_r, track=False)
+    
+    fetch_all_data_from_db.clear()
+
+def perform_redo():
+    """Εκτελεί επανάληψη της τελευταίας αναιρεμένης συναλλαγής."""
+    if not st.session_state.redo_stack: return
+    transaction = st.session_state.redo_stack.pop()
+    st.session_state.undo_stack.append(transaction)
+    
+    for act in transaction:
+        if act['type'] == 'insert':
+            db_insert(act['table'], act['records'], track=False)
+        elif act['type'] == 'delete':
+            ids = [r['id'] for r in act['records']]
+            db_delete_in(act['table'], 'id', ids, track=False)
+        elif act['type'] == 'update':
+            for new_r in act['new_records']:
+                db_update(act['table'], new_r['id'], new_r, track=False)
+                
+    fetch_all_data_from_db.clear()
 
 # --- 10 Βασικά Χρώματα ---
 BASIC_COLORS = {
@@ -280,6 +354,19 @@ menu = st.sidebar.radio("Μενού", [
     "Ώρες Εργασιών",
     "Αξιολόγηση Προσωπικού"
 ])
+
+st.sidebar.write("---")
+
+st.sidebar.subheader("Ενέργειες")
+col_u, col_r = st.sidebar.columns(2)
+with col_u:
+    if st.button("↩️ Undo", disabled=len(st.session_state.undo_stack) == 0, use_container_width=True):
+        perform_undo()
+        st.rerun()
+with col_r:
+    if st.button("↪️ Redo", disabled=len(st.session_state.redo_stack) == 0, use_container_width=True):
+        perform_redo()
+        st.rerun()
 
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
@@ -702,15 +789,18 @@ if menu == "Ταμπλό Gantt":
                             for err in errors:
                                 st.error(err)
                         else:
+                            actions = []
                             # Διαχείριση νέου έργου
                             if custom_proj_name.strip():
                                 final_proj_id = str(uuid.uuid4())
                                 new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
                                 st.session_state.projects.append(new_p)
-                                db_insert('projects', new_p)
+                                db_insert('projects', new_p, track=False)
+                                actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                             else:
                                 final_proj_id = proj_choice
                                 
+                            new_assigns = []
                             for eid in emps_to_process:
                                 new_assign = {
                                     'id': str(uuid.uuid4()),
@@ -726,8 +816,12 @@ if menu == "Ταμπλό Gantt":
                                     'cancel_reason': "",
                                     'recurring_id': None
                                 }
+                                new_assigns.append(new_assign)
                                 st.session_state.assignments.append(new_assign)
-                                db_insert("assignments", new_assign)
+                            
+                            db_insert("assignments", new_assigns, track=False)
+                            actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                            add_transaction(actions)
                             
                             st.success("Η ανάθεση ολοκληρώθηκε!")
                             st.rerun()
@@ -784,7 +878,7 @@ if menu == "Ταμπλό Gantt":
                 if selected_key != "":
                     target_group = weekly_groups[selected_key]
                     
-                    with st.form("quick_edit"):
+                    with st.form("quick_edit", clear_on_submit=True):
                         edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
                         
                         proj_ids = [p['id'] for p in st.session_state.projects]
@@ -796,7 +890,7 @@ if menu == "Ταμπλό Gantt":
                                                  
                         edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                         
-                        # Φιλτράρισμα κενών υπαλλήλων για να μην κρασάρει το multiselect
+                        # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
                         valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
                         edit_options = list(set(active_employee_ids + valid_emp_ids))
                         edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options,
@@ -832,8 +926,9 @@ if menu == "Ταμπλό Gantt":
                             del_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή Μπάρας")
                             
                         if del_edit:
+                            old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                            db_delete_in('assignments', 'id', target_group['AssignmentIds'])
+                            db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
                             st.rerun()
                             
                         if save_edit:
@@ -859,18 +954,23 @@ if menu == "Ταμπλό Gantt":
                                     for err in errors:
                                         st.error(err)
                                 else:
+                                    actions = []
                                     # Διαχείριση νέου έργου κατά την επεξεργασία
                                     if edit_custom_proj_name.strip():
                                         final_edit_proj_id = str(uuid.uuid4())
                                         new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
                                         st.session_state.projects.append(new_p)
-                                        db_insert('projects', new_p)
+                                        db_insert('projects', new_p, track=False)
+                                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                                     else:
                                         final_edit_proj_id = edit_proj
                                         
+                                    old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                                    db_delete_in('assignments', 'id', target_group['AssignmentIds'])
+                                    db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
+                                    actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                                     
+                                    new_assigns = []
                                     for eid in emps_to_process:
                                         new_a = {
                                             'id': str(uuid.uuid4()),
@@ -886,8 +986,13 @@ if menu == "Ταμπλό Gantt":
                                             'cancel_reason': e_cancel_reason if e_is_cancelled else "",
                                             'recurring_id': None 
                                         }
+                                        new_assigns.append(new_a)
                                         st.session_state.assignments.append(new_a)
-                                        db_insert('assignments', new_a)
+                                    
+                                    db_insert('assignments', new_assigns, track=False)
+                                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                                    
+                                    add_transaction(actions)
                                     st.rerun()
 
 # --- VIEW: RECURRING TASKS ---
@@ -947,12 +1052,15 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             elif not r_custom_proj_name.strip() and not r_proj:
                 st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
             else:
+                actions = []
+                
                 # Διαχείριση νέου έργου
                 if r_custom_proj_name.strip():
                     final_r_proj_id = str(uuid.uuid4())
                     new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': BASIC_COLORS[r_color]}
                     st.session_state.projects.append(new_p)
-                    db_insert('projects', new_p)
+                    db_insert('projects', new_p, track=False)
+                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                 else:
                     final_r_proj_id = r_proj
                     
@@ -1056,17 +1164,29 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     
                     # Update Memory & DB
                     st.session_state.recurring_patterns.append(new_pattern)
-                    db_insert('recurring_patterns', new_pattern)
+                    db_insert('recurring_patterns', new_pattern, track=False)
+                    actions.append({'type': 'insert', 'table': 'recurring_patterns', 'records': [new_pattern]})
                     
                     if new_assignments_batch:
                         st.session_state.assignments.extend(new_assignments_batch)
                         # Χρησιμοποιούμε batch insert σε κομμάτια (chunks) για ασφάλεια
                         chunk_size = 500
                         for i in range(0, len(new_assignments_batch), chunk_size):
-                            db_insert('assignments', new_assignments_batch[i:i+chunk_size])
+                            db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
+                        
+                    add_transaction(actions)
+                    
+                    # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
+                    keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
+                    for i in range(7):
+                        keys_to_clear.append(f"new_chk_{i}")
+                    for k in keys_to_clear:
+                        if k in st.session_state:
+                            del st.session_state[k]
                     
                 if success_count > 0:
-                    st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών για τα επόμενα 3 χρόνια! Η σελίδα ανανεώνεται...")
+                    st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται...")
                     time.sleep(1.5)
                     st.rerun()
                 if conflict_count > 0:
@@ -1091,7 +1211,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             if selected_pattern_id:
                 pat = next(p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id)
                 
-                with st.form("edit_recurring_form"):
+                with st.form("edit_recurring_form", clear_on_submit=True):
                     st.warning("⚠️ Προσοχή: Η αποθήκευση αλλαγών θα επαναδημιουργήσει **ΟΛΕΣ** τις βάρδιες αυτής της σειράς. Τυχόν μεμονωμένες αλλαγές που κάνατε στο Ταμπλό θα χαθούν.")
                     
                     e_col1, e_col2 = st.columns(2)
@@ -1143,11 +1263,17 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         del_rec = st.form_submit_button("🗑️ Διαγραφή ΟΛΗΣ της σειράς")
                         
                     if del_rec:
-                        # Διαγράφουμε όλες τις βάρδιες και το pattern
+                        old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                         st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                         st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
-                        db_delete('assignments', 'recurring_id', selected_pattern_id)
-                        db_delete('recurring_patterns', 'id', selected_pattern_id)
+                        
+                        db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
+                        db_delete('recurring_patterns', 'id', selected_pattern_id, track=False)
+                        
+                        add_transaction([
+                            {'type': 'delete', 'table': 'assignments', 'records': old_assigns},
+                            {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}
+                        ])
                         st.rerun()
                         
                     if save_rec:
@@ -1161,18 +1287,22 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         elif not e_custom_proj_name.strip() and not e_proj:
                             st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                         else:
+                            actions = []
                             # Διαχείριση νέου έργου κατά την επεξεργασία
                             if e_custom_proj_name.strip():
                                 final_e_proj_id = str(uuid.uuid4())
                                 new_p = {'id': final_e_proj_id, 'name': e_custom_proj_name.strip(), 'color': BASIC_COLORS[e_color]}
                                 st.session_state.projects.append(new_p)
-                                db_insert('projects', new_p)
+                                db_insert('projects', new_p, track=False)
+                                actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                             else:
                                 final_e_proj_id = e_proj
                                 
                             # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
+                            old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                            db_delete('assignments', 'recurring_id', selected_pattern_id)
+                            db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
+                            actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                             
                             # 2. Παράγουμε τις νέες
                             r_end_date = e_start_date + timedelta(days=365 * 3)
@@ -1245,6 +1375,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             new_assignments_batch.append(new_assign)
                                 
                                 # 3. Ενημερώνουμε τα δεδομένα του Pattern
+                                old_pat = dict(pat)
                                 pat['projectId'] = final_e_proj_id
                                 pat['employeeIds'] = e_emps
                                 pat['colorName'] = e_color
@@ -1254,13 +1385,17 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 pat['startTime'] = str_start
                                 pat['endTime'] = str_end
                                 
-                                db_update('recurring_patterns', selected_pattern_id, pat)
+                                db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
+                                actions.append({'type': 'update', 'table': 'recurring_patterns', 'old_records': [old_pat], 'new_records': [dict(pat)]})
                                 
                                 if new_assignments_batch:
                                     st.session_state.assignments.extend(new_assignments_batch)
                                     chunk_size = 500
                                     for i in range(0, len(new_assignments_batch), chunk_size):
-                                        db_insert('assignments', new_assignments_batch[i:i+chunk_size])
+                                        db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
+                                
+                                add_transaction(actions)
                                 
                             st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
                             time.sleep(1.5)
@@ -1270,20 +1405,21 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
 elif menu == "Διαχείριση Έργων":
     st.title("🏗️ Έργα")
     with st.expander("Νέο Έργο"):
-        p_name = st.text_input("Όνομα Έργου")
-        p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
-        if st.button("Δημιουργία"):
-            new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
-            st.session_state.projects.append(new_p)
-            db_insert('projects', new_p)
-            st.rerun()
+        with st.form("new_project_form", clear_on_submit=True):
+            p_name = st.text_input("Όνομα Έργου")
+            p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
+            if st.form_submit_button("Δημιουργία"):
+                new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
+                st.session_state.projects.append(new_p)
+                db_insert('projects', new_p)
+                st.rerun()
             
     for p in st.session_state.projects:
         col1, col2 = st.columns([4, 1])
         col1.write(f"**{p['name']}**")
         if col2.button("Διαγραφή", key=p['id']):
             st.session_state.projects = [proj for proj in st.session_state.projects if proj['id'] != p['id']]
-            db_delete('projects', 'id', p['id'])
+            db_delete('projects', 'id', p['id'], deleted_records=[p])
             st.rerun()
 
 # --- VIEW: EMPLOYEES ---
@@ -1342,7 +1478,7 @@ elif menu == "Ομάδα Προσωπικού":
             
             emp_to_edit = next(e for e in st.session_state.employees if e['id'] == emp_to_edit_id)
             
-            with st.form("edit_emp"):
+            with st.form("edit_emp", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     ed_name = st.text_input("Ονοματεπώνυμο", value=emp_to_edit['name'])
@@ -1376,13 +1512,15 @@ elif menu == "Ομάδα Προσωπικού":
                                     break
                         
                         if not is_dup:
+                            old_emp_data = dict(emp_to_edit)
+                            
                             emp_to_edit['name'] = ed_name.strip()
                             emp_to_edit['position'] = ed_pos.strip()
                             emp_to_edit['id_number'] = ed_id_num.strip()
                             emp_to_edit['phone'] = ed_phone.strip()
                             emp_to_edit['status'] = ed_status
                             
-                            db_update('employees', emp_to_edit_id, emp_to_edit)
+                            db_update('employees', emp_to_edit_id, emp_to_edit, old_data=old_emp_data)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
                             st.rerun()
 
@@ -1391,103 +1529,101 @@ elif menu == "Ομάδα Προσωπικού":
         st.write("Κατεβάστε το Google Sheet σας ως αρχείο Excel (.xlsx) ή CSV και ανεβάστε το εδώ.")
         st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό', 'Κατάσταση') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
         
-        uploaded_file = st.file_uploader("Επιλέξτε αρχείο Excel ή CSV", type=['csv', 'xlsx'])
-        
-        if uploaded_file is not None:
+        with st.form("import_form", clear_on_submit=True):
+            uploaded_file = st.file_uploader("Επιλέξτε αρχείο Excel ή CSV", type=['csv', 'xlsx'])
+            submit_import = st.form_submit_button("Εκτέλεση Εισαγωγής", type="primary")
+            
+        if submit_import and uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.csv'):
                     df_import = pd.read_csv(uploaded_file)
                 else:
                     df_import = pd.read_excel(uploaded_file)
                 
-                st.write("Προεπισκόπηση Δεδομένων:")
-                st.dataframe(df_import.head())
+                success_count = 0
+                error_count = 0
                 
-                if st.button("Εκτέλεση Εισαγωγής", type="primary"):
-                    success_count = 0
-                    error_count = 0
+                # Κανονικοποίηση ονομάτων στηλών (μικρά γράμματα, χωρίς κενά)
+                cols = [str(c).lower().strip().replace(".", "").replace("_", " ") for c in df_import.columns]
+                
+                # Αναζήτηση στήλης Ονόματος
+                name_col = None
+                for orig_col, c in zip(df_import.columns, cols):
+                    if 'ονομα' in c or 'name' in c or 'υπαλλ' in c or 'υπάλλ' in c:
+                        name_col = orig_col
+                        break
+                        
+                if not name_col:
+                    st.error("❌ Δεν βρέθηκε στήλη για το Ονοματεπώνυμο. Βεβαιωθείτε ότι γράφεται 'Ονοματεπώνυμο' στην πρώτη γραμμή του Excel.")
+                else:
+                    # Αναζήτηση άλλων στηλών
+                    pos_col = next((orig for orig, c in zip(df_import.columns, cols) if 'θεσ' in c or 'θέσ' in c or 'ειδικ' in c or 'ρολο' in c or 'ρόλο' in c or 'position' in c), None)
+                    id_col = next((orig for orig, c in zip(df_import.columns, cols) if 'ταυτοτ' in c or 'ταυτότ' in c or 'αδτ' in c or 'id' in c), None)
+                    phone_col = next((orig for orig, c in zip(df_import.columns, cols) if 'τηλ' in c or 'κινητ' in c or 'phone' in c), None)
+                    status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c or 'ενεργ' in c or 'active' in c), None)
                     
-                    # Κανονικοποίηση ονομάτων στηλών (μικρά γράμματα, χωρίς κενά)
-                    cols = [str(c).lower().strip().replace(".", "").replace("_", " ") for c in df_import.columns]
+                    new_employees_batch = []
                     
-                    # Αναζήτηση στήλης Ονόματος
-                    name_col = None
-                    for orig_col, c in zip(df_import.columns, cols):
-                        if 'ονομα' in c or 'name' in c or 'υπαλλ' in c or 'υπάλλ' in c:
-                            name_col = orig_col
-                            break
+                    with st.spinner("Εισαγωγή Δεδομένων..."):
+                        for index, row in df_import.iterrows():
+                            e_name = str(row[name_col]).strip() if pd.notna(row[name_col]) else ""
+                            if not e_name or e_name.lower() == 'nan':
+                                continue
+                                
+                            e_pos = str(row[pos_col]).strip().upper() if pos_col and pd.notna(row[pos_col]) else "ΕΡΓΑΤΗΣ"
+                            if e_pos not in ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"]:
+                                e_pos = "ΕΡΓΑΤΗΣ" # Default αν δεν αναγνωριστεί η θέση
+                                
+                            e_id_num = str(row[id_col]).strip() if id_col and pd.notna(row[id_col]) else ""
+                            if e_id_num.lower() == 'nan': e_id_num = ""
+                            if e_id_num.endswith('.0'): e_id_num = e_id_num[:-2] # Διορθώνει νούμερα που διαβάζονται με δεκαδικά πχ 12345.0
                             
-                    if not name_col:
-                        st.error("❌ Δεν βρέθηκε στήλη για το Ονοματεπώνυμο. Βεβαιωθείτε ότι γράφεται 'Ονοματεπώνυμο' στην πρώτη γραμμή του Excel.")
-                    else:
-                        # Αναζήτηση άλλων στηλών
-                        pos_col = next((orig for orig, c in zip(df_import.columns, cols) if 'θεσ' in c or 'θέσ' in c or 'ειδικ' in c or 'ρολο' in c or 'ρόλο' in c or 'position' in c), None)
-                        id_col = next((orig for orig, c in zip(df_import.columns, cols) if 'ταυτοτ' in c or 'ταυτότ' in c or 'αδτ' in c or 'id' in c), None)
-                        phone_col = next((orig for orig, c in zip(df_import.columns, cols) if 'τηλ' in c or 'κινητ' in c or 'phone' in c), None)
-                        status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c or 'ενεργ' in c or 'active' in c), None)
-                        
-                        new_employees_batch = []
-                        
-                        with st.spinner("Εισαγωγή Δεδομένων..."):
-                            for index, row in df_import.iterrows():
-                                e_name = str(row[name_col]).strip() if pd.notna(row[name_col]) else ""
-                                if not e_name or e_name.lower() == 'nan':
-                                    continue
+                            e_phone = str(row[phone_col]).strip() if phone_col and pd.notna(row[phone_col]) else ""
+                            if e_phone.lower() == 'nan': e_phone = ""
+                            if e_phone.endswith('.0'): e_phone = e_phone[:-2]
+                            
+                            e_status = "Ενεργός"
+                            if status_col and pd.notna(row[status_col]):
+                                val = str(row[status_col]).strip().lower()
+                                if any(kw in val for kw in ["ανενεργ", "inactive", "false", "0", "οχι", "όχι", "no", "αποχωρ", "παραιτ"]):
+                                    e_status = "Ανενεργός"
+                            
+                            # Έλεγχος αν υπάρχει ήδη ο υπάλληλος
+                            is_duplicate = False
+                            for emp in st.session_state.employees:
+                                if emp['name'].strip().lower() == e_name.lower():
+                                    is_duplicate = True
+                                    break
+                                if e_id_num and emp.get('id_number', '').strip().lower() == e_id_num.lower():
+                                    is_duplicate = True
+                                    break
                                     
-                                e_pos = str(row[pos_col]).strip().upper() if pos_col and pd.notna(row[pos_col]) else "ΕΡΓΑΤΗΣ"
-                                if e_pos not in ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"]:
-                                    e_pos = "ΕΡΓΑΤΗΣ" # Default αν δεν αναγνωριστεί η θέση
-                                    
-                                e_id_num = str(row[id_col]).strip() if id_col and pd.notna(row[id_col]) else ""
-                                if e_id_num.lower() == 'nan': e_id_num = ""
-                                if e_id_num.endswith('.0'): e_id_num = e_id_num[:-2] # Διορθώνει νούμερα που διαβάζονται με δεκαδικά πχ 12345.0
+                            if not is_duplicate:
+                                new_e = {
+                                    'id': str(uuid.uuid4()), 
+                                    'name': e_name, 
+                                    'position': e_pos,
+                                    'id_number': e_id_num,
+                                    'phone': e_phone,
+                                    'status': e_status
+                                }
+                                new_employees_batch.append(new_e)
+                                st.session_state.employees.append(new_e)
+                                success_count += 1
+                            else:
+                                error_count += 1
                                 
-                                e_phone = str(row[phone_col]).strip() if phone_col and pd.notna(row[phone_col]) else ""
-                                if e_phone.lower() == 'nan': e_phone = ""
-                                if e_phone.endswith('.0'): e_phone = e_phone[:-2]
-                                
-                                e_status = "Ενεργός"
-                                if status_col and pd.notna(row[status_col]):
-                                    val = str(row[status_col]).strip().lower()
-                                    if any(kw in val for kw in ["ανενεργ", "inactive", "false", "0", "οχι", "όχι", "no", "αποχωρ", "παραιτ"]):
-                                        e_status = "Ανενεργός"
-                                
-                                # Έλεγχος αν υπάρχει ήδη ο υπάλληλος
-                                is_duplicate = False
-                                for emp in st.session_state.employees:
-                                    if emp['name'].strip().lower() == e_name.lower():
-                                        is_duplicate = True
-                                        break
-                                    if e_id_num and emp.get('id_number', '').strip().lower() == e_id_num.lower():
-                                        is_duplicate = True
-                                        break
-                                        
-                                if not is_duplicate:
-                                    new_e = {
-                                        'id': str(uuid.uuid4()), 
-                                        'name': e_name, 
-                                        'position': e_pos,
-                                        'id_number': e_id_num,
-                                        'phone': e_phone,
-                                        'status': e_status
-                                    }
-                                    new_employees_batch.append(new_e)
-                                    st.session_state.employees.append(new_e)
-                                    success_count += 1
-                                else:
-                                    error_count += 1
-                                    
-                            if new_employees_batch:
-                                db_insert('employees', new_employees_batch)
-                                
-                            if error_count > 0:
-                                st.warning(f"Παραλείφθηκαν {error_count} υπάλληλοι επειδή υπήρχαν ήδη στη λίστα (ίδιο όνομα ή ταυτότητα).")
-                                
-                            if success_count > 0:
-                                st.success(f"Εισήχθησαν επιτυχώς {success_count} υπάλληλοι! Η σελίδα ανανεώνεται...")
-                                time.sleep(1.5) # Αναμονή για να διαβάσει ο χρήστης το μήνυμα
-                                st.rerun() # Ανανέωση ώστε να φανούν αμέσως στην καρτέλα Επεξεργασίας!
-                                
+                        if new_employees_batch:
+                            db_insert('employees', new_employees_batch)
+                            
+                        if error_count > 0:
+                            st.warning(f"Παραλείφθηκαν {error_count} υπάλληλοι επειδή υπήρχαν ήδη στη λίστα (ίδιο όνομα ή ταυτότητα).")
+                            
+                        if success_count > 0:
+                            st.success(f"Εισήχθησαν επιτυχώς {success_count} υπάλληλοι! Η σελίδα ανανεώνεται...")
+                            time.sleep(1.5) # Αναμονή για να διαβάσει ο χρήστης το μήνυμα
+                            st.rerun() # Ανανέωση ώστε να φανούν αμέσως στην καρτέλα Επεξεργασίας!
+                            
             except Exception as e:
                 st.error(f"Υπήρξε πρόβλημα με την ανάγνωση του αρχείου: {e}")
 
@@ -1503,8 +1639,9 @@ elif menu == "Ομάδα Προσωπικού":
             )
             if st.button("Οριστική Διαγραφή", type="primary", key="btn_bulk_del"):
                 if emps_to_delete:
+                    deleted_emps = [e for e in st.session_state.employees if e['id'] in emps_to_delete]
                     st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] not in emps_to_delete]
-                    db_delete_in('employees', 'id', emps_to_delete)
+                    db_delete_in('employees', 'id', emps_to_delete, deleted_records=deleted_emps)
                     st.rerun()
                 else:
                     st.warning("Δεν έχετε επιλέξει κανέναν υπάλληλο.")
@@ -1535,13 +1672,13 @@ elif menu == "Ομάδα Προσωπικού":
             
             if col6.button("❌", key=f"del_emp_{e['id']}"):
                 st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] != e['id']]
-                db_delete('employees', 'id', e['id'])
+                db_delete('employees', 'id', e['id'], deleted_records=[e])
                 st.rerun()
 
 # --- VIEW: LEAVES ---
 elif menu == "Άδειες":
     st.title("🏖️ Διαχείριση Αδειών")
-    with st.form("new_leave"):
+    with st.form("new_leave", clear_on_submit=True):
         l_emp = st.selectbox("Υπάλληλος (Μόνο Ενεργοί)", options=active_employee_ids, 
                              format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
         l_start = st.date_input("Από")
@@ -1595,7 +1732,7 @@ elif menu == "Άδειες":
             col3.write(l['endDate'].strftime('%d/%m/%Y'))
             if col4.button("❌", key=f"del_leave_{l['id']}"):
                 st.session_state.leaves = [leave for leave in st.session_state.leaves if leave['id'] != l['id']]
-                db_delete('leaves', 'id', l['id'])
+                db_delete('leaves', 'id', l['id'], deleted_records=[l])
                 st.rerun()
     else:
         st.info("Δεν υπάρχουν καταχωρημένες άδειες.")
@@ -1795,7 +1932,7 @@ elif menu == "Αξιολόγηση Προσωπικού":
             evals_to_delete = [e['id'] for e in month_evals]
             if evals_to_delete:
                 st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
-                db_delete_in('evaluations', 'id', evals_to_delete)
+                db_delete_in('evaluations', 'id', evals_to_delete, deleted_records=month_evals)
             
             # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
             for emp in active_employee_ids:
@@ -1808,7 +1945,7 @@ elif menu == "Αξιολόγηση Προσωπικού":
                     
             st.rerun()
 
-    with st.form("evaluations_form"):
+    with st.form("evaluations_form", clear_on_submit=True):
         # Επικεφαλίδες
         hc1, hc2, hc3, hc4, hc5 = st.columns([2, 1.5, 1.5, 1.5, 1])
         hc1.write("**Ονοματεπώνυμο**")
@@ -1852,6 +1989,7 @@ elif menu == "Αξιολόγηση Προσωπικού":
 
         if submit_eval:
             updates_made = False
+            actions = []
             
             with st.spinner("Αποθήκευση αξιολογήσεων..."):
                 for emp_id, data in eval_inputs.items():
@@ -1864,13 +2002,18 @@ elif menu == "Αξιολόγηση Προσωπικού":
                         # Υπάρχει ήδη, ελέγχουμε αν άλλαξε κάτι για να το κάνουμε update
                         ev_to_update = next(e for e in st.session_state.evaluations if e['id'] == existing_id)
                         if ev_to_update['cooperation'] != new_coop or ev_to_update['willingness'] != new_will or ev_to_update['behavior'] != new_behav:
+                            old_ev = dict(ev_to_update)
+                            
                             ev_to_update['cooperation'] = new_coop
                             ev_to_update['willingness'] = new_will
                             ev_to_update['behavior'] = new_behav
                             
                             # Στέλνουμε στη βάση μόνο τα πεδία που υπάρχουν στον πίνακα (αφαιρούμε το 'avg')
                             payload = {k: v for k, v in ev_to_update.items() if k != 'avg'}
-                            db_update('evaluations', existing_id, payload)
+                            old_payload = {k: v for k, v in old_ev.items() if k != 'avg'}
+                            
+                            db_update('evaluations', existing_id, payload, track=False)
+                            actions.append({'type': 'update', 'table': 'evaluations', 'old_records': [old_payload], 'new_records': [payload]})
                             updates_made = True
                     else:
                         # Νέα εγγραφή για αυτόν τον υπάλληλο και τον μήνα
@@ -1885,8 +2028,12 @@ elif menu == "Αξιολόγηση Προσωπικού":
                             'behavior': new_behav
                         }
                         st.session_state.evaluations.append(new_eval)
-                        db_insert('evaluations', new_eval)
+                        db_insert('evaluations', new_eval, track=False)
+                        actions.append({'type': 'insert', 'table': 'evaluations', 'records': [new_eval]})
                         updates_made = True
+
+            if actions:
+                add_transaction(actions)
 
             if updates_made:
                 st.success("Οι αξιολογήσεις αποθηκεύτηκαν επιτυχώς!")
