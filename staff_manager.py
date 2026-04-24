@@ -1002,27 +1002,31 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
     
     tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "✏️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
     
+    if "rec_reset_counter" not in st.session_state:
+        st.session_state.rec_reset_counter = 0
+    rc = st.session_state.rec_reset_counter
+    
     # --- ΚΑΡΤΕΛΑ 1: ΝΕΑ Καταχώρηση ---
     with tab_new:
         r_col1, r_col2 = st.columns(2)
         
         with r_col1:
             r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key="new_r_proj")
+                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"new_r_proj_{rc}")
                                      
-            r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key="new_r_custom_proj")
+            r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"new_r_custom_proj_{rc}")
             
             # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
             r_emps = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
-                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key="new_r_emps")
+                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"new_r_emps_{rc}")
             
             c_r_color, c_r_notes = st.columns(2)
             with c_r_color:
-                r_color = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key="new_r_color")
+                r_color = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"new_r_color_{rc}")
             with c_r_notes:
-                r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key="new_r_notes")
+                r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"new_r_notes_{rc}")
             
-            r_type = st.selectbox("Συχνότητα Επανάληψης", ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"], key="new_r_type")
+            r_type = st.selectbox("Συχνότητα Επανάληψης", ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"], key=f"new_r_type_{rc}")
             
             selected_weekdays = []
             if r_type == "Επιλεγμένες Μέρες Εβδομάδας":
@@ -1030,13 +1034,13 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
                 cols = st.columns(4)
                 for i, d_name in enumerate(day_names):
-                    if cols[i % 4].checkbox(d_name, value=(i==0), key=f"new_chk_{i}"):
+                    if cols[i % 4].checkbox(d_name, value=(i==0), key=f"new_chk_{i}_{rc}"):
                         selected_weekdays.append(d_name)
         
         with r_col2:
-            r_start_date = st.date_input("Από Ημερομηνία", date.today(), key="new_r_start_date")
-            r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key="new_r_start_time")
-            r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key="new_r_end_time")
+            r_start_date = st.date_input("Από Ημερομηνία", date.today(), key=f"new_r_start_date_{rc}")
+            r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
+            r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
             
             st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
         
@@ -1048,12 +1052,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             clear_r = st.button("🧹 Καθαρισμός", key="btn_clear_r", use_container_width=True)
             
         if clear_r:
-            keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
-            for idx in range(7):
-                keys_to_clear.append(f"new_chk_{idx}")
-            for k in keys_to_clear:
-                if k in st.session_state:
-                    del st.session_state[k]
+            st.session_state.rec_reset_counter += 1
             st.rerun()
             
         if submit_r:
@@ -1193,12 +1192,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     add_transaction(actions)
                     
                     # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
-                    keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
-                    for idx in range(7):
-                        keys_to_clear.append(f"new_chk_{idx}")
-                    for k in keys_to_clear:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                    st.session_state.rec_reset_counter += 1
                     
                 if success_count > 0:
                     st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται...")
@@ -1487,7 +1481,7 @@ elif menu == "Ομάδα Προσωπικού":
         if not st.session_state.employees:
             st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
         else:
-            emp_to_edit_id = st.selectbox("Επιλέξ Υπάλληλο για Επεξεργασία", 
+            emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
             
