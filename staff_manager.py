@@ -1041,7 +1041,22 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
         
         st.write("") 
-        if st.button("Καταχώρηση Επαναλαμβανόμενης Εργασίας", type="primary", key="btn_new_r"):
+        col_btn1, col_btn2 = st.columns([1, 1])
+        with col_btn1:
+            submit_r = st.button("Καταχώρηση Επαναλαμβανόμενης Εργασίας", type="primary", key="btn_new_r", use_container_width=True)
+        with col_btn2:
+            clear_r = st.button("🧹 Καθαρισμός", key="btn_clear_r", use_container_width=True)
+            
+        if clear_r:
+            keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
+            for i in range(7):
+                keys_to_clear.append(f"new_chk_{i}")
+            for k in keys_to_clear:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.rerun()
+            
+        if submit_r:
             str_start = r_start_time.strftime("%H:%M")
             str_end = r_end_time.strftime("%H:%M")
             
