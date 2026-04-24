@@ -1438,44 +1438,61 @@ elif menu == "Ομάδα Προσωπικού":
     tab_list, tab_add, tab_edit, tab_import = st.tabs(["📋 Λίστα Υπαλλήλων", "➕ Προσθήκη Υπαλλήλου", "✏️ Επεξεργασία", "📥 Εισαγωγή από Αρχείο"])
     
     with tab_add:
-        with st.form("new_emp", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                e_name = st.text_input("Ονοματεπώνυμο")
-                e_pos = st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"])
-            with c2:
-                e_id_num = st.text_input("Αριθμός Ταυτότητας")
-                e_phone = st.text_input("Κινητό Τηλέφωνο")
-            with c3:
-                e_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"])
-                
-            if st.form_submit_button("Προσθήκη Υπαλλήλου", type="primary"):
-                if not e_name.strip():
-                    st.error("Το πεδίο 'Ονοματεπώνυμο' είναι υποχρεωτικό.")
-                else:
-                    is_duplicate = False
-                    for emp in st.session_state.employees:
-                        if emp['name'].strip().lower() == e_name.strip().lower():
-                            st.error(f"Ο/Η υπάλληλος '{emp['name']}' υπάρχει ήδη στη λίστα.")
-                            is_duplicate = True
-                            break
-                        if e_id_num.strip() and emp.get('id_number', '').strip().lower() == e_id_num.strip().lower():
-                            st.error(f"Ο Αριθμός Ταυτότητας '{e_id_num}' ανήκει ήδη στον/στην '{emp['name']}'.")
-                            is_duplicate = True
-                            break
+        if "emp_reset_counter" not in st.session_state:
+            st.session_state.emp_reset_counter = 0
+        erc = st.session_state.emp_reset_counter
 
-                    if not is_duplicate:
-                        new_e = {
-                            'id': str(uuid.uuid4()), 
-                            'name': e_name.strip(), 
-                            'position': e_pos.strip(),
-                            'id_number': e_id_num.strip(),
-                            'phone': e_phone.strip(),
-                            'status': e_status
-                        }
-                        st.session_state.employees.append(new_e)
-                        db_insert('employees', new_e)
-                        st.success(f"Ο/Η '{e_name.strip()}' προστέθηκε με επιτυχία!")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            e_name = st.text_input("Ονοματεπώνυμο", key=f"new_emp_name_{erc}")
+            e_pos = st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"], key=f"new_emp_pos_{erc}")
+        with c2:
+            e_id_num = st.text_input("Αριθμός Ταυτότητας", key=f"new_emp_id_{erc}")
+            e_phone = st.text_input("Κινητό Τηλέφωνο", key=f"new_emp_phone_{erc}")
+        with c3:
+            e_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"], key=f"new_emp_status_{erc}")
+            
+        st.write("")
+        col_btn1, col_btn2 = st.columns([1, 1])
+        with col_btn1:
+            submit_emp = st.button("Προσθήκη Υπαλλήλου", type="primary", use_container_width=True)
+        with col_btn2:
+            clear_emp = st.button("🧹 Καθαρισμός", key="btn_clear_emp", use_container_width=True)
+            
+        if clear_emp:
+            st.session_state.emp_reset_counter += 1
+            st.rerun()
+            
+        if submit_emp:
+            if not e_name.strip():
+                st.error("Το πεδίο 'Ονοματεπώνυμο' είναι υποχρεωτικό.")
+            else:
+                is_duplicate = False
+                for emp in st.session_state.employees:
+                    if emp['name'].strip().lower() == e_name.strip().lower():
+                        st.error(f"Ο/Η υπάλληλος '{emp['name']}' υπάρχει ήδη στη λίστα.")
+                        is_duplicate = True
+                        break
+                    if e_id_num.strip() and emp.get('id_number', '').strip().lower() == e_id_num.strip().lower():
+                        st.error(f"Ο Αριθμός Ταυτότητας '{e_id_num}' ανήκει ήδη στον/στην '{emp['name']}'.")
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    new_e = {
+                        'id': str(uuid.uuid4()), 
+                        'name': e_name.strip(), 
+                        'position': e_pos.strip(),
+                        'id_number': e_id_num.strip(),
+                        'phone': e_phone.strip(),
+                        'status': e_status
+                    }
+                    st.session_state.employees.append(new_e)
+                    db_insert('employees', new_e)
+                    st.success(f"Ο/Η '{e_name.strip()}' προστέθηκε με επιτυχία! Η σελίδα ανανεώνεται...")
+                    time.sleep(1.5)
+                    st.session_state.emp_reset_counter += 1
+                    st.rerun()
     
     with tab_edit:
         if not st.session_state.employees:
