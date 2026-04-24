@@ -1048,12 +1048,18 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             clear_r = st.button("🧹 Καθαρισμός", key="btn_clear_r", use_container_width=True)
             
         if clear_r:
-            keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
-            for i in range(7):
-                keys_to_clear.append(f"new_chk_{i}")
-            for k in keys_to_clear:
-                if k in st.session_state:
-                    del st.session_state[k]
+            if len(st.session_state.projects) > 0:
+                st.session_state["new_r_proj"] = st.session_state.projects[0]['id']
+            st.session_state["new_r_custom_proj"] = ""
+            st.session_state["new_r_emps"] = []
+            st.session_state["new_r_color"] = list(BASIC_COLORS.keys())[0]
+            st.session_state["new_r_notes"] = ""
+            st.session_state["new_r_type"] = "Εβδομαδιαία"
+            st.session_state["new_r_start_date"] = date.today()
+            st.session_state["new_r_start_time"] = datetime.strptime("09:00", "%H:%M").time()
+            st.session_state["new_r_end_time"] = datetime.strptime("17:00", "%H:%M").time()
+            for idx in range(7):
+                st.session_state[f"new_chk_{idx}"] = (idx == 0)
             st.rerun()
             
         if submit_r:
@@ -1193,12 +1199,18 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     add_transaction(actions)
                     
                     # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
-                    keys_to_clear = ["new_r_proj", "new_r_custom_proj", "new_r_emps", "new_r_color", "new_r_notes", "new_r_type", "new_r_start_date", "new_r_start_time", "new_r_end_time"]
-                    for i in range(7):
-                        keys_to_clear.append(f"new_chk_{i}")
-                    for k in keys_to_clear:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                    if len(st.session_state.projects) > 0:
+                        st.session_state["new_r_proj"] = st.session_state.projects[0]['id']
+                    st.session_state["new_r_custom_proj"] = ""
+                    st.session_state["new_r_emps"] = []
+                    st.session_state["new_r_color"] = list(BASIC_COLORS.keys())[0]
+                    st.session_state["new_r_notes"] = ""
+                    st.session_state["new_r_type"] = "Εβδομαδιαία"
+                    st.session_state["new_r_start_date"] = date.today()
+                    st.session_state["new_r_start_time"] = datetime.strptime("09:00", "%H:%M").time()
+                    st.session_state["new_r_end_time"] = datetime.strptime("17:00", "%H:%M").time()
+                    for idx in range(7):
+                        st.session_state[f"new_chk_{idx}"] = (idx == 0)
                     
                 if success_count > 0:
                     st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται...")
@@ -1487,7 +1499,7 @@ elif menu == "Ομάδα Προσωπικού":
         if not st.session_state.employees:
             st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
         else:
-            emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
+            emp_to_edit_id = st.selectbox("Επιλέξ Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
             
