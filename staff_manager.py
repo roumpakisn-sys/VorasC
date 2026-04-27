@@ -32,7 +32,7 @@ if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
-            username = st.selectbox("Χρήστης", ["Admin", "Χρήστης 1", "Χρήστης 2", "Χρήστης 3", "Χρήστης 4"])
+            username = st.selectbox("Χρήστης", ["Admin", "EXOUZ", "MEMEK", "NAK", "TAN"])
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
@@ -40,10 +40,10 @@ if not st.session_state.authenticated:
                 # Έλεγχος κωδικών για κάθε χρήστη (Από secrets ή προεπιλεγμένοι)
                 valid_passwords = {
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
-                    "Χρήστης 1": st.secrets.get("USER1_PASSWORD", "pass1"),
-                    "Χρήστης 2": st.secrets.get("USER2_PASSWORD", "pass2"),
-                    "Χρήστης 3": st.secrets.get("USER3_PASSWORD", "pass3"),
-                    "Χρήστης 4": st.secrets.get("USER4_PASSWORD", "pass4")
+                    "EXOUZ": st.secrets.get("USER1_PASSWORD", "pass1"),
+                    "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
+                    "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
+                    "TAN": st.secrets.get("USER4_PASSWORD", "pass4")
                 }
                 
                 if password == valid_passwords.get(username):
@@ -489,8 +489,8 @@ def go_prev_week():
 def go_next_week():
     st.session_state.view_week_date += timedelta(days=7)
 
-# Μεταβλητή για τον έλεγχο Read-Only πρόσβασης (ο Χρήστης 4 δεν μπορεί να πειράξει το Gantt και τα έργα)
-is_full_admin = st.session_state.get('current_user') != "Χρήστης 4"
+# Μεταβλητή για τον έλεγχο Read-Only πρόσβασης (ο TAN δεν μπορεί να πειράξει το Gantt και τα έργα)
+is_full_admin = st.session_state.get('current_user') != "TAN"
 
 # --- Sidebar Navigation ---
 st.sidebar.title("STAFF.PRO")
