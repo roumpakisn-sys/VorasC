@@ -742,29 +742,34 @@ if menu == "Ταμπλό Gantt":
 
         with col_add:
             st.subheader("➕ Νέα Τοποθέτηση")
-            with st.form("quick_add", clear_on_submit=True):
-                add_date = st.date_input("Ημερομηνία", value=selected_date)
+            
+            if "qa_rc" not in st.session_state:
+                st.session_state.qa_rc = 0
+            qa_rc = st.session_state.qa_rc
+            
+            with st.form("quick_add"):
+                add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
                 
                 proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"qa_proj_{qa_rc}")
                 
-                custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)")
+                custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
                 
                 # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
                 emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
-                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
+                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"qa_emps_{qa_rc}")
                 
                 c_color, c_notes = st.columns(2)
                 with c_color:
-                    color_choice = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()))
+                    color_choice = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
                 with c_notes:
-                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key="add_notes")
+                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                 
                 c_start, c_end = st.columns(2)
                 with c_start:
-                    t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key="add_s")
+                    t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                 with c_end:
-                    t_end = st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time(), key="add_e")
+                    t_end = st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time(), key=f"qa_end_{qa_rc}")
                     
                 if st.form_submit_button("Καταχώρηση"):
                     str_start = t_start.strftime("%H:%M")
@@ -824,6 +829,8 @@ if menu == "Ταμπλό Gantt":
                             add_transaction(actions)
                             
                             st.success("Η ανάθεση ολοκληρώθηκε!")
+                            time.sleep(1)
+                            st.session_state.qa_rc += 1
                             st.rerun()
 
         with col_edit:
@@ -878,7 +885,7 @@ if menu == "Ταμπλό Gantt":
                 if selected_key != "":
                     target_group = weekly_groups[selected_key]
                     
-                    with st.form("quick_edit", clear_on_submit=True):
+                    with st.form("quick_edit"):
                         edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
                         
                         proj_ids = [p['id'] for p in st.session_state.projects]
