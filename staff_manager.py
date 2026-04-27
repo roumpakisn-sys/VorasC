@@ -30,7 +30,7 @@ if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
-            username = st.selectbox("Χρήστης", ["Admin", "Χρήστης 1", "Χρήστης 2", "Χρήστης 3"])
+            username = st.selectbox("Χρήστης", ["Admin", "Χρήστης 1", "Χρήστης 2", "Χρήστης 3", "Χρήστης 4"])
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
@@ -40,7 +40,8 @@ if not st.session_state.authenticated:
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
                     "Χρήστης 1": st.secrets.get("USER1_PASSWORD", "pass1"),
                     "Χρήστης 2": st.secrets.get("USER2_PASSWORD", "pass2"),
-                    "Χρήστης 3": st.secrets.get("USER3_PASSWORD", "pass3")
+                    "Χρήστης 3": st.secrets.get("USER3_PASSWORD", "pass3"),
+                    "Χρήστης 4": st.secrets.get("USER4_PASSWORD", "pass4")
                 }
                 
                 if password == valid_passwords.get(username):
@@ -351,6 +352,9 @@ def go_prev_week():
 
 def go_next_week():
     st.session_state.view_week_date += timedelta(days=7)
+
+# Μεταβλητή για τον έλεγχο Read-Only πρόσβασης (ο Χρήστης 4 δεν μπορεί να πειράξει το Gantt και τα έργα)
+is_full_admin = st.session_state.get('current_user') != "Χρήστης 4"
 
 # --- Sidebar Navigation ---
 st.sidebar.title("STAFF.PRO")
@@ -750,407 +754,431 @@ if menu == "Ταμπλό Gantt":
     if not presentation_mode:
         st.divider()
 
-        col_add, col_edit = st.columns(2)
+        if is_full_admin:
+            col_add, col_edit = st.columns(2)
 
-        with col_add:
-            st.subheader("➕ Νέα Τοποθέτηση")
-            
-            if "qa_rc" not in st.session_state:
-                st.session_state.qa_rc = 0
-            qa_rc = st.session_state.qa_rc
-            
-            with st.form("quick_add"):
-                add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
+            with col_add:
+                st.subheader("➕ Νέα Τοποθέτηση")
                 
-                proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"qa_proj_{qa_rc}")
+                if "qa_rc" not in st.session_state:
+                    st.session_state.qa_rc = 0
+                qa_rc = st.session_state.qa_rc
                 
-                custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
-                
-                # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
-                emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
-                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"qa_emps_{qa_rc}")
-                
-                c_color, c_notes = st.columns(2)
-                with c_color:
-                    color_choice = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
-                with c_notes:
-                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
-                
-                c_start, c_end = st.columns(2)
-                with c_start:
-                    t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
-                with c_end:
-                    t_end = st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time(), key=f"qa_end_{qa_rc}")
+                with st.form("quick_add"):
+                    add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
                     
-                if st.form_submit_button("Καταχώρηση"):
-                    str_start = t_start.strftime("%H:%M")
-                    str_end = t_end.strftime("%H:%M")
+                    proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
+                                             format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"qa_proj_{qa_rc}")
                     
-                    if str_start >= str_end:
-                        st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                    elif not custom_proj_name.strip() and not proj_choice:
-                        st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
-                    else:
-                        emps_to_process = emp_choices if emp_choices else [""]
-                        errors = []
-                        for eid in emps_to_process:
-                            if eid:
-                                emp_name = get_employee_name(eid)
-                                if is_on_leave(eid, add_date):
-                                    errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
-                                elif has_time_conflict(eid, add_date, str_start, str_end):
-                                    errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει στις {add_date.strftime('%d/%m')}.")
+                    custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
+                    
+                    # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
+                    emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
+                                               format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"qa_emps_{qa_rc}")
+                    
+                    c_color, c_notes = st.columns(2)
+                    with c_color:
+                        color_choice = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
+                    with c_notes:
+                        add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+                    
+                    c_start, c_end = st.columns(2)
+                    with c_start:
+                        t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
+                    with c_end:
+                        t_end = st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time(), key=f"qa_end_{qa_rc}")
                         
-                        if errors:
-                            for err in errors:
-                                st.error(err)
+                    if st.form_submit_button("Καταχώρηση"):
+                        str_start = t_start.strftime("%H:%M")
+                        str_end = t_end.strftime("%H:%M")
+                        
+                        if str_start >= str_end:
+                            st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
+                        elif not custom_proj_name.strip() and not proj_choice:
+                            st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                         else:
-                            actions = []
-                            # Διαχείριση νέου έργου
-                            if custom_proj_name.strip():
-                                final_proj_id = str(uuid.uuid4())
-                                new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
-                                st.session_state.projects.append(new_p)
-                                db_insert('projects', new_p, track=False)
-                                actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
-                            else:
-                                final_proj_id = proj_choice
-                                
-                            new_assigns = []
+                            emps_to_process = emp_choices if emp_choices else [""]
+                            errors = []
                             for eid in emps_to_process:
-                                new_assign = {
-                                    'id': str(uuid.uuid4()),
-                                    'employeeId': eid,
-                                    'projectId': final_proj_id,
-                                    'date': add_date,
-                                    'startTime': str_start,
-                                    'endTime': str_end,
-                                    'colorName': color_choice,
-                                    'colorHex': BASIC_COLORS[color_choice],
-                                    'notes': add_notes,
-                                    'is_cancelled': False,
-                                    'cancel_reason': "",
-                                    'recurring_id': None
-                                }
-                                new_assigns.append(new_assign)
-                                st.session_state.assignments.append(new_assign)
+                                if eid:
+                                    emp_name = get_employee_name(eid)
+                                    if is_on_leave(eid, add_date):
+                                        errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
+                                    elif has_time_conflict(eid, add_date, str_start, str_end):
+                                        errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει στις {add_date.strftime('%d/%m')}.")
                             
-                            db_insert("assignments", new_assigns, track=False)
-                            actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
-                            add_transaction(actions)
-                            
-                            st.success("Η ανάθεση ολοκληρώθηκε!")
-                            time.sleep(1)
-                            st.session_state.qa_rc += 1
-                            st.rerun()
-
-        with col_edit:
-            st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
-            
-            weekly_groups = {}
-            weekly_assignments = [a for a in st.session_state.assignments if start_of_week <= a['date'] <= start_of_week + timedelta(days=6)]
-            
-            for a in weekly_assignments:
-                proj = get_project_info(a['projectId'])
-                c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
-                c_name = a.get('colorName', "Προεπιλογή")
-                notes = a.get('notes', '')
-                is_canc = a.get('is_cancelled', False)
-                c_reason = a.get('cancel_reason', '')
-                
-                key = f"{a['date']}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
-                if key not in weekly_groups:
-                    weekly_groups[key] = {
-                        'Date': a['date'],
-                        'ProjectId': a['projectId'],
-                        'Project': proj['name'] if proj else "Άγνωστο",
-                        'StartTime': a['startTime'],
-                        'EndTime': a['endTime'],
-                        'EmployeeIds': [],
-                        'AssignmentIds': [],
-                        'ColorName': c_name,
-                        'Notes': notes,
-                        'is_cancelled': is_canc,
-                        'cancel_reason': c_reason
-                    }
-                weekly_groups[key]['EmployeeIds'].append(a['employeeId'])
-                weekly_groups[key]['AssignmentIds'].append(a['id'])
-
-            if not weekly_groups:
-                st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
-            else:
-                group_keys = list(weekly_groups.keys())
-                group_keys.sort(key=lambda k: (weekly_groups[k]['Date'], weekly_groups[k]['StartTime']))
-                
-                default_idx = 0
-                if clicked_key and clicked_key in group_keys:
-                    default_idx = group_keys.index(clicked_key) + 1
-                
-                selected_key = st.selectbox(
-                    "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
-                    options=[""] + group_keys,
-                    index=default_idx,
-                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{weekly_groups[x]['Date'].strftime('%d/%m')} - {weekly_groups[x]['Project']} ({weekly_groups[x]['StartTime']}-{weekly_groups[x]['EndTime']})"
-                )
-                
-                if selected_key != "":
-                    target_group = weekly_groups[selected_key]
-                    
-                    with st.form("quick_edit"):
-                        edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
-                        
-                        proj_ids = [p['id'] for p in st.session_state.projects]
-                        default_proj_idx = proj_ids.index(target_group['ProjectId']) if target_group['ProjectId'] in proj_ids else 0
-                        
-                        edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
-                                                 index=default_proj_idx,
-                                                 format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
-                                                 
-                        edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
-                        
-                        # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
-                        valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
-                        edit_options = list(set(active_employee_ids + valid_emp_ids))
-                        edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options,
-                                                   default=valid_emp_ids,
-                                                   format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
-                        
-                        e_color_col, e_notes_col = st.columns(2)
-                        with e_color_col:
-                            default_color_idx = list(BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in BASIC_COLORS else 0
-                            edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=default_color_idx)
-                        with e_notes_col:
-                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'], key="edit_notes")
-
-                        e_start, e_end = st.columns(2)
-                        with e_start:
-                            new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'], "%H:%M").time(), key="edit_s")
-                        with e_end:
-                            new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(target_group['EndTime'], "%H:%M").time(), key="edit_e")
-                            
-                        st.markdown("---")
-                        st.write("🛑 **Ακύρωση / Διαγραφή Βάρδιας (Διαγράμμιση)**")
-                        c_canc1, c_canc2 = st.columns([1, 2])
-                        with c_canc1:
-                            e_is_cancelled = st.checkbox("Επισήμανση ως Ακυρωμένη", value=target_group.get('is_cancelled', False))
-                        with c_canc2:
-                            e_cancel_reason = st.text_input("Λόγος Ακύρωσης (Συμπληρώστε αν ακυρώνετε)", value=target_group.get('cancel_reason', ''))
-                        st.markdown("---")
-                        
-                        col_btn1, col_btn2 = st.columns(2)
-                        with col_btn1:
-                            save_edit = st.form_submit_button("💾 Αποθήκευση")
-                        with col_btn2:
-                            del_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή Μπάρας")
-                            
-                        if del_edit:
-                            old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
-                            st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                            db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
-                            st.rerun()
-                            
-                        if save_edit:
-                            str_start = new_t_start.strftime("%H:%M")
-                            str_end = new_t_end.strftime("%H:%M")
-                            
-                            if str_start >= str_end:
-                                st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                            elif not edit_custom_proj_name.strip() and not edit_proj:
-                                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
+                            if errors:
+                                for err in errors:
+                                    st.error(err)
                             else:
-                                emps_to_process = edit_emps if edit_emps else [""]
-                                errors = []
-                                for eid in emps_to_process:
-                                    if eid:
-                                        emp_name = get_employee_name(eid)
-                                        if is_on_leave(eid, edit_date):
-                                            errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
-                                        elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
-                                            errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
-                                        
-                                if errors:
-                                    for err in errors:
-                                        st.error(err)
+                                actions = []
+                                # Διαχείριση νέου έργου
+                                if custom_proj_name.strip():
+                                    final_proj_id = str(uuid.uuid4())
+                                    new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
+                                    st.session_state.projects.append(new_p)
+                                    db_insert('projects', new_p, track=False)
+                                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                                 else:
-                                    actions = []
-                                    # Διαχείριση νέου έργου κατά την επεξεργασία
-                                    if edit_custom_proj_name.strip():
-                                        final_edit_proj_id = str(uuid.uuid4())
-                                        new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
-                                        st.session_state.projects.append(new_p)
-                                        db_insert('projects', new_p, track=False)
-                                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
-                                    else:
-                                        final_edit_proj_id = edit_proj
-                                        
-                                    old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
-                                    st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                                    db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
-                                    actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
+                                    final_proj_id = proj_choice
                                     
-                                    new_assigns = []
+                                new_assigns = []
+                                for eid in emps_to_process:
+                                    new_assign = {
+                                        'id': str(uuid.uuid4()),
+                                        'employeeId': eid,
+                                        'projectId': final_proj_id,
+                                        'date': add_date,
+                                        'startTime': str_start,
+                                        'endTime': str_end,
+                                        'colorName': color_choice,
+                                        'colorHex': BASIC_COLORS[color_choice],
+                                        'notes': add_notes,
+                                        'is_cancelled': False,
+                                        'cancel_reason': "",
+                                        'recurring_id': None
+                                    }
+                                    new_assigns.append(new_assign)
+                                    st.session_state.assignments.append(new_assign)
+                                
+                                db_insert("assignments", new_assigns, track=False)
+                                actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                                add_transaction(actions)
+                                
+                                st.success("Η ανάθεση ολοκληρώθηκε!")
+                                time.sleep(1)
+                                st.session_state.qa_rc += 1
+                                st.rerun()
+
+            with col_edit:
+                st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
+                
+                weekly_groups = {}
+                weekly_assignments = [a for a in st.session_state.assignments if start_of_week <= a['date'] <= start_of_week + timedelta(days=6)]
+                
+                for a in weekly_assignments:
+                    proj = get_project_info(a['projectId'])
+                    c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
+                    c_name = a.get('colorName', "Προεπιλογή")
+                    notes = a.get('notes', '')
+                    is_canc = a.get('is_cancelled', False)
+                    c_reason = a.get('cancel_reason', '')
+                    
+                    key = f"{a['date']}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
+                    if key not in weekly_groups:
+                        weekly_groups[key] = {
+                            'Date': a['date'],
+                            'ProjectId': a['projectId'],
+                            'Project': proj['name'] if proj else "Άγνωστο",
+                            'StartTime': a['startTime'],
+                            'EndTime': a['endTime'],
+                            'EmployeeIds': [],
+                            'AssignmentIds': [],
+                            'ColorName': c_name,
+                            'Notes': notes,
+                            'is_cancelled': is_canc,
+                            'cancel_reason': c_reason
+                        }
+                    weekly_groups[key]['EmployeeIds'].append(a['employeeId'])
+                    weekly_groups[key]['AssignmentIds'].append(a['id'])
+
+                if not weekly_groups:
+                    st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
+                else:
+                    group_keys = list(weekly_groups.keys())
+                    group_keys.sort(key=lambda k: (weekly_groups[k]['Date'], weekly_groups[k]['StartTime']))
+                    
+                    default_idx = 0
+                    if clicked_key and clicked_key in group_keys:
+                        default_idx = group_keys.index(clicked_key) + 1
+                    
+                    selected_key = st.selectbox(
+                        "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
+                        options=[""] + group_keys,
+                        index=default_idx,
+                        format_func=lambda x: "Επιλέξτε..." if x == "" else f"{weekly_groups[x]['Date'].strftime('%d/%m')} - {weekly_groups[x]['Project']} ({weekly_groups[x]['StartTime']}-{weekly_groups[x]['EndTime']})"
+                    )
+                    
+                    if selected_key != "":
+                        target_group = weekly_groups[selected_key]
+                        
+                        with st.form("quick_edit"):
+                            edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
+                            
+                            proj_ids = [p['id'] for p in st.session_state.projects]
+                            default_proj_idx = proj_ids.index(target_group['ProjectId']) if target_group['ProjectId'] in proj_ids else 0
+                            
+                            edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
+                                                     index=default_proj_idx,
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                     
+                            edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
+                            
+                            # Στην επεξεργασία: Δείχνουμε τους ενεργούς + όσους είναι ήδη στην εργασία (ακόμα κι αν πλέον είναι ανενεργοί)
+                            valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
+                            edit_options = list(set(active_employee_ids + valid_emp_ids))
+                            edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options,
+                                                       default=valid_emp_ids,
+                                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
+                            
+                            e_color_col, e_notes_col = st.columns(2)
+                            with e_color_col:
+                                default_color_idx = list(BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in BASIC_COLORS else 0
+                                edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=default_color_idx)
+                            with e_notes_col:
+                                edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'], key="edit_notes")
+
+                            e_start, e_end = st.columns(2)
+                            with e_start:
+                                new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'], "%H:%M").time(), key="edit_s")
+                            with e_end:
+                                new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(target_group['EndTime'], "%H:%M").time(), key="edit_e")
+                                
+                            st.markdown("---")
+                            st.write("🛑 **Ακύρωση / Διαγραφή Βάρδιας (Διαγράμμιση)**")
+                            c_canc1, c_canc2 = st.columns([1, 2])
+                            with c_canc1:
+                                e_is_cancelled = st.checkbox("Επισήμανση ως Ακυρωμένη", value=target_group.get('is_cancelled', False))
+                            with c_canc2:
+                                e_cancel_reason = st.text_input("Λόγος Ακύρωσης (Συμπληρώστε αν ακυρώνετε)", value=target_group.get('cancel_reason', ''))
+                            st.markdown("---")
+                            
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                save_edit = st.form_submit_button("💾 Αποθήκευση")
+                            with col_btn2:
+                                del_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή Μπάρας")
+                                
+                            if del_edit:
+                                old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
+                                st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                                db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
+                                st.rerun()
+                                
+                            if save_edit:
+                                str_start = new_t_start.strftime("%H:%M")
+                                str_end = new_t_end.strftime("%H:%M")
+                                
+                                if str_start >= str_end:
+                                    st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
+                                elif not edit_custom_proj_name.strip() and not edit_proj:
+                                    st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
+                                else:
+                                    emps_to_process = edit_emps if edit_emps else [""]
+                                    errors = []
                                     for eid in emps_to_process:
-                                        new_a = {
-                                            'id': str(uuid.uuid4()),
-                                            'employeeId': eid,
-                                            'projectId': final_edit_proj_id,
-                                            'date': edit_date,
-                                            'startTime': str_start,
-                                            'endTime': str_end,
-                                            'colorName': edit_color,
-                                            'colorHex': BASIC_COLORS[edit_color],
-                                            'notes': edit_notes,
-                                            'is_cancelled': e_is_cancelled,
-                                            'cancel_reason': e_cancel_reason if e_is_cancelled else "",
-                                            'recurring_id': None 
-                                        }
-                                        new_assigns.append(new_a)
-                                        st.session_state.assignments.append(new_a)
-                                    
-                                    db_insert('assignments', new_assigns, track=False)
-                                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
-                                    
-                                    add_transaction(actions)
-                                    st.rerun()
+                                        if eid:
+                                            emp_name = get_employee_name(eid)
+                                            if is_on_leave(eid, edit_date):
+                                                errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
+                                            elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
+                                                errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
+                                            
+                                    if errors:
+                                        for err in errors:
+                                            st.error(err)
+                                    else:
+                                        actions = []
+                                        # Διαχείριση νέου έργου κατά την επεξεργασία
+                                        if edit_custom_proj_name.strip():
+                                            final_edit_proj_id = str(uuid.uuid4())
+                                            new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
+                                            st.session_state.projects.append(new_p)
+                                            db_insert('projects', new_p, track=False)
+                                            actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                                        else:
+                                            final_edit_proj_id = edit_proj
+                                            
+                                        old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
+                                        st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                                        db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
+                                        actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
+                                        
+                                        new_assigns = []
+                                        for eid in emps_to_process:
+                                            new_a = {
+                                                'id': str(uuid.uuid4()),
+                                                'employeeId': eid,
+                                                'projectId': final_edit_proj_id,
+                                                'date': edit_date,
+                                                'startTime': str_start,
+                                                'endTime': str_end,
+                                                'colorName': edit_color,
+                                                'colorHex': BASIC_COLORS[edit_color],
+                                                'notes': edit_notes,
+                                                'is_cancelled': e_is_cancelled,
+                                                'cancel_reason': e_cancel_reason if e_is_cancelled else "",
+                                                'recurring_id': None 
+                                            }
+                                            new_assigns.append(new_a)
+                                            st.session_state.assignments.append(new_a)
+                                        
+                                        db_insert('assignments', new_assigns, track=False)
+                                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                                        
+                                        add_transaction(actions)
+                                        st.rerun()
+        else:
+            st.info("⚠️ Έχετε πρόσβαση μόνο για προβολή στο Χρονοδιάγραμμα. Δεν μπορείτε να προσθέσετε ή να επεξεργαστείτε βάρδιες.")
 
 # --- VIEW: RECURRING TASKS ---
 elif menu == "Επαναλαμβανόμενες Εργασίες":
     st.title("🔄 Επαναλαμβανόμενες Εργασίες")
-    st.write("Προσθέστε ή επεξεργαστείτε εργασίες που επαναλαμβάνονται «για πάντα» (προγραμματίζονται αυτόματα για τα επόμενα 3 χρόνια).")
     
-    tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "✏️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
-    
-    if "rec_reset_counter" not in st.session_state:
-        st.session_state.rec_reset_counter = 0
-    rc = st.session_state.rec_reset_counter
-    
-    # --- ΚΑΡΤΕΛΑ 1: ΝΕΑ Καταχώρηση ---
-    with tab_new:
-        r_col1, r_col2 = st.columns(2)
+    if not is_full_admin:
+        st.info("⚠️ Έχετε δικαιώματα μόνο για ανάγνωση. Δεν μπορείτε να διαχειριστείτε τις επαναλαμβανόμενες εργασίες.")
+    else:
+        st.write("Προσθέστε ή επεξεργαστείτε εργασίες που επαναλαμβάνονται «για πάντα» (προγραμματίζονται αυτόματα για τα επόμενα 3 χρόνια).")
+        tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "✏️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
         
-        with r_col1:
-            r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"new_r_proj_{rc}")
-                                     
-            r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"new_r_custom_proj_{rc}")
-            
-            # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
-            r_emps = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
-                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"new_r_emps_{rc}")
-            
-            c_r_color, c_r_notes = st.columns(2)
-            with c_r_color:
-                r_color = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"new_r_color_{rc}")
-            with c_r_notes:
-                r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"new_r_notes_{rc}")
-            
-            r_type = st.selectbox("Συχνότητα Επανάληψης", ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"], key=f"new_r_type_{rc}")
-            
-            selected_weekdays = []
-            if r_type == "Επιλεγμένες Μέρες Εβδομάδας":
-                st.caption("Επιλέξτε Μέρες (τικάρετε τα κουτάκια):")
-                day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
-                cols = st.columns(4)
-                for i, d_name in enumerate(day_names):
-                    if cols[i % 4].checkbox(d_name, value=(i==0), key=f"new_chk_{i}_{rc}"):
-                        selected_weekdays.append(d_name)
+        if "rec_reset_counter" not in st.session_state:
+            st.session_state.rec_reset_counter = 0
+        rc = st.session_state.rec_reset_counter
         
-        with r_col2:
-            r_start_date = st.date_input("Από Ημερομηνία", date.today(), key=f"new_r_start_date_{rc}")
-            r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
-            r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
+        # --- ΚΑΡΤΕΛΑ 1: ΝΕΑ Καταχώρηση ---
+        with tab_new:
+            r_col1, r_col2 = st.columns(2)
             
-            st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
-        
-        st.write("") 
-        col_btn1, col_btn2 = st.columns([1, 1])
-        with col_btn1:
-            submit_r = st.button("Καταχώρηση Επαναλαμβανόμενης Εργασίας", type="primary", key="btn_new_r", use_container_width=True)
-        with col_btn2:
-            clear_r = st.button("🧹 Καθαρισμός", key="btn_clear_r", use_container_width=True)
-            
-        if clear_r:
-            st.session_state.rec_reset_counter += 1
-            st.rerun()
-            
-        if submit_r:
-            str_start = r_start_time.strftime("%H:%M")
-            str_end = r_end_time.strftime("%H:%M")
-            
-            if str_start >= str_end:
-                st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-            elif r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not selected_weekdays:
-                st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας τικάροντας το αντίστοιχο κουτάκι.")
-            elif not r_custom_proj_name.strip() and not r_proj:
-                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
-            else:
-                actions = []
+            with r_col1:
+                r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
+                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"new_r_proj_{rc}")
+                                         
+                r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"new_r_custom_proj_{rc}")
                 
-                # Διαχείριση νέου έργου
-                if r_custom_proj_name.strip():
-                    final_r_proj_id = str(uuid.uuid4())
-                    new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': BASIC_COLORS[r_color]}
-                    st.session_state.projects.append(new_p)
-                    db_insert('projects', new_p, track=False)
-                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                # Φιλτράρισμα: Μόνο ενεργοί υπάλληλοι (Μπορεί να μείνει κενό)
+                r_emps = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
+                                           format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"new_r_emps_{rc}")
+                
+                c_r_color, c_r_notes = st.columns(2)
+                with c_r_color:
+                    r_color = st.selectbox("Χρώμα Μπάρας", options=list(BASIC_COLORS.keys()), key=f"new_r_color_{rc}")
+                with c_r_notes:
+                    r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"new_r_notes_{rc}")
+                
+                r_type = st.selectbox("Συχνότητα Επανάληψης", ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"], key=f"new_r_type_{rc}")
+                
+                selected_weekdays = []
+                if r_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                    st.caption("Επιλέξτε Μέρες (τικάρετε τα κουτάκια):")
+                    day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
+                    cols = st.columns(4)
+                    for i, d_name in enumerate(day_names):
+                        if cols[i % 4].checkbox(d_name, value=(i==0), key=f"new_chk_{i}_{rc}"):
+                            selected_weekdays.append(d_name)
+            
+            with r_col2:
+                r_start_date = st.date_input("Από Ημερομηνία", date.today(), key=f"new_r_start_date_{rc}")
+                r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
+                r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
+                
+                st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
+            
+            st.write("") 
+            col_btn1, col_btn2 = st.columns([1, 1])
+            with col_btn1:
+                submit_r = st.button("Καταχώρηση Επαναλαμβανόμενης Εργασίας", type="primary", key="btn_new_r", use_container_width=True)
+            with col_btn2:
+                clear_r = st.button("🧹 Καθαρισμός", key="btn_clear_r", use_container_width=True)
+                
+            if clear_r:
+                st.session_state.rec_reset_counter += 1
+                st.rerun()
+                
+            if submit_r:
+                str_start = r_start_time.strftime("%H:%M")
+                str_end = r_end_time.strftime("%H:%M")
+                
+                if str_start >= str_end:
+                    st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
+                elif r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not selected_weekdays:
+                    st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας τικάροντας το αντίστοιχο κουτάκι.")
+                elif not r_custom_proj_name.strip() and not r_proj:
+                    st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                 else:
-                    final_r_proj_id = r_proj
+                    actions = []
                     
-                pattern_id = str(uuid.uuid4())
-                r_end_date = r_start_date + timedelta(days=365 * 3)
-                
-                dates_to_assign = []
-                curr_date = r_start_date
-                day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
-                selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
-                
-                new_assignments_batch = []
-                emps_to_process = r_emps if r_emps else [""]
-                
-                with st.spinner('Υπολογισμός και καταχώρηση βαρδιών...'):
-                    while curr_date <= r_end_date:
-                        if r_type == "Εβδομαδιαία":
-                            dates_to_assign.append(curr_date)
-                            curr_date += timedelta(days=7)
-                        elif r_type == "Μηνιαία":
-                            dates_to_assign.append(curr_date)
-                            month = curr_date.month
-                            year = curr_date.year
-                            if month == 12:
-                                month = 1
-                                year += 1
-                            else:
-                                month += 1
-                            try:
-                                curr_date = curr_date.replace(year=year, month=month)
-                            except ValueError:
-                                last_day = calendar.monthrange(year, month)[1]
-                                curr_date = curr_date.replace(year=year, month=month, day=last_day)
-                        elif r_type == "Επιλεγμένες Μέρες Εβδομάδας":
-                            if curr_date.weekday() in selected_weekday_ints:
+                    # Διαχείριση νέου έργου
+                    if r_custom_proj_name.strip():
+                        final_r_proj_id = str(uuid.uuid4())
+                        new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': BASIC_COLORS[r_color]}
+                        st.session_state.projects.append(new_p)
+                        db_insert('projects', new_p, track=False)
+                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                    else:
+                        final_r_proj_id = r_proj
+                        
+                    pattern_id = str(uuid.uuid4())
+                    r_end_date = r_start_date + timedelta(days=365 * 3)
+                    
+                    dates_to_assign = []
+                    curr_date = r_start_date
+                    day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
+                    selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
+                    
+                    new_assignments_batch = []
+                    emps_to_process = r_emps if r_emps else [""]
+                    
+                    with st.spinner('Υπολογισμός και καταχώρηση βαρδιών...'):
+                        while curr_date <= r_end_date:
+                            if r_type == "Εβδομαδιαία":
                                 dates_to_assign.append(curr_date)
-                            curr_date += timedelta(days=1)
-                    
-                    success_count = 0
-                    conflict_count = 0
-                    conflict_details = []
-                    
-                    for d in dates_to_assign:
-                        for eid in emps_to_process:
-                            if eid:
-                                emp_name = get_employee_name(eid)
-                                if is_on_leave(eid, d):
-                                    conflict_count += 1
-                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
-                                elif has_time_conflict(eid, d, str_start, str_end):
-                                    conflict_count += 1
-                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                                curr_date += timedelta(days=7)
+                            elif r_type == "Μηνιαία":
+                                dates_to_assign.append(curr_date)
+                                month = curr_date.month
+                                year = curr_date.year
+                                if month == 12:
+                                    month = 1
+                                    year += 1
                                 else:
+                                    month += 1
+                                try:
+                                    curr_date = curr_date.replace(year=year, month=month)
+                                except ValueError:
+                                    last_day = calendar.monthrange(year, month)[1]
+                                    curr_date = curr_date.replace(year=year, month=month, day=last_day)
+                            elif r_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                                if curr_date.weekday() in selected_weekday_ints:
+                                    dates_to_assign.append(curr_date)
+                                curr_date += timedelta(days=1)
+                        
+                        success_count = 0
+                        conflict_count = 0
+                        conflict_details = []
+                        
+                        for d in dates_to_assign:
+                            for eid in emps_to_process:
+                                if eid:
+                                    emp_name = get_employee_name(eid)
+                                    if is_on_leave(eid, d):
+                                        conflict_count += 1
+                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
+                                    elif has_time_conflict(eid, d, str_start, str_end):
+                                        conflict_count += 1
+                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                                    else:
+                                        new_assign = {
+                                            'id': str(uuid.uuid4()),
+                                            'recurring_id': pattern_id,
+                                            'employeeId': eid,
+                                            'projectId': final_r_proj_id,
+                                            'date': d,
+                                            'startTime': str_start,
+                                            'endTime': str_end,
+                                            'colorName': r_color,
+                                            'colorHex': BASIC_COLORS[r_color],
+                                            'notes': r_notes,
+                                            'is_cancelled': False,
+                                            'cancel_reason': ""
+                                        }
+                                        new_assignments_batch.append(new_assign)
+                                        success_count += 1
+                                else:
+                                    # Καταχώρηση βάρδιας χωρίς προσωπικό (χωρίς έλεγχο επικάλυψης)
                                     new_assign = {
                                         'id': str(uuid.uuid4()),
                                         'recurring_id': pattern_id,
-                                        'employeeId': eid,
+                                        'employeeId': "",
                                         'projectId': final_r_proj_id,
                                         'date': d,
                                         'startTime': str_start,
@@ -1163,217 +1191,215 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     }
                                     new_assignments_batch.append(new_assign)
                                     success_count += 1
-                            else:
-                                # Καταχώρηση βάρδιας χωρίς προσωπικό (χωρίς έλεγχο επικάλυψης)
-                                new_assign = {
-                                    'id': str(uuid.uuid4()),
-                                    'recurring_id': pattern_id,
-                                    'employeeId': "",
-                                    'projectId': final_r_proj_id,
-                                    'date': d,
-                                    'startTime': str_start,
-                                    'endTime': str_end,
-                                    'colorName': r_color,
-                                    'colorHex': BASIC_COLORS[r_color],
-                                    'notes': r_notes,
-                                    'is_cancelled': False,
-                                    'cancel_reason': ""
-                                }
-                                new_assignments_batch.append(new_assign)
-                                success_count += 1
-                    
-                    new_pattern = {
-                        'id': pattern_id,
-                        'projectId': final_r_proj_id,
-                        'employeeIds': r_emps,
-                        'colorName': r_color,
-                        'notes': r_notes,
-                        'type': r_type,
-                        'weekdays': selected_weekdays,
-                        'startDate': r_start_date,
-                        'startTime': str_start,
-                        'endTime': str_end
-                    }
-                    
-                    # Update Memory & DB
-                    st.session_state.recurring_patterns.append(new_pattern)
-                    db_insert('recurring_patterns', new_pattern, track=False)
-                    actions.append({'type': 'insert', 'table': 'recurring_patterns', 'records': [new_pattern]})
-                    
-                    if new_assignments_batch:
-                        st.session_state.assignments.extend(new_assignments_batch)
-                        # Χρησιμοποιούμε batch insert σε κομμάτια (chunks) για ασφάλεια
-                        chunk_size = 500
-                        for i in range(0, len(new_assignments_batch), chunk_size):
-                            db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
-                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                         
-                    add_transaction(actions)
-                    
-                    # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
-                    st.session_state.rec_reset_counter += 1
-                    
-                if success_count > 0:
-                    st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται...")
-                    time.sleep(1.5)
-                    st.rerun()
-                if conflict_count > 0:
-                    st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
-                    with st.expander("Δείτε τις συγκρούσεις"):
-                        for c in conflict_details:
-                            st.write(f"⚠️ {c}")
-
-    # --- ΚΑΡΤΕΛΑ 2: ΔΙΑΧΕΙΡΙΣΗ / ΕΠΕΞΕΡΓΑΣΙΑ ---
-    with tab_edit:
-        if not st.session_state.recurring_patterns:
-            st.info("Δεν υπάρχ ενεργές επαναλαμβανόμενες εργασίες.")
-        else:
-            pattern_options = {}
-            for p in st.session_state.recurring_patterns:
-                p_info = get_project_info(p['projectId'])
-                p_name = p_info['name'] if p_info else 'Άγνωστο Έργο'
-                pattern_options[p['id']] = f"{p_name} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})"
-            
-            selected_pattern_id = st.selectbox("Επιλέξ Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
-            
-            if selected_pattern_id:
-                pat = next(p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id)
-                
-                with st.form("edit_recurring_form", clear_on_submit=True):
-                    st.warning("⚠️ Προσοχή: Η αποθήκευση αλλαγών θα επαναδημιουργήσει **ΟΛΕΣ** τις βάρδιες αυτής της σειράς. Τυχόν μεμονωμένες αλλαγές που κάνατε στο Ταμπλό θα χαθούν.")
-                    
-                    e_col1, e_col2 = st.columns(2)
-                    with e_col1:
-                        proj_ids = [p['id'] for p in st.session_state.projects]
-                        default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
-                        e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
-                                                index=default_proj_idx,
-                                                format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
-                                                
-                        e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key="edit_r_custom_proj")
+                        new_pattern = {
+                            'id': pattern_id,
+                            'projectId': final_r_proj_id,
+                            'employeeIds': r_emps,
+                            'colorName': r_color,
+                            'notes': r_notes,
+                            'type': r_type,
+                            'weekdays': selected_weekdays,
+                            'startDate': r_start_date,
+                            'startTime': str_start,
+                            'endTime': str_end
+                        }
                         
-                        valid_emp_ids = [eid for eid in pat['employeeIds'] if eid]
-                        edit_options_r = list(set(active_employee_ids + valid_emp_ids))
-                        e_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options_r,
-                                                  default=valid_emp_ids,
-                                                  format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
+                        # Update Memory & DB
+                        st.session_state.recurring_patterns.append(new_pattern)
+                        db_insert('recurring_patterns', new_pattern, track=False)
+                        actions.append({'type': 'insert', 'table': 'recurring_patterns', 'records': [new_pattern]})
                         
-                        e_color_col, e_notes_col = st.columns(2)
-                        with e_color_col:
-                            e_color_idx = list(BASIC_COLORS.keys()).index(pat['colorName']) if pat['colorName'] in BASIC_COLORS else 0
-                            e_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=e_color_idx)
-                        with e_notes_col:
-                            e_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key="edit_r_notes")
-
-                    with e_col2:
-                        e_start_date = st.date_input("Αλλαγή Ημερομηνίας Έναρξης", pat['startDate'])
-                        e_start_time = st.time_input("Αλλαγή Ώρας Έναρξης", value=datetime.strptime(pat['startTime'], "%H:%M").time())
-                        e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'], "%H:%M").time())
-
-                    # Αν ήταν μέρες εβδομάδας, επιτρέπουμε αλλαγή ημερών
-                    e_selected_weekdays = pat['weekdays']
-                    e_type = pat['type']
-                    if e_type == "Επιλεγμένες Μέρες Εβδομάδας":
-                        st.caption("Αλλαγή Επιλεγμένων Ημερών:")
-                        day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
-                        cols = st.columns(4)
-                        new_selected = []
-                        for i, d_name in enumerate(day_names):
-                            if cols[i % 4].checkbox(d_name, value=(d_name in pat['weekdays']), key=f"edit_chk_{i}"):
-                                new_selected.append(d_name)
-                        e_selected_weekdays = new_selected
+                        if new_assignments_batch:
+                            st.session_state.assignments.extend(new_assignments_batch)
+                            # Χρησιμοποιούμε batch insert σε κομμάτια (chunks) για ασφάλεια
+                            chunk_size = 500
+                            for i in range(0, len(new_assignments_batch), chunk_size):
+                                db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                            actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
+                            
+                        add_transaction(actions)
                         
-                    st.write("")
-                    col_b1, col_b2 = st.columns(2)
-                    with col_b1:
-                        save_rec = st.form_submit_button("💾 Αποθήκευση Αλλαγών", type="primary")
-                    with col_b2:
-                        del_rec = st.form_submit_button("🗑️ Διαγραφή ΟΛΗΣ της σειράς")
+                        # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
+                        st.session_state.rec_reset_counter += 1
                         
-                    if del_rec:
-                        old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                        st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                        st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
-                        
-                        db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
-                        db_delete('recurring_patterns', 'id', selected_pattern_id, track=False)
-                        
-                        add_transaction([
-                            {'type': 'delete', 'table': 'assignments', 'records': old_assigns},
-                            {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}
-                        ])
+                    if success_count > 0:
+                        st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται...")
+                        time.sleep(1.5)
                         st.rerun()
+                    if conflict_count > 0:
+                        st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
+                        with st.expander("Δείτε τις συγκρούσεις"):
+                            for c in conflict_details:
+                                st.write(f"⚠️ {c}")
+
+        # --- ΚΑΡΤΕΛΑ 2: ΔΙΑΧΕΙΡΙΣΗ / ΕΠΕΞΕΡΓΑΣΙΑ ---
+        with tab_edit:
+            if not st.session_state.recurring_patterns:
+                st.info("Δεν υπάρχ ενεργές επαναλαμβανόμενες εργασίες.")
+            else:
+                pattern_options = {}
+                for p in st.session_state.recurring_patterns:
+                    p_info = get_project_info(p['projectId'])
+                    p_name = p_info['name'] if p_info else 'Άγνωστο Έργο'
+                    pattern_options[p['id']] = f"{p_name} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})"
+                
+                selected_pattern_id = st.selectbox("Επιλέξ Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
+                
+                if selected_pattern_id:
+                    pat = next(p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id)
+                    
+                    with st.form("edit_recurring_form", clear_on_submit=True):
+                        st.warning("⚠️ Προσοχή: Η αποθήκευση αλλαγών θα επαναδημιουργήσει **ΟΛΕΣ** τις βάρδιες αυτής της σειράς. Τυχόν μεμονωμένες αλλαγές που κάνατε στο Ταμπλό θα χαθούν.")
                         
-                    if save_rec:
-                        str_start = e_start_time.strftime("%H:%M")
-                        str_end = e_end_time.strftime("%H:%M")
-                        
-                        if str_start >= str_end:
-                            st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                        elif e_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays:
-                            st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
-                        elif not e_custom_proj_name.strip() and not e_proj:
-                            st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
-                        else:
-                            actions = []
-                            # Διαχείριση νέου έργου κατά την επεξεργασία
-                            if e_custom_proj_name.strip():
-                                final_e_proj_id = str(uuid.uuid4())
-                                new_p = {'id': final_e_proj_id, 'name': e_custom_proj_name.strip(), 'color': BASIC_COLORS[e_color]}
-                                st.session_state.projects.append(new_p)
-                                db_insert('projects', new_p, track=False)
-                                actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
-                            else:
-                                final_e_proj_id = e_proj
-                                
-                            # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
+                        e_col1, e_col2 = st.columns(2)
+                        with e_col1:
+                            proj_ids = [p['id'] for p in st.session_state.projects]
+                            default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
+                            e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
+                                                    index=default_proj_idx,
+                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                    
+                            e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key="edit_r_custom_proj")
+                            
+                            valid_emp_ids = [eid for eid in pat['employeeIds'] if eid]
+                            edit_options_r = list(set(active_employee_ids + valid_emp_ids))
+                            e_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options_r,
+                                                      default=valid_emp_ids,
+                                                      format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
+                            
+                            e_color_col, e_notes_col = st.columns(2)
+                            with e_color_col:
+                                e_color_idx = list(BASIC_COLORS.keys()).index(pat['colorName']) if pat['colorName'] in BASIC_COLORS else 0
+                                e_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=e_color_idx)
+                            with e_notes_col:
+                                e_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key="edit_r_notes")
+
+                        with e_col2:
+                            e_start_date = st.date_input("Αλλαγή Ημερομηνίας Έναρξης", pat['startDate'])
+                            e_start_time = st.time_input("Αλλαγή Ώρας Έναρξης", value=datetime.strptime(pat['startTime'], "%H:%M").time())
+                            e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'], "%H:%M").time())
+
+                        # Αν ήταν μέρες εβδομάδας, επιτρέπουμε αλλαγή ημερών
+                        e_selected_weekdays = pat['weekdays']
+                        e_type = pat['type']
+                        if e_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                            st.caption("Αλλαγή Επιλεγμένων Ημερών:")
+                            day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
+                            cols = st.columns(4)
+                            new_selected = []
+                            for i, d_name in enumerate(day_names):
+                                if cols[i % 4].checkbox(d_name, value=(d_name in pat['weekdays']), key=f"edit_chk_{i}"):
+                                    new_selected.append(d_name)
+                            e_selected_weekdays = new_selected
+                            
+                        st.write("")
+                        col_b1, col_b2 = st.columns(2)
+                        with col_b1:
+                            save_rec = st.form_submit_button("💾 Αποθήκευση Αλλαγών", type="primary")
+                        with col_b2:
+                            del_rec = st.form_submit_button("🗑️ Διαγραφή ΟΛΗΣ της σειράς")
+                            
+                        if del_rec:
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
+                            st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
+                            
                             db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
-                            actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
+                            db_delete('recurring_patterns', 'id', selected_pattern_id, track=False)
                             
-                            # 2. Παράγουμε τις νέες
-                            r_end_date = e_start_date + timedelta(days=365 * 3)
-                            dates_to_assign = []
-                            curr_date = e_start_date
-                            day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
-                            selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
+                            add_transaction([
+                                {'type': 'delete', 'table': 'assignments', 'records': old_assigns},
+                                {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}
+                            ])
+                            st.rerun()
                             
-                            new_assignments_batch = []
-                            emps_to_process = e_emps if e_emps else [""]
+                        if save_rec:
+                            str_start = e_start_time.strftime("%H:%M")
+                            str_end = e_end_time.strftime("%H:%M")
                             
-                            with st.spinner('Ενημέρωση και καταχώρηση βαρδιών...'):
-                                while curr_date <= r_end_date:
-                                    if e_type == "Εβδομαδιαία":
-                                        dates_to_assign.append(curr_date)
-                                        curr_date += timedelta(days=7)
-                                    elif e_type == "Μηνιαία":
-                                        dates_to_assign.append(curr_date)
-                                        month = curr_date.month
-                                        year = curr_date.year
-                                        if month == 12:
-                                            month = 1
-                                            year += 1
-                                        else:
-                                            month += 1
-                                        try:
-                                            curr_date = curr_date.replace(year=year, month=month)
-                                        except ValueError:
-                                            last_day = calendar.monthrange(year, month)[1]
-                                            curr_date = curr_date.replace(year=year, month=month, day=last_day)
-                                    elif e_type == "Επιλεγμένες Μέρες Εβδομάδας":
-                                        if curr_date.weekday() in selected_weekday_ints:
-                                            dates_to_assign.append(curr_date)
-                                        curr_date += timedelta(days=1)
+                            if str_start >= str_end:
+                                st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
+                            elif e_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays:
+                                st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
+                            elif not e_custom_proj_name.strip() and not e_proj:
+                                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
+                            else:
+                                actions = []
+                                # Διαχείριση νέου έργου κατά την επεξεργασία
+                                if e_custom_proj_name.strip():
+                                    final_e_proj_id = str(uuid.uuid4())
+                                    new_p = {'id': final_e_proj_id, 'name': e_custom_proj_name.strip(), 'color': BASIC_COLORS[e_color]}
+                                    st.session_state.projects.append(new_p)
+                                    db_insert('projects', new_p, track=False)
+                                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                                else:
+                                    final_e_proj_id = e_proj
+                                    
+                                # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
+                                old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
+                                st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
+                                db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
+                                actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                                 
-                                for d in dates_to_assign:
-                                    for eid in emps_to_process:
-                                        if eid:
-                                            if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
+                                # 2. Παράγουμε τις νέες
+                                r_end_date = e_start_date + timedelta(days=365 * 3)
+                                dates_to_assign = []
+                                curr_date = e_start_date
+                                day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
+                                selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
+                                
+                                new_assignments_batch = []
+                                emps_to_process = e_emps if e_emps else [""]
+                                
+                                with st.spinner('Ενημέρωση και καταχώρηση βαρδιών...'):
+                                    while curr_date <= r_end_date:
+                                        if e_type == "Εβδομαδιαία":
+                                            dates_to_assign.append(curr_date)
+                                            curr_date += timedelta(days=7)
+                                        elif e_type == "Μηνιαία":
+                                            dates_to_assign.append(curr_date)
+                                            month = curr_date.month
+                                            year = curr_date.year
+                                            if month == 12:
+                                                month = 1
+                                                year += 1
+                                            else:
+                                                month += 1
+                                            try:
+                                                curr_date = curr_date.replace(year=year, month=month)
+                                            except ValueError:
+                                                last_day = calendar.monthrange(year, month)[1]
+                                                curr_date = curr_date.replace(year=year, month=month, day=last_day)
+                                        elif e_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                                            if curr_date.weekday() in selected_weekday_ints:
+                                                dates_to_assign.append(curr_date)
+                                            curr_date += timedelta(days=1)
+                                    
+                                    for d in dates_to_assign:
+                                        for eid in emps_to_process:
+                                            if eid:
+                                                if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
+                                                    new_assign = {
+                                                        'id': str(uuid.uuid4()),
+                                                        'recurring_id': selected_pattern_id,
+                                                        'employeeId': eid,
+                                                        'projectId': final_e_proj_id,
+                                                        'date': d,
+                                                        'startTime': str_start,
+                                                        'endTime': str_end,
+                                                        'colorName': e_color,
+                                                        'colorHex': BASIC_COLORS[e_color],
+                                                        'notes': e_notes,
+                                                        'is_cancelled': False,
+                                                        'cancel_reason': ""
+                                                    }
+                                                    new_assignments_batch.append(new_assign)
+                                            else:
                                                 new_assign = {
                                                     'id': str(uuid.uuid4()),
                                                     'recurring_id': selected_pattern_id,
-                                                    'employeeId': eid,
+                                                    'employeeId': "",
                                                     'projectId': final_e_proj_id,
                                                     'date': d,
                                                     'startTime': str_start,
@@ -1385,70 +1411,59 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     'cancel_reason': ""
                                                 }
                                                 new_assignments_batch.append(new_assign)
-                                        else:
-                                            new_assign = {
-                                                'id': str(uuid.uuid4()),
-                                                'recurring_id': selected_pattern_id,
-                                                'employeeId': "",
-                                                'projectId': final_e_proj_id,
-                                                'date': d,
-                                                'startTime': str_start,
-                                                'endTime': str_end,
-                                                'colorName': e_color,
-                                                'colorHex': BASIC_COLORS[e_color],
-                                                'notes': e_notes,
-                                                'is_cancelled': False,
-                                                'cancel_reason': ""
-                                            }
-                                            new_assignments_batch.append(new_assign)
-                                
-                                # 3. Ενημερώνουμε τα δεδομένα του Pattern
-                                old_pat = dict(pat)
-                                pat['projectId'] = final_e_proj_id
-                                pat['employeeIds'] = e_emps
-                                pat['colorName'] = e_color
-                                pat['notes'] = e_notes
-                                pat['weekdays'] = e_selected_weekdays
-                                pat['startDate'] = e_start_date
-                                pat['startTime'] = str_start
-                                pat['endTime'] = str_end
-                                
-                                db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
-                                actions.append({'type': 'update', 'table': 'recurring_patterns', 'old_records': [old_pat], 'new_records': [dict(pat)]})
-                                
-                                if new_assignments_batch:
-                                    st.session_state.assignments.extend(new_assignments_batch)
-                                    chunk_size = 500
-                                    for i in range(0, len(new_assignments_batch), chunk_size):
-                                        db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
-                                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
-                                
-                                add_transaction(actions)
-                                
-                            st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
-                            time.sleep(1.5)
-                            st.rerun()
+                                    
+                                    # 3. Ενημερώνουμε τα δεδομένα του Pattern
+                                    old_pat = dict(pat)
+                                    pat['projectId'] = final_e_proj_id
+                                    pat['employeeIds'] = e_emps
+                                    pat['colorName'] = e_color
+                                    pat['notes'] = e_notes
+                                    pat['weekdays'] = e_selected_weekdays
+                                    pat['startDate'] = e_start_date
+                                    pat['startTime'] = str_start
+                                    pat['endTime'] = str_end
+                                    
+                                    db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
+                                    actions.append({'type': 'update', 'table': 'recurring_patterns', 'old_records': [old_pat], 'new_records': [dict(pat)]})
+                                    
+                                    if new_assignments_batch:
+                                        st.session_state.assignments.extend(new_assignments_batch)
+                                        chunk_size = 500
+                                        for i in range(0, len(new_assignments_batch), chunk_size):
+                                            db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
+                                    
+                                    add_transaction(actions)
+                                    
+                                st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
+                                time.sleep(1.5)
+                                st.rerun()
 
 # --- VIEW: PROJECTS ---
 elif menu == "Διαχείριση Έργων":
     st.title("🏗️ Έργα")
-    with st.expander("Νέο Έργο"):
-        with st.form("new_project_form", clear_on_submit=True):
-            p_name = st.text_input("Όνομα Έργου")
-            p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
-            if st.form_submit_button("Δημιουργία"):
-                new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
-                st.session_state.projects.append(new_p)
-                db_insert('projects', new_p)
-                st.rerun()
+    
+    if is_full_admin:
+        with st.expander("Νέο Έργο"):
+            with st.form("new_project_form", clear_on_submit=True):
+                p_name = st.text_input("Όνομα Έργου")
+                p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
+                if st.form_submit_button("Δημιουργία"):
+                    new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
+                    st.session_state.projects.append(new_p)
+                    db_insert('projects', new_p)
+                    st.rerun()
+    else:
+        st.info("⚠️ Έχετε πρόσβαση μόνο για προβολή στα Έργα.")
             
     for p in st.session_state.projects:
         col1, col2 = st.columns([4, 1])
         col1.write(f"**{p['name']}**")
-        if col2.button("Διαγραφή", key=p['id']):
-            st.session_state.projects = [proj for proj in st.session_state.projects if proj['id'] != p['id']]
-            db_delete('projects', 'id', p['id'], deleted_records=[p])
-            st.rerun()
+        if is_full_admin:
+            if col2.button("Διαγραφή", key=p['id']):
+                st.session_state.projects = [proj for proj in st.session_state.projects if proj['id'] != p['id']]
+                db_delete('projects', 'id', p['id'], deleted_records=[p])
+                st.rerun()
 
 # --- VIEW: EMPLOYEES ---
 elif menu == "Ομάδα Προσωπικού":
@@ -1973,22 +1988,26 @@ elif menu == "Αξιολόγηση Προσωπικού":
     with col_title:
         st.write("### 📝 Φόρμα Βαθμολόγησης")
     with col_reset:
-        if st.button("🔄 Επαναφορά Βαθμολογιών", use_container_width=True):
-            evals_to_delete = [e['id'] for e in month_evals]
-            if evals_to_delete:
-                st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
-                db_delete_in('evaluations', 'id', evals_to_delete, deleted_records=month_evals)
-            
-            # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
-            for emp in active_employee_ids:
-                if f"coop_{emp}" in st.session_state:
-                    del st.session_state[f"coop_{emp}"]
-                if f"will_{emp}" in st.session_state:
-                    del st.session_state[f"will_{emp}"]
-                if f"behav_{emp}" in st.session_state:
-                    del st.session_state[f"behav_{emp}"]
-                    
-            st.rerun()
+        if is_full_admin:
+            if st.button("🔄 Επαναφορά Βαθμολογιών", use_container_width=True):
+                evals_to_delete = [e['id'] for e in month_evals]
+                if evals_to_delete:
+                    st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
+                    db_delete_in('evaluations', 'id', evals_to_delete, deleted_records=month_evals)
+                
+                # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
+                for emp in active_employee_ids:
+                    if f"coop_{emp}" in st.session_state:
+                        del st.session_state[f"coop_{emp}"]
+                    if f"will_{emp}" in st.session_state:
+                        del st.session_state[f"will_{emp}"]
+                    if f"behav_{emp}" in st.session_state:
+                        del st.session_state[f"behav_{emp}"]
+                        
+                st.rerun()
+
+    if not is_full_admin:
+        st.info("⚠️ Έχετε δικαιώματα μόνο για ανάγνωση. Δεν μπορείτε να αποθηκεύσετε νέες αξιολογήσεις.")
 
     with st.form("evaluations_form", clear_on_submit=True):
         # Επικεφαλίδες
@@ -2001,6 +2020,8 @@ elif menu == "Αξιολόγηση Προσωπικού":
         st.markdown("---")
 
         eval_inputs = {}
+        
+        is_readonly = not is_full_admin
 
         # Εμφάνιση μόνο των Ενεργών υπαλλήλων
         for emp in active_employee_ids:
@@ -2017,9 +2038,9 @@ elif menu == "Αξιολόγηση Προσωπικού":
             c1.write(f"\n**{emp_info['name']}**")
 
             eval_inputs[emp] = {
-                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}", label_visibility="collapsed"),
-                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}", label_visibility="collapsed"),
-                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}", label_visibility="collapsed"),
+                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}", label_visibility="collapsed", disabled=is_readonly),
+                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}", label_visibility="collapsed", disabled=is_readonly),
+                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}", label_visibility="collapsed", disabled=is_readonly),
                 'existing_id': existing_eval['id'] if existing_eval else None
             }
 
@@ -2030,9 +2051,9 @@ elif menu == "Αξιολόγηση Προσωπικού":
         st.markdown("---")
         
         # Το κουμπί πιάνει όλο το πλάτος και αιωρείται!
-        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary", use_container_width=True)
+        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary", use_container_width=True, disabled=is_readonly)
 
-        if submit_eval:
+        if submit_eval and not is_readonly:
             updates_made = False
             actions = []
             
