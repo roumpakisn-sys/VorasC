@@ -171,17 +171,92 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
-def log_activity(action_type, table_name, details):
+def format_log_details(table_name, records):
+    """Μετατρέπει τα δεδομένα σε μορφή JSON (dict) σε φιλικό και ευανάγνωστο κείμενο."""
+    if not records: return "Καμία εγγραφή"
+    if isinstance(records, dict): records = [records]
+    if isinstance(records, str): return records
+    
+    lines = []
+    for r in records:
+        if not isinstance(r, dict): continue
+        
+        if table_name == 'employees':
+            lines.append(f"{r.get('name', 'Άγνωστος')}")
+            
+        elif table_name == 'projects':
+            lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
+            
+        elif table_name == 'assignments':
+            emp_id = r.get('employeeId')
+            emp_name = "Χωρίς Προσωπικό"
+            if emp_id and 'employees' in st.session_state:
+                e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
+                if e_info: emp_name = e_info['name']
+            
+            proj_id = r.get('projectId')
+            proj_name = "Άγνωστο Έργο"
+            if proj_id and 'projects' in st.session_state:
+                p_info = next((p for p in st.session_state.projects if p['id'] == proj_id), None)
+                if p_info: proj_name = p_info['name']
+                
+            d = r.get('date', '')
+            if isinstance(d, date): d = d.strftime('%d/%m/%Y')
+            elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
+            
+            lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
+            
+        elif table_name == 'leaves':
+            emp_id = r.get('employeeId')
+            emp_name = "Άγνωστος"
+            if emp_id and 'employees' in st.session_state:
+                e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
+                if e_info: emp_name = e_info['name']
+            sd = r.get('startDate', '')
+            ed = r.get('endDate', '')
+            if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
+            if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
+            lines.append(f"Άδεια: {emp_name} ({sd} - {ed})")
+            
+        elif table_name == 'evaluations':
+            emp_id = r.get('employeeId')
+            emp_name = "Άγνωστος"
+            if emp_id and 'employees' in st.session_state:
+                e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
+                if e_info: emp_name = e_info['name']
+            lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
+            
+        elif table_name == 'recurring_patterns':
+            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
+            
+        else:
+            lines.append("Εγγραφή")
+            
+    if not lines: return "Λεπτομέρειες μη διαθέσιμες"
+    if len(lines) > 5:
+        return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
+    return " | ".join(lines)
+
+
+def log_activity(action_type, table_name, details_raw):
     """Καταγράφει την ενέργεια του χρήστη στον πίνακα activity_logs"""
     if not supabase: return
     if table_name == 'activity_logs': return # Αποτροπή ατέρμονου βρόχου (infinite loop)
     
     user = st.session_state.get("current_user", "Άγνωστος")
-    detail_str = str(details)[:2000] # Περιορισμός μεγέθους για ασφάλεια
+    
+    # Μετατροπή της ώρας σε Ώρα Ελλάδος
+    try:
+        from zoneinfo import ZoneInfo
+        now_gr = datetime.now(ZoneInfo("Europe/Athens")).isoformat()
+    except Exception:
+        now_gr = (datetime.utcnow() + timedelta(hours=3)).isoformat()
+        
+    detail_str = str(details_raw)[:2000] # Περιορισμός μεγέθους για ασφάλεια
     
     log_entry = {
         "id": str(uuid.uuid4()),
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": now_gr,
         "username": user,
         "action_type": action_type,
         "table_name": table_name,
@@ -202,8 +277,9 @@ def db_insert(table, data, track=True):
                 records = data if isinstance(data, list) else [data]
                 add_transaction([{'type': 'insert', 'table': table, 'records': records}])
             
-            # Προσθήκη στο Audit Log
-            log_activity("ΠΡΟΣΘΗΚΗ", table, data)
+            # Προσθήκη στο Audit Log με τα καθαρά Ελληνικά ονόματα!
+            details_str = format_log_details(table, data)
+            log_activity("ΠΡΟΣΘΗΚΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
 
@@ -211,7 +287,7 @@ def db_delete(table, column, value, deleted_records=None, track=True):
     """Διαγράφει εγγραφές με βάση μια συνθήκη."""
     if supabase:
         try:
-            if track and not deleted_records:
+            if not deleted_records:
                 table_data = st.session_state.get(table, [])
                 deleted_records = [r for r in table_data if r.get(column) == value]
                 
@@ -222,7 +298,8 @@ def db_delete(table, column, value, deleted_records=None, track=True):
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
                 
             # Προσθήκη στο Audit Log
-            log_activity("ΔΙΑΓΡΑΦΗ", table, f"{column} = {value}")
+            details_str = format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}"
+            log_activity("ΔΙΑΓΡΑΦΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
@@ -230,7 +307,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
     """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
     if supabase and values:
         try:
-            if track and not deleted_records:
+            if not deleted_records:
                 table_data = st.session_state.get(table, [])
                 deleted_records = [r for r in table_data if r.get(column) in values]
                 
@@ -241,7 +318,8 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
                 
             # Προσθήκη στο Audit Log
-            log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, f"{column} IN {values}")
+            details_str = format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές"
+            log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
@@ -260,7 +338,8 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
                 add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
                 
             # Προσθήκη στο Audit Log
-            log_activity("ΕΝΗΜΕΡΩΣΗ", table, f"ID: {id_val} -> {new_data}")
+            details_str = format_log_details(table, new_data)
+            log_activity("ΕΝΗΜΕΡΩΣΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
@@ -2171,6 +2250,15 @@ elif menu == "Καταγραφή Κινήσεων":
         # Ταξινόμηση ώστε οι πιο πρόσφατες να βγαίνουν πρώτες
         sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
         
+        TABLE_NAMES_GR = {
+            'employees': 'Προσωπικό',
+            'projects': 'Έργα',
+            'assignments': 'Βάρδιες',
+            'leaves': 'Άδειες',
+            'recurring_patterns': 'Επαν. Εργασίες',
+            'evaluations': 'Αξιολογήσεις'
+        }
+        
         log_data = []
         for log in sorted_logs:
             # Μετατροπή Timestamp σε ευανάγνωστη μορφή
@@ -2180,11 +2268,13 @@ elif menu == "Καταγραφή Κινήσεων":
             except:
                 dt_str = log.get('timestamp', '')
                 
+            table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
+                
             log_data.append({
                 "Ημερομηνία/Ώρα": dt_str,
                 "Χρήστης": log.get('username', '-'),
                 "Ενέργεια": log.get('action_type', '-'),
-                "Πίνακας (Στοιχείο)": log.get('table_name', '-'),
+                "Πίνακας (Στοιχείο)": table_gr,
                 "Λεπτομέρειες": log.get('details', '-')
             })
         
