@@ -143,6 +143,12 @@ def fetch_all_data_from_db():
             evals = fetch_paginated("evaluations")
         except Exception:
             evals = []
+
+        # Safe fallback για την Καταγραφή Κινήσεων
+        try:
+            act_logs = fetch_paginated("activity_logs")
+        except Exception:
+            act_logs = []
                 
         return {
             "employees": emps,
@@ -150,7 +156,8 @@ def fetch_all_data_from_db():
             "assignments": assigns,
             "leaves": leaves,
             "recurring_patterns": patterns,
-            "evaluations": evals
+            "evaluations": evals,
+            "activity_logs": act_logs
         }
     except Exception as e:
         print(f"Σφάλμα ανάγνωσης από Supabase: {e}")
@@ -164,6 +171,27 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
+def log_activity(action_type, table_name, details):
+    """Καταγράφει την ενέργεια του χρήστη στον πίνακα activity_logs"""
+    if not supabase: return
+    if table_name == 'activity_logs': return # Αποτροπή ατέρμονου βρόχου (infinite loop)
+    
+    user = st.session_state.get("current_user", "Άγνωστος")
+    detail_str = str(details)[:2000] # Περιορισμός μεγέθους για ασφάλεια
+    
+    log_entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.now().isoformat(),
+        "username": user,
+        "action_type": action_type,
+        "table_name": table_name,
+        "details": detail_str
+    }
+    try:
+        supabase.table("activity_logs").insert(log_entry).execute()
+    except Exception as e:
+        print(f"Σφάλμα αποθήκευσης στο Ιστορικό (activity_logs): {e}")
+
 def db_insert(table, data, track=True):
     """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση."""
     if supabase:
@@ -173,6 +201,9 @@ def db_insert(table, data, track=True):
             if track:
                 records = data if isinstance(data, list) else [data]
                 add_transaction([{'type': 'insert', 'table': table, 'records': records}])
+            
+            # Προσθήκη στο Audit Log
+            log_activity("ΠΡΟΣΘΗΚΗ", table, data)
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
 
@@ -189,6 +220,9 @@ def db_delete(table, column, value, deleted_records=None, track=True):
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+                
+            # Προσθήκη στο Audit Log
+            log_activity("ΔΙΑΓΡΑΦΗ", table, f"{column} = {value}")
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
@@ -205,6 +239,9 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+                
+            # Προσθήκη στο Audit Log
+            log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, f"{column} IN {values}")
         except Exception as e:
             st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
@@ -221,6 +258,9 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
             
             if track and old_data:
                 add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
+                
+            # Προσθήκη στο Audit Log
+            log_activity("ΕΝΗΜΕΡΩΣΗ", table, f"ID: {id_val} -> {new_data}")
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
@@ -284,6 +324,7 @@ if db_data is not None:
     st.session_state.leaves = db_data["leaves"]
     st.session_state.recurring_patterns = db_data["recurring_patterns"]
     st.session_state.evaluations = db_data.get("evaluations", [])
+    st.session_state.activity_logs = db_data.get("activity_logs", [])
     st.session_state.is_cloud = True
 else:
     # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
@@ -303,6 +344,7 @@ else:
         st.session_state.recurring_patterns = []
         st.session_state.leaves = []
         st.session_state.evaluations = []
+        st.session_state.activity_logs = []
 
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
@@ -358,7 +400,8 @@ is_full_admin = st.session_state.get('current_user') != "Χρήστης 4"
 
 # --- Sidebar Navigation ---
 st.sidebar.title("STAFF.PRO")
-menu = st.sidebar.radio("Μενού", [
+
+menu_options = [
     "Ταμπλό Gantt", 
     "Διαχείριση Έργων", 
     "Ομάδα Προσωπικού", 
@@ -367,7 +410,13 @@ menu = st.sidebar.radio("Μενού", [
     "Επαναλαμβανόμενες Εργασίες",
     "Ώρες Εργασιών",
     "Αξιολόγηση Προσωπικού"
-])
+]
+
+# Το Μενού "Καταγραφή Κινήσεων" εμφανίζεται ΜΟΝΟ στον Admin
+if st.session_state.get('current_user') == "Admin":
+    menu_options.append("Καταγραφή Κινήσεων")
+
+menu = st.sidebar.radio("Μενού", menu_options)
 
 st.sidebar.write("---")
 
@@ -2106,3 +2155,37 @@ elif menu == "Αξιολόγηση Προσωπικού":
                 st.rerun()
             else:
                 st.info("Δεν υπήρξαν αλλαγές για αποθήκευση.")
+
+# --- VIEW: ΚΑΤΑΓΡΑΦΗ ΚΙΝΗΣΕΩΝ (ΜΟΝΟ ADMIN) ---
+elif menu == "Καταγραφή Κινήσεων":
+    st.title("📜 Καταγραφή Κινήσεων (Audit Log)")
+    st.write("Παρακολουθήστε τις ενέργειες όλων των χρηστών στο σύστημα (Δημιουργία, Ενημέρωση, Διαγραφή).")
+    
+    if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=False):
+        fetch_all_data_from_db.clear()
+        st.rerun()
+
+    if not st.session_state.activity_logs:
+        st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
+    else:
+        # Ταξινόμηση ώστε οι πιο πρόσφατες να βγαίνουν πρώτες
+        sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        log_data = []
+        for log in sorted_logs:
+            # Μετατροπή Timestamp σε ευανάγνωστη μορφή
+            try:
+                dt_obj = datetime.fromisoformat(log.get('timestamp', ''))
+                dt_str = dt_obj.strftime("%d/%m/%Y %H:%M:%S")
+            except:
+                dt_str = log.get('timestamp', '')
+                
+            log_data.append({
+                "Ημερομηνία/Ώρα": dt_str,
+                "Χρήστης": log.get('username', '-'),
+                "Ενέργεια": log.get('action_type', '-'),
+                "Πίνακας (Στοιχείο)": log.get('table_name', '-'),
+                "Λεπτομέρειες": log.get('details', '-')
+            })
+        
+        st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
