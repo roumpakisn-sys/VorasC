@@ -7,6 +7,8 @@ import calendar
 import io
 import time
 import copy
+import ast
+import re
 
 try:
     from supabase import create_client
@@ -237,6 +239,19 @@ def format_log_details(table_name, records):
         return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
     return " | ".join(lines)
 
+def parse_old_log_details(table_name, details_str):
+    """Παίρνει παλιές ακατέργαστες εγγραφές (raw dict/list strings) από τη βάση και τις μετατρέπει σε φιλικό κείμενο δυναμικά."""
+    if not isinstance(details_str, str): return details_str
+    if not (details_str.startswith("[{") or details_str.startswith("{")): return details_str
+    
+    try:
+        # Αντικαθιστούμε τα datetime.date(Y, M, D) με απλά strings μορφής 'D/M/Y' για να περάσουν από την eval
+        clean_str = re.sub(r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)", r"'\3/\2/\1'", details_str)
+        parsed_data = ast.literal_eval(clean_str)
+        return format_log_details(table_name, parsed_data)
+    except Exception:
+        # Αν αποτύχει η μετατροπή, επέστρεψε απλά την παλιά μορφή
+        return details_str
 
 def log_activity(action_type, table_name, details_raw):
     """Καταγράφει την ενέργεια του χρήστη στον πίνακα activity_logs"""
@@ -2240,9 +2255,25 @@ elif menu == "Καταγραφή Κινήσεων":
     st.title("📜 Καταγραφή Κινήσεων (Audit Log)")
     st.write("Παρακολουθήστε τις ενέργειες όλων των χρηστών στο σύστημα (Δημιουργία, Ενημέρωση, Διαγραφή).")
     
-    if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=False):
-        fetch_all_data_from_db.clear()
-        st.rerun()
+    col_b1, col_b2 = st.columns([1, 4])
+    with col_b1:
+        if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True):
+            fetch_all_data_from_db.clear()
+            st.rerun()
+    with col_b2:
+        if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
+            if supabase and st.session_state.activity_logs:
+                try:
+                    log_ids = [l['id'] for l in st.session_state.activity_logs]
+                    chunk_size = 500
+                    for i in range(0, len(log_ids), chunk_size):
+                        supabase.table('activity_logs').delete().in_('id', log_ids[i:i+chunk_size]).execute()
+                    fetch_all_data_from_db.clear()
+                    st.success("Το ιστορικό καθαρίστηκε!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Σφάλμα καθαρισμού: {e}")
 
     if not st.session_state.activity_logs:
         st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
@@ -2269,13 +2300,16 @@ elif menu == "Καταγραφή Κινήσεων":
                 dt_str = log.get('timestamp', '')
                 
             table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
+            
+            # Εφαρμογή του νέου "έξυπνου" μεταφραστή για παλιά δεδομένα
+            details_safe = parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
                 
             log_data.append({
                 "Ημερομηνία/Ώρα": dt_str,
                 "Χρήστης": log.get('username', '-'),
                 "Ενέργεια": log.get('action_type', '-'),
                 "Πίνακας (Στοιχείο)": table_gr,
-                "Λεπτομέρειες": log.get('details', '-')
+                "Λεπτομέρειες": details_safe
             })
         
         st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
