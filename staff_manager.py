@@ -20,22 +20,32 @@ st.set_page_config(page_title="Staff Manager Pro", layout="wide")
 # --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
 
 if not st.session_state.authenticated:
     st.markdown("<h1 style='text-align: center; margin-top: 10vh;'>🔒 Staff Manager Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ εισάγετε τον κωδικό πρόσβασης για να συνεχίσετε.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ επιλέξτε χρήστη και εισάγετε τον κωδικό πρόσβασης.</p>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
+            username = st.selectbox("Χρήστης", ["Admin", "Χρήστης 1", "Χρήστης 2", "Χρήστης 3"])
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # Έλεγχος κωδικού (Από secrets ή προεπιλογή το admin123)
-                correct_password = st.secrets.get("APP_PASSWORD", "admin123")
-                if password == correct_password:
+                # Έλεγχος κωδικών για κάθε χρήστη (Από secrets ή προεπιλεγμένοι)
+                valid_passwords = {
+                    "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
+                    "Χρήστης 1": st.secrets.get("USER1_PASSWORD", "pass1"),
+                    "Χρήστης 2": st.secrets.get("USER2_PASSWORD", "pass2"),
+                    "Χρήστης 3": st.secrets.get("USER3_PASSWORD", "pass3")
+                }
+                
+                if password == valid_passwords.get(username):
                     st.session_state.authenticated = True
+                    st.session_state.current_user = username
                     st.rerun()
                 else:
                     st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
@@ -387,8 +397,10 @@ else:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
 
 st.sidebar.write("---")
+st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
 if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
     st.session_state.authenticated = False
+    st.session_state.current_user = None
     st.rerun()
 
 # --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ (Για τις φόρμες επιλογής) ---
