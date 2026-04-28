@@ -9,6 +9,7 @@ import time
 import copy
 import ast
 import re
+import textwrap
 
 try:
     from supabase import create_client
@@ -707,16 +708,22 @@ if menu == "Ταμπλό Gantt":
             proj_name = g['Project'].upper()
             times_str = f"{g['StartTime']}-{g['EndTime']}"
             
+            # Δημιουργία του βασικού κειμένου
+            base_text = f"{times_str} {proj_name} // {emps_str}"
+            if g['Notes']:
+                base_text += f" ({g['Notes'].upper()})"
+                
+            # Αυτόματη αναδίπλωση κειμένου ανά 45 χαρακτήρες (για να μη χάνεται σε μεγάλες βάρδιες)
+            wrapped_base = "<br>".join(textwrap.wrap(base_text, width=45))
+            
             # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
             if g['is_cancelled']:
-                label_text = f"<s>{times_str} {proj_name} // {emps_str}</s>"
+                label_text = f"<s>{wrapped_base}</s>"
                 if g['cancel_reason']:
-                    label_text += f" <span style='color:#dc2626;'><b>[{g['cancel_reason'].upper()}]</b></span>"
+                    wrapped_reason = "<br>".join(textwrap.wrap(f"[{g['cancel_reason'].upper()}]", width=45))
+                    label_text += f"<br><span style='color:#dc2626;'><b>{wrapped_reason}</b></span>"
             else:
-                label_text = f"{times_str} {proj_name} // {emps_str}"
-                
-            if g['Notes']:
-                label_text += f" ({g['Notes'].upper()})"
+                label_text = wrapped_base
                 
             data.append({
                 'Y_Axis': row_id,
@@ -783,7 +790,8 @@ if menu == "Ταμπλό Gantt":
         marker=dict(line=dict(color='black', width=1))
     )
     
-    dynamic_height = max(500, len(y_category_order) * 60 + 100)
+    # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 85px (αντί για 60) για να χωράνε οι έξτρα γραμμές αναδίπλωσης
+    dynamic_height = max(600, len(y_category_order) * 85 + 100)
     
     fig.update_layout(
         showlegend=False, 
