@@ -219,7 +219,14 @@ def format_log_details(table_name, records):
             ed = r.get('endDate', '')
             if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
             if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
-            lines.append(f"Άδεια: {emp_name} ({sd} - {ed})")
+            
+            sub_str = ""
+            sub_id = r.get('substituteId')
+            if sub_id:
+                sub_name = next((e['name'] for e in st.session_state.employees if e['id'] == sub_id), "Άγνωστος")
+                sub_str = f" [Αντικατ: {sub_name}]"
+                
+            lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
             
         elif table_name == 'evaluations':
             emp_id = r.get('employeeId')
@@ -1902,11 +1909,17 @@ elif menu == "Άδειες":
         l_start = st.date_input("Από")
         l_end = st.date_input("Έως")
         
+        # Προαιρετική επιλογή αντικαταστάτη
+        l_sub_emp = st.selectbox("Αντικαταστάτης (Προαιρετικό)", options=[""] + active_employee_ids, 
+                                 format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
+        
         if st.form_submit_button("Καταχώρηση Άδειας"):
             if not l_emp:
                 st.error("Παρακαλώ επιλέξτε υπάλληλο.")
             elif l_start > l_end:
                 st.error("Η ημερομηνία 'Από' πρέπει να είναι πριν ή ίση με την 'Έως'.")
+            elif l_emp == l_sub_emp:
+                st.error("Ο αντικαταστάτης δεν μπορεί να είναι το ίδιο πρόσωπο με αυτόν που παίρνει άδεια.")
             else:
                 # Έλεγχος αν ο υπάλληλος εργάζεται ήδη κάποια από τις μέρες της άδειας
                 conflict_errors = []
@@ -1925,7 +1938,13 @@ elif menu == "Άδειες":
                     for err in conflict_errors:
                         st.error(err)
                 else:
-                    new_l = {'id': str(uuid.uuid4()), 'employeeId': l_emp, 'startDate': l_start, 'endDate': l_end}
+                    new_l = {
+                        'id': str(uuid.uuid4()), 
+                        'employeeId': l_emp, 
+                        'startDate': l_start, 
+                        'endDate': l_end,
+                        'substituteId': l_sub_emp if l_sub_emp else None
+                    }
                     st.session_state.leaves.append(new_l)
                     db_insert('leaves', new_l)
                     st.success("Η άδεια καταχωρήθηκε με επιτυχία!")
@@ -1935,20 +1954,26 @@ elif menu == "Άδειες":
         st.write("### Λίστα Αδειών")
         
         # Επικεφαλίδες Στηλών
-        hc1, hc2, hc3, hc4 = st.columns([3, 2, 2, 1])
+        hc1, hc2, hc3, hc4, hc5 = st.columns([2.5, 2, 2, 2.5, 1])
         hc1.write("**Υπάλληλος**")
         hc2.write("**Από**")
         hc3.write("**Έως**")
-        hc4.write("")
+        hc4.write("**Αντικαταστάτης**")
+        hc5.write("")
         st.divider()
         
         # Δεδομένα
         for l in st.session_state.leaves:
-            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            col1, col2, col3, col4, col5 = st.columns([2.5, 2, 2, 2.5, 1])
             col1.write(get_employee_name(l['employeeId']))
             col2.write(l['startDate'].strftime('%d/%m/%Y'))
             col3.write(l['endDate'].strftime('%d/%m/%Y'))
-            if col4.button("❌", key=f"del_leave_{l['id']}"):
+            
+            # Εμφάνιση του Αντικαταστάτη εάν υπάρχει
+            sub_name = get_employee_name(l.get('substituteId')) if l.get('substituteId') else "-"
+            col4.write(sub_name)
+            
+            if col5.button("❌", key=f"del_leave_{l['id']}"):
                 st.session_state.leaves = [leave for leave in st.session_state.leaves if leave['id'] != l['id']]
                 db_delete('leaves', 'id', l['id'], deleted_records=[l])
                 st.rerun()
