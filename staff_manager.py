@@ -91,80 +91,97 @@ def init_supabase():
 
 supabase = init_supabase()
 
-@st.cache_data(ttl=15)
-def fetch_all_data_from_db():
-    """
-    Αντλεί όλα τα δεδομένα από το Supabase. 
-    Χρησιμοποιεί Pagination (σελιδοποίηση) για να παρακάμψει τον περιορισμό των 1000 γραμμών του Supabase
-    και να κατεβάσει ΟΛΕΣ τις βάρδιες, ανεξάρτητα από το πόσες είναι.
-    """
+# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING (Micro-Caching) ---
+# Αντί να τα κατεβάζουμε όλα μαζί, τα χωρίζουμε ανά πίνακα.
+# Έτσι, όταν αλλάζει κάτι στο Προσωπικό, ανανεώνεται ΜΟΝΟ το Προσωπικό.
+CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη για ασύλληπτη ταχύτητα στην πλοήγηση
+
+def fetch_paginated(table):
     if not supabase:
-        return None
-        
-    def fetch_paginated(table):
-        all_rows = []
-        offset = 0
-        limit = 1000
-        while True:
-            try:
-                # Το Supabase range() περιλαμβάνει και το start και το end (γι' αυτό offset + limit - 1)
-                data = supabase.table(table).select("*").range(offset, offset + limit - 1).execute().data
-                if data:
-                    all_rows.extend(data)
-                if not data or len(data) < limit:
-                    break
-                offset += limit
-            except Exception as e:
-                print(f"Σφάλμα ανάγνωσης από τον πίνακα {table}: {e}")
+        return []
+    all_rows = []
+    offset = 0
+    limit = 1000
+    while True:
+        try:
+            data = supabase.table(table).select("*").range(offset, offset + limit - 1).execute().data
+            if data:
+                all_rows.extend(data)
+            if not data or len(data) < limit:
                 break
-        return all_rows
+            offset += limit
+        except Exception as e:
+            print(f"Σφάλμα ανάγνωσης από τον πίνακα {table}: {e}")
+            break
+    return all_rows
 
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_employees():
+    return fetch_paginated("employees")
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_projects():
+    return fetch_paginated("projects")
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_assignments():
+    assigns = fetch_paginated("assignments")
+    for a in assigns:
+        if isinstance(a.get('date'), str):
+            a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+    return assigns
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_leaves():
+    leaves = fetch_paginated("leaves")
+    for l in leaves:
+        if isinstance(l.get('startDate'), str):
+            l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
+        if isinstance(l.get('endDate'), str):
+            l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+    return leaves
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_patterns():
+    patterns = fetch_paginated("recurring_patterns")
+    for p in patterns:
+        if isinstance(p.get('startDate'), str):
+            p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
+    return patterns
+
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_evaluations():
     try:
-        emps = fetch_paginated("employees")
-        projs = fetch_paginated("projects")
-        
-        assigns = fetch_paginated("assignments")
-        for a in assigns:
-            if isinstance(a.get('date'), str):
-                # Ασφαλής μετατροπή ακόμα κι αν επιστραφεί time part
-                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-                
-        leaves = fetch_paginated("leaves")
-        for l in leaves:
-            if isinstance(l.get('startDate'), str):
-                l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-            if isinstance(l.get('endDate'), str):
-                l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-                
-        patterns = fetch_paginated("recurring_patterns")
-        for p in patterns:
-            if isinstance(p.get('startDate'), str):
-                p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-                
-        # Safe fallback για τις Αξιολογήσεις, σε περίπτωση που δεν έχει δημιουργηθεί ακόμα ο πίνακας
-        try:
-            evals = fetch_paginated("evaluations")
-        except Exception:
-            evals = []
+        return fetch_paginated("evaluations")
+    except Exception:
+        return []
 
-        # Safe fallback για την Καταγραφή Κινήσεων
-        try:
-            act_logs = fetch_paginated("activity_logs")
-        except Exception:
-            act_logs = []
-                
-        return {
-            "employees": emps,
-            "projects": projs,
-            "assignments": assigns,
-            "leaves": leaves,
-            "recurring_patterns": patterns,
-            "evaluations": evals,
-            "activity_logs": act_logs
-        }
-    except Exception as e:
-        print(f"Σφάλμα ανάγνωσης από Supabase: {e}")
-        return None
+@st.cache_data(ttl=CACHE_TTL)
+def fetch_table_activity_logs():
+    try:
+        return fetch_paginated("activity_logs")
+    except Exception:
+        return []
+
+def clear_cache_for_table(table):
+    """Καθαρίζει τη μνήμη ΜΟΝΟ για τον πίνακα που μόλις τροποποιήθηκε"""
+    if table == "employees": fetch_table_employees.clear()
+    elif table == "projects": fetch_table_projects.clear()
+    elif table == "assignments": fetch_table_assignments.clear()
+    elif table == "leaves": fetch_table_leaves.clear()
+    elif table == "recurring_patterns": fetch_table_patterns.clear()
+    elif table == "evaluations": fetch_table_evaluations.clear()
+    elif table == "activity_logs": fetch_table_activity_logs.clear()
+
+def clear_all_caches():
+    """Εξαναγκάζει καθαρισμό σε όλους τους πίνακες (για το κουμπί Ανανέωσης)"""
+    fetch_table_employees.clear()
+    fetch_table_projects.clear()
+    fetch_table_assignments.clear()
+    fetch_table_leaves.clear()
+    fetch_table_patterns.clear()
+    fetch_table_evaluations.clear()
+    fetch_table_activity_logs.clear()
 
 def serialize_dates(data):
     """Μετατρέπει τα ημερολογιακά objects σε string για να μπουν σωστά στη βάση (Supabase/JSON)."""
@@ -287,6 +304,7 @@ def log_activity(action_type, table_name, details_raw):
     }
     try:
         supabase.table("activity_logs").insert(log_entry).execute()
+        clear_cache_for_table("activity_logs")
     except Exception as e:
         print(f"Σφάλμα αποθήκευσης στο Ιστορικό (activity_logs): {e}")
 
@@ -295,7 +313,7 @@ def db_insert(table, data, track=True):
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
-            fetch_all_data_from_db.clear()
+            clear_cache_for_table(table)
             if track:
                 records = data if isinstance(data, list) else [data]
                 add_transaction([{'type': 'insert', 'table': table, 'records': records}])
@@ -315,7 +333,7 @@ def db_delete(table, column, value, deleted_records=None, track=True):
                 deleted_records = [r for r in table_data if r.get(column) == value]
                 
             supabase.table(table).delete().eq(column, value).execute()
-            fetch_all_data_from_db.clear()
+            clear_cache_for_table(table)
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
@@ -335,7 +353,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 deleted_records = [r for r in table_data if r.get(column) in values]
                 
             supabase.table(table).delete().in_(column, values).execute()
-            fetch_all_data_from_db.clear()
+            clear_cache_for_table(table)
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
@@ -355,7 +373,7 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
                 old_data = next((r for r in table_data if r.get('id') == id_val), None)
                 
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
-            fetch_all_data_from_db.clear()
+            clear_cache_for_table(table)
             
             if track and old_data:
                 add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
@@ -382,7 +400,7 @@ def perform_undo():
             for old_r in act['old_records']:
                 db_update(act['table'], old_r['id'], old_r, track=False)
     
-    fetch_all_data_from_db.clear()
+    clear_all_caches()
 
 def perform_redo():
     """Εκτελεί επανάληψη της τελευταίας αναιρεμένης συναλλαγής."""
@@ -400,7 +418,7 @@ def perform_redo():
             for new_r in act['new_records']:
                 db_update(act['table'], new_r['id'], new_r, track=False)
                 
-    fetch_all_data_from_db.clear()
+    clear_all_caches()
 
 # --- 10 Βασικά Χρώματα ---
 BASIC_COLORS = {
@@ -417,16 +435,14 @@ BASIC_COLORS = {
 }
 
 # --- Συνεχής Φόρτωση Δεδομένων (Real-time Sync Logic) ---
-db_data = fetch_all_data_from_db()
-
-if db_data is not None:
-    st.session_state.employees = db_data["employees"]
-    st.session_state.projects = db_data["projects"]
-    st.session_state.assignments = db_data["assignments"]
-    st.session_state.leaves = db_data["leaves"]
-    st.session_state.recurring_patterns = db_data["recurring_patterns"]
-    st.session_state.evaluations = db_data.get("evaluations", [])
-    st.session_state.activity_logs = db_data.get("activity_logs", [])
+if supabase:
+    st.session_state.employees = fetch_table_employees()
+    st.session_state.projects = fetch_table_projects()
+    st.session_state.assignments = fetch_table_assignments()
+    st.session_state.leaves = fetch_table_leaves()
+    st.session_state.recurring_patterns = fetch_table_patterns()
+    st.session_state.evaluations = fetch_table_evaluations()
+    st.session_state.activity_logs = fetch_table_activity_logs()
     st.session_state.is_cloud = True
 else:
     # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
@@ -538,9 +554,9 @@ st.sidebar.subheader("Κατάσταση Συστήματος")
 
 # Διαγνωστικός Έλεγχος & Έλεγχος Αποσύνδεσης
 if st.session_state.get('is_cloud'):
-    st.sidebar.success("✅ Cloud Sync (Ανανέωση 15s)")
+    st.sidebar.success(f"✅ Cloud Sync (Ανανέωση {CACHE_TTL}s)")
     if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-        fetch_all_data_from_db.clear()
+        clear_all_caches()
         st.rerun()
 else:
     st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
