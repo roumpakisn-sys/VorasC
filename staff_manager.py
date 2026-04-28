@@ -607,14 +607,18 @@ if menu == "Ταμπλό Gantt":
                 sub_id = l.get('substituteId')
                 if sub_id:
                     sub_n = get_employee_name(sub_id)
-                    leaves_today.append(f"{emp_n} [ΠΡΟΤΕΙΝΟΜΕΝΟΣ ΑΝΤΙΚΑΤΑΣΤΑΤΗΣ: {sub_n}]")
+                    leaves_today.append(f"<b>{emp_n}</b><br>[ΠΡΟΤΕΙΝΟΜΕΝΟΣ ΑΝΤΙΚΑΤΑΣΤΑΤΗΣ: <b>{sub_n}</b>]")
                 else:
-                    leaves_today.append(emp_n)
+                    leaves_today.append(f"<b>{emp_n}</b>")
                     
-        leaves_str = ", ".join(leaves_today) if leaves_today else "Καμία"
+        # Διαχωρισμός πολλαπλών αδειών με αλλαγή γραμμής (<br>) αντί για κόμμα
+        leaves_str = "<br><br>".join(leaves_today) if leaves_today else "Καμία"
         
         # Η βασική ετικέτα του άξονα Y για αυτή τη μέρα
-        base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
+        if leaves_today:
+            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
+        else:
+            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
         
         day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_date]
         
