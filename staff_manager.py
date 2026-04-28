@@ -558,8 +558,8 @@ active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('sta
 if menu == "Ταμπλό Gantt":
     st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
     
-    # Μενού πλοήγησης εβδομάδων
-    col_nav1, col_date, col_nav2, col_space, col_pres = st.columns([1, 2, 1, 0.5, 3])
+    # Μενού πλοήγησης εβδομάδων με Προσθήκη επιλογέα ZOOM
+    col_nav1, col_date, col_nav2, col_space, col_zoom, col_pres = st.columns([1, 2, 1, 0.5, 2, 2.5])
     with col_nav1:
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
@@ -569,10 +569,14 @@ if menu == "Ταμπλό Gantt":
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
+    with col_zoom:
+        zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
     with col_pres:
         st.write("")
         st.write("")
         presentation_mode = st.checkbox("🖥️ Λειτουργία Πλήρους Προβολής")
+        
+    zoom_factor = zoom_level / 100.0
     
     data = []
     export_data = [] # Λίστα για τα δεδομένα που θα εξαχθούν στο Excel
@@ -783,15 +787,18 @@ if menu == "Ταμπλό Gantt":
     )
     
     # --- EXCEL STYLING & BORDERS ---
+    base_font_size = 11 if not presentation_mode else 12
+    scaled_font_size = max(8, int(base_font_size * zoom_factor))
+    
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
-        textfont=dict(color='black', size=11 if not presentation_mode else 12, family="Arial Black, Arial, sans-serif"),
+        textfont=dict(color='black', size=scaled_font_size, family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1))
     )
     
-    # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 85px (αντί για 60) για να χωράνε οι έξτρα γραμμές αναδίπλωσης
-    dynamic_height = max(600, len(y_category_order) * 85 + 100)
+    # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 85px * zoom_factor για να προσαρμόζεται στο zoom
+    dynamic_height = max(500, int(len(y_category_order) * 85 * zoom_factor) + 100)
     
     fig.update_layout(
         showlegend=False, 
@@ -810,13 +817,13 @@ if menu == "Ταμπλό Gantt":
             gridwidth=1,
             range=[day_start, day_end],
             title="",
-            tickfont=dict(size=11, color="black", family="Arial"),
+            tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
             fixedrange=False,
             rangeslider=dict(visible=True, thickness=0.04, bgcolor="#e2e8f0") # Εμφάνιση μπάρας κύλισης
         ),
         yaxis=dict(
             title="",
-            tickfont=dict(size=12, color="black"),
+            tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"),
             fixedrange=False
         ),
         dragmode="pan"
