@@ -764,17 +764,9 @@ if menu == "Ταμπλό Gantt":
             # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
             duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
             
-            # Χαλαρώνουμε πολύ το wrap για να μην κάνει περιττές αλλαγές γραμμής όταν έχει χώρο
-            if duration_hours < 1.5:
-                wrap_w = 20
-            elif duration_hours < 2.0:
-                wrap_w = 30
-            elif duration_hours < 4.0:
-                wrap_w = 60
-            elif duration_hours < 6.0:
-                wrap_w = 90
-            else:
-                wrap_w = 150
+            # Αυστηρός υπολογισμός χαρακτήρων ανάλογα με τη διάρκεια (περίπου 16 χαρακτήρες ανά ώρα)
+            # για να εξασφαλίσουμε ότι το κείμενο θα κάνει αναδίπλωση ΠΡΙΝ αναγκαστεί να μικρύνει η γραμματοσειρά.
+            wrap_w = max(15, int(duration_hours * 16))
 
             # Αυτόματη αναδίπλωση κειμένου δυναμικά
             wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -854,6 +846,7 @@ if menu == "Ταμπλό Gantt":
         textposition='inside', 
         insidetextanchor='middle',
         textfont=dict(color='black', size=scaled_font_size, family="Arial Black, Arial, sans-serif"),
+        insidetextfont=dict(color='black', size=scaled_font_size, family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1)),
         textangle=0 # Διασφαλίζει ότι το κείμενο παραμένει πάντα οριζόντιο
     )
