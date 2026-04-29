@@ -796,9 +796,11 @@ if menu == "Ταμπλό Gantt":
         
     df = pd.DataFrame(data)
     
-    # Σταθερά όρια άξονα Χ (από 07:00 το πρωί έως 23:00 το βράδυ)
-    day_start = datetime(1970, 1, 1, 7, 0)
-    day_end = datetime(1970, 1, 1, 23, 0)
+    # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 15:00 το μεσημέρι)
+    # Ο χρήστης μπορεί να κάνει scroll/pan για να δει και τις υπόλοιπες ώρες.
+    view_start = datetime(1970, 1, 1, 6, 0)
+    view_end = datetime(1970, 1, 1, 15, 0)
+    tick_start = datetime(1970, 1, 1, 0, 0) # Σταθερό σημείο αναφοράς για τα ticks
     
     # Σχεδιασμός Γραφήματος
     fig = px.timeline(
@@ -846,13 +848,13 @@ if menu == "Ταμπλό Gantt":
         xaxis=dict(
             side='top', 
             tickmode='linear',
-            tick0=day_start,
+            tick0=tick_start,
             dtick=1800000, # Κάθε 30 λεπτά
             tickformat="%H:%M",
             showgrid=True,
             gridcolor='#a8c8c0',
             gridwidth=1,
-            range=[day_start, day_end],
+            range=[view_start, view_end],
             title="",
             tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
             fixedrange=False,
