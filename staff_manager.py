@@ -861,9 +861,9 @@ if menu == "Ταμπλό Gantt":
     # ΜΕΙΩΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 90px * zoom_factor (επειδή οι μπάρες θα εφάπτονται)
     dynamic_height = max(500, int(len(y_category_order) * 90 * zoom_factor) + 100)
     
-    # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 15:00 το μεσημέρι)
+    # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 17:00 το απόγευμα)
     view_start = datetime(1970, 1, 1, 6, 0)
-    view_end = datetime(1970, 1, 1, 15, 0)
+    view_end = datetime(1970, 1, 1, 17, 0)
     tick_start = datetime(1970, 1, 1, 0, 0) # Σταθερό σημείο αναφοράς για τα ticks
     
     fig.update_layout(
