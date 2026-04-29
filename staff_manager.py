@@ -619,11 +619,18 @@ if menu == "Ταμπλό Gantt":
         leaves_today = []
         for l in st.session_state.leaves:
             if l['startDate'] <= curr_date <= l['endDate']:
-                emp_n = get_employee_name(l['employeeId'])
+                emp_full = get_employee_name(l['employeeId'])
+                # Συντόμευση Ονόματος: π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.
+                emp_parts = emp_full.split()
+                emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
+                
                 sub_id = l.get('substituteId')
                 if sub_id:
-                    sub_n = get_employee_name(sub_id)
-                    leaves_today.append(f"<b>{emp_n}</b><br>[ΠΡΟΤΕΙΝΟΜΕΝΟΣ ΑΝΤΙΚΑΤΑΣΤΑΤΗΣ: <b>{sub_n}</b>]")
+                    sub_full = get_employee_name(sub_id)
+                    sub_parts = sub_full.split()
+                    sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
+                    
+                    leaves_today.append(f"<b>{emp_n}</b><br><span style='font-size:10px; color:#991b1b;'>↳ Αντικατ: <b>{sub_n}</b></span>")
                 else:
                     leaves_today.append(f"<b>{emp_n}</b>")
                     
