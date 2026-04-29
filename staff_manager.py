@@ -763,12 +763,18 @@ if menu == "Ταμπλό Gantt":
                 
             # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
             duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-            if duration_hours <= 2.0:
+            
+            # Χαλαρώνουμε πολύ το wrap για να μην κάνει περιττές αλλαγές γραμμής όταν έχει χώρο
+            if duration_hours < 1.5:
                 wrap_w = 20
-            elif duration_hours <= 4.0:
+            elif duration_hours < 2.0:
                 wrap_w = 30
+            elif duration_hours < 4.0:
+                wrap_w = 60
+            elif duration_hours < 6.0:
+                wrap_w = 90
             else:
-                wrap_w = 50
+                wrap_w = 150
 
             # Αυτόματη αναδίπλωση κειμένου δυναμικά
             wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
