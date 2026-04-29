@@ -1885,10 +1885,23 @@ elif menu == "Ομάδα Προσωπικού":
     with tab_list:
         st.write("### Συνολική Λίστα Υπαλλήλων")
         
+        # --- Προσθήκη Μπάρας Αναζήτησης ---
+        search_query = st.text_input("🔍 Αναζήτηση", placeholder="Ψάξε με Όνομα, Θέση, Ταυτότητα ή Τηλέφωνο...", key="emp_search_bar")
+        
+        # Φιλτράρισμα λίστας βάσει αναζήτησης
+        filtered_emps = st.session_state.employees
+        if search_query:
+            q = search_query.strip().lower()
+            filtered_emps = [e for e in st.session_state.employees if 
+                             q in str(e.get('name', '')).lower() or 
+                             q in str(e.get('position', '')).lower() or 
+                             q in str(e.get('id_number', '')).lower() or 
+                             q in str(e.get('phone', '')).lower()]
+        
         with st.expander("🗑️ Μαζική Διαγραφή"):
             emps_to_delete = st.multiselect(
-                "Επιλέξτε τους υπαλλήλους που θέλετε να διαγράψετε:",
-                options=[e['id'] for e in st.session_state.employees],
+                "Επιλέξτε τους υπαλλήλους που θέλετε να διαγράψετε (εμφανίζονται τα αποτελέσματα αναζήτησης):",
+                options=[e['id'] for e in filtered_emps],
                 format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"),
                 key="bulk_delete_emps"
             )
@@ -1903,32 +1916,35 @@ elif menu == "Ομάδα Προσωπικού":
         
         st.divider()
         
-        # Επικεφαλίδες Στηλών
-        hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2, 2, 2, 1.5, 1])
-        hc1.write("**Ονοματεπώνυμο**")
-        hc2.write("**Θέση**")
-        hc3.write("**Αρ. Ταυτότητας**")
-        hc4.write("**Κινητό**")
-        hc5.write("**Κατάσταση**")
-        hc6.write("")
-        st.divider()
-        
-        # Δεδομένα
-        for e in st.session_state.employees:
-            col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1.5, 1])
-            col1.write(e['name'])
-            col2.write(f"*{e['position']}*")
-            col3.write(e.get('id_number') or '-')
-            col4.write(e.get('phone') or '-')
+        if not filtered_emps:
+            st.info("Δεν βρέθηκαν υπάλληλοι που να ταιριάζουν στα κριτήρια αναζήτησης.")
+        else:
+            # Επικεφαλίδες Στηλών
+            hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2, 2, 2, 1.5, 1])
+            hc1.write("**Ονοματεπώνυμο**")
+            hc2.write("**Θέση**")
+            hc3.write("**Αρ. Ταυτότητας**")
+            hc4.write("**Κινητό**")
+            hc5.write("**Κατάσταση**")
+            hc6.write("")
+            st.divider()
             
-            status_val = e.get('status', 'Ενεργός')
-            status_color = "#16a34a" if status_val == 'Ενεργός' else "#dc2626"
-            col5.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{status_val}</span>", unsafe_allow_html=True)
-            
-            if col6.button("❌", key=f"del_emp_{e['id']}"):
-                st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] != e['id']]
-                db_delete('employees', 'id', e['id'], deleted_records=[e])
-                st.rerun()
+            # Δεδομένα
+            for e in filtered_emps:
+                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1.5, 1])
+                col1.write(e['name'])
+                col2.write(f"*{e['position']}*")
+                col3.write(e.get('id_number') or '-')
+                col4.write(e.get('phone') or '-')
+                
+                status_val = e.get('status', 'Ενεργός')
+                status_color = "#16a34a" if status_val == 'Ενεργός' else "#dc2626"
+                col5.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{status_val}</span>", unsafe_allow_html=True)
+                
+                if col6.button("❌", key=f"del_emp_{e['id']}"):
+                    st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] != e['id']]
+                    db_delete('employees', 'id', e['id'], deleted_records=[e])
+                    st.rerun()
 
 # --- VIEW: LEAVES ---
 elif menu == "Άδειες":
