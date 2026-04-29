@@ -2337,19 +2337,19 @@ elif menu == "Αξιολόγηση Προσωπικού":
                 
                 # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
                 for emp in active_employee_ids:
-                    if f"coop_{emp}" in st.session_state:
-                        del st.session_state[f"coop_{emp}"]
-                    if f"will_{emp}" in st.session_state:
-                        del st.session_state[f"will_{emp}"]
-                    if f"behav_{emp}" in st.session_state:
-                        del st.session_state[f"behav_{emp}"]
+                    k_c = f"coop_{emp}_{eval_month}_{eval_year}"
+                    k_w = f"will_{emp}_{eval_month}_{eval_year}"
+                    k_b = f"behav_{emp}_{eval_month}_{eval_year}"
+                    if k_c in st.session_state: del st.session_state[k_c]
+                    if k_w in st.session_state: del st.session_state[k_w]
+                    if k_b in st.session_state: del st.session_state[k_b]
                         
                 st.rerun()
 
     if not is_full_admin:
         st.info("⚠️ Έχετε δικαιώματα μόνο για ανάγνωση. Δεν μπορείτε να αποθηκεύσετε νέες αξιολογήσεις.")
 
-    with st.form("evaluations_form", clear_on_submit=True):
+    with st.form("evaluations_form"):
         # Επικεφαλίδες
         hc1, hc2, hc3, hc4, hc5 = st.columns([2, 1.5, 1.5, 1.5, 1])
         hc1.write("**Ονοματεπώνυμο**")
@@ -2378,9 +2378,9 @@ elif menu == "Αξιολόγηση Προσωπικού":
             c1.write(f"\n**{emp_info['name']}**")
 
             eval_inputs[emp] = {
-                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}", label_visibility="collapsed", disabled=is_readonly),
-                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}", label_visibility="collapsed", disabled=is_readonly),
-                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}", label_visibility="collapsed", disabled=is_readonly),
+                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
+                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
+                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
                 'existing_id': existing_eval['id'] if existing_eval else None
             }
 
