@@ -754,16 +754,14 @@ if menu == "Ταμπλό Gantt":
             if g['Notes']:
                 base_text += f" ({g['Notes'].upper()})"
                 
-            # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (μικρότερη βάρδια = πιο συχνό wrap)
+            # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
             duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-            if duration_hours <= 1.5:
-                wrap_w = 15
-            elif duration_hours <= 3.0:
-                wrap_w = 25
-            elif duration_hours <= 5.0:
-                wrap_w = 35
+            if duration_hours <= 2.0:
+                wrap_w = 20
+            elif duration_hours <= 4.0:
+                wrap_w = 30
             else:
-                wrap_w = 45
+                wrap_w = 50
 
             # Αυτόματη αναδίπλωση κειμένου δυναμικά
             wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -807,11 +805,9 @@ if menu == "Ταμπλό Gantt":
         
     df = pd.DataFrame(data)
     
-    # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 15:00 το μεσημέρι)
-    # Ο χρήστης μπορεί να κάνει scroll/pan για να δει και τις υπόλοιπες ώρες.
-    view_start = datetime(1970, 1, 1, 6, 0)
-    view_end = datetime(1970, 1, 1, 15, 0)
-    tick_start = datetime(1970, 1, 1, 0, 0) # Σταθερό σημείο αναφοράς για τα ticks
+    # Σταθερά όρια άξονα Χ (από 07:00 το πρωί έως 23:00 το βράδυ)
+    day_start = datetime(1970, 1, 1, 7, 0)
+    day_end = datetime(1970, 1, 1, 23, 0)
     
     # Σχεδιασμός Γραφήματος
     fig = px.timeline(
@@ -840,19 +836,24 @@ if menu == "Ταμπλό Gantt":
     base_font_size = 10 if not presentation_mode else 12
     scaled_font_size = max(8, int(base_font_size * zoom_factor))
     
+    # Αφαίρεση του uniformtext για να μην αναγκάζεται να σχεδιάζει τα γράμματα έξω από τις μικρές μπάρες!
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
         textfont=dict(color='black', size=scaled_font_size, family="Arial Black, Arial, sans-serif"),
-        marker=dict(line=dict(color='black', width=1))
+        marker=dict(line=dict(color='black', width=1)),
+        textangle=0 # Διασφαλίζει ότι το κείμενο παραμένει πάντα οριζόντιο
     )
     
     # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 120px * zoom_factor για να προσαρμόζεται στο zoom και τις πολλές γραμμές
     dynamic_height = max(500, int(len(y_category_order) * 120 * zoom_factor) + 100)
     
+    # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 15:00 το μεσημέρι)
+    view_start = datetime(1970, 1, 1, 6, 0)
+    view_end = datetime(1970, 1, 1, 15, 0)
+    tick_start = datetime(1970, 1, 1, 0, 0) # Σταθερό σημείο αναφοράς για τα ticks
+    
     fig.update_layout(
-        uniformtext_minsize=scaled_font_size,
-        uniformtext_mode='show',
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
