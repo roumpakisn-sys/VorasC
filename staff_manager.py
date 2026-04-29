@@ -711,27 +711,50 @@ if menu == "Ταμπλό Gantt":
                 
             groups[key]['Employees'].append(formatted_name)
 
-        # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes)
-        sorted_groups = sorted(groups.values(), key=lambda x: x['Start'])
-        lanes = [] 
+        # Διαχωρισμός σε "Μπλε" και "Μη-Μπλε" μπάρες
+        non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
+        blue_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
+        
+        # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΗ ΜΠΛΕ (Μπαίνουν πάνω)
+        non_blue_lanes = [] 
         group_row_mapping = []
         
-        for g in sorted_groups:
+        for g in sorted(non_blue_groups, key=lambda x: x['Start']):
             placed = False
-            for lane_idx, lane_end in enumerate(lanes):
+            for lane_idx, lane_end in enumerate(non_blue_lanes):
                 if g['Start'] >= lane_end:
                     row_idx = lane_idx
-                    lanes[lane_idx] = g['End']
+                    non_blue_lanes[lane_idx] = g['End']
                     placed = True
                     break
             
             if not placed:
-                lanes.append(g['End'])
-                row_idx = len(lanes) - 1
+                non_blue_lanes.append(g['End'])
+                row_idx = len(non_blue_lanes) - 1
             
             group_row_mapping.append((g, row_idx))
 
-        num_lanes = len(lanes)
+        num_non_blue_lanes = len(non_blue_lanes)
+
+        # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΠΛΕ (Μπαίνουν κάτω)
+        blue_lanes = []
+        for g in sorted(blue_groups, key=lambda x: x['Start']):
+            placed = False
+            for lane_idx, lane_end in enumerate(blue_lanes):
+                if g['Start'] >= lane_end:
+                    row_idx = lane_idx
+                    blue_lanes[lane_idx] = g['End']
+                    placed = True
+                    break
+            
+            if not placed:
+                blue_lanes.append(g['End'])
+                row_idx = len(blue_lanes) - 1
+            
+            # Προσθέτουμε το offset των non-blue lanes ώστε να μπουν από κάτω
+            group_row_mapping.append((g, row_idx + num_non_blue_lanes))
+
+        num_lanes = num_non_blue_lanes + len(blue_lanes)
         middle_lane = num_lanes // 2  # Υπολογισμός της μεσαίας σειράς για κεντράρισμα του κειμένου
         
         day_row_ids = []
