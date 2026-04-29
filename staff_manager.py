@@ -754,14 +754,25 @@ if menu == "Ταμπλό Gantt":
             if g['Notes']:
                 base_text += f" ({g['Notes'].upper()})"
                 
-            # Αυτόματη αναδίπλωση κειμένου ανά 45 χαρακτήρες (για να μη χάνεται σε μεγάλες βάρδιες)
-            wrapped_base = "<br>".join(textwrap.wrap(base_text, width=45))
+            # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (μικρότερη βάρδια = πιο συχνό wrap)
+            duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
+            if duration_hours <= 1.5:
+                wrap_w = 15
+            elif duration_hours <= 3.0:
+                wrap_w = 25
+            elif duration_hours <= 5.0:
+                wrap_w = 35
+            else:
+                wrap_w = 45
+
+            # Αυτόματη αναδίπλωση κειμένου δυναμικά
+            wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
             
             # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
             if g['is_cancelled']:
                 label_text = f"<s>{wrapped_base}</s>"
                 if g['cancel_reason']:
-                    wrapped_reason = "<br>".join(textwrap.wrap(f"[{g['cancel_reason'].upper()}]", width=45))
+                    wrapped_reason = "<br>".join(textwrap.wrap(f"[{g['cancel_reason'].upper()}]", width=wrap_w))
                     label_text += f"<br><span style='color:#dc2626;'><b>{wrapped_reason}</b></span>"
             else:
                 label_text = wrapped_base
@@ -826,7 +837,7 @@ if menu == "Ταμπλό Gantt":
     )
     
     # --- EXCEL STYLING & BORDERS ---
-    base_font_size = 11 if not presentation_mode else 12
+    base_font_size = 10 if not presentation_mode else 12
     scaled_font_size = max(8, int(base_font_size * zoom_factor))
     
     fig.update_traces(
@@ -836,10 +847,12 @@ if menu == "Ταμπλό Gantt":
         marker=dict(line=dict(color='black', width=1))
     )
     
-    # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 85px * zoom_factor για να προσαρμόζεται στο zoom
-    dynamic_height = max(500, int(len(y_category_order) * 85 * zoom_factor) + 100)
+    # ΑΥΞΗΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 120px * zoom_factor για να προσαρμόζεται στο zoom και τις πολλές γραμμές
+    dynamic_height = max(500, int(len(y_category_order) * 120 * zoom_factor) + 100)
     
     fig.update_layout(
+        uniformtext_minsize=scaled_font_size,
+        uniformtext_mode='show',
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
