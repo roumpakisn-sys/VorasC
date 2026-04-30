@@ -37,11 +37,11 @@ components.html("""
     <script>
         const doc = window.parent.document;
         let clockDiv = doc.getElementById("staff_pro_clock");
+        
+        // Δημιουργία του στοιχείου αν δεν υπάρχει
         if (!clockDiv) {
             clockDiv = doc.createElement("div");
             clockDiv.id = "staff_pro_clock";
-            // Αλλάξαμε το right: 20px σε right: 280px για να μην κρύβει τα εικονίδια του Streamlit
-            clockDiv.style.cssText = "position: fixed; top: 12px; right: 280px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
             doc.body.appendChild(clockDiv);
             
             function updateClock() {
@@ -51,6 +51,10 @@ components.html("""
             setInterval(updateClock, 1000);
             updateClock();
         }
+        
+        // Επιβολή του CSS σε κάθε εκτέλεση (έτσι μετακινείται σίγουρα ακόμα κι αν υπήρχε ήδη)
+        // Ρυθμίστηκε στο right: 300px για να είναι εντελώς μακριά από τα εικονίδια του Streamlit
+        clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
     </script>
 """, height=0, width=0)
 
