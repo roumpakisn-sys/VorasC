@@ -2513,7 +2513,7 @@ elif menu == "Καταγραφή Κινήσεων":
     col_b1, col_b2 = st.columns([1, 4])
     with col_b1:
         if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True):
-            fetch_all_data_from_db.clear()
+            clear_cache_for_table("activity_logs")
             st.rerun()
     with col_b2:
         if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
@@ -2523,7 +2523,7 @@ elif menu == "Καταγραφή Κινήσεων":
                     chunk_size = 500
                     for i in range(0, len(log_ids), chunk_size):
                         supabase.table('activity_logs').delete().in_('id', log_ids[i:i+chunk_size]).execute()
-                    fetch_all_data_from_db.clear()
+                    clear_cache_for_table("activity_logs")
                     st.success("Το ιστορικό καθαρίστηκε!")
                     time.sleep(1)
                     st.rerun()
