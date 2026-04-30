@@ -254,7 +254,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -607,6 +607,7 @@ if menu == "Ταμπλό Gantt":
     y_category_order = []
     tickvals = []
     ticktext = []
+    empty_shift_annotations = [] # Λίστα για τα κυκλάκια "Χωρίς Προσωπικό"
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
     
@@ -794,12 +795,19 @@ if menu == "Ταμπλό Gantt":
             # Αυτόματη αναδίπλωση κειμένου δυναμικά
             wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
             
-            # Αν δεν έχει οριστεί προσωπικό, προσθέτουμε ένα 🔴 στο τέλος της πρώτης γραμμής 
-            # ώστε να εμφανίζεται "πάνω δεξιά" στο μπλοκ του κειμένου.
+            # Εάν η βάρδια είναι "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ", προσθέτουμε ένα Annotation (🔴) στην πάνω δεξιά γωνία
             if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
-                lines = wrapped_base.split("<br>")
-                lines[0] = f"{lines[0]} 🔴"
-                wrapped_base = "<br>".join(lines)
+                empty_shift_annotations.append(dict(
+                    x=g['End'],
+                    y=row_id,
+                    text="🔴",
+                    showarrow=False,
+                    xanchor='right',
+                    yanchor='middle',
+                    xshift=-4,  # Λίγο αριστερά από το τέλος της μπάρας για να μην ακουμπάει στο περίγραμμα
+                    yshift=int(35 * zoom_factor), # Μετατόπιση προς τα πάνω (κοντά στο πάνω όριο)
+                    font=dict(size=max(10, int(14 * zoom_factor)))
+                ))
             
             # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
             if g['is_cancelled']:
@@ -896,6 +904,7 @@ if menu == "Ταμπλό Gantt":
         paper_bgcolor='#ffffff',
         height=dynamic_height,
         margin=dict(l=10, r=10, t=50, b=10),
+        annotations=empty_shift_annotations, # Εφαρμογή των annotations για το κόκκινο κυκλάκι
         xaxis=dict(
             side='top', 
             tickmode='linear',
