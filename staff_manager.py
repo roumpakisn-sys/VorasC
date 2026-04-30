@@ -254,7 +254,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -793,6 +793,13 @@ if menu == "Ταμπλό Gantt":
 
             # Αυτόματη αναδίπλωση κειμένου δυναμικά
             wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
+            
+            # Αν δεν έχει οριστεί προσωπικό, προσθέτουμε ένα 🔴 στο τέλος της πρώτης γραμμής 
+            # ώστε να εμφανίζεται "πάνω δεξιά" στο μπλοκ του κειμένου.
+            if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
+                lines = wrapped_base.split("<br>")
+                lines[0] = f"{lines[0]} 🔴"
+                wrapped_base = "<br>".join(lines)
             
             # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
             if g['is_cancelled']:
