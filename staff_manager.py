@@ -928,7 +928,26 @@ if menu == "Ταμπλό Gantt":
         dragmode="pan"
     )
     
-    # --- ΠΡΟΣΘΗΚΗ ΠΑΧΙΩΝ ΔΙΑΧΩΡΙΣΤΙΚΩΝ ΓΡΑΜΜΩΝ ΑΝΑΜΕΣΑ ΣΤΙΣ ΗΜΕΡΕΣ ---
+    # --- ΠΡΟΣΘΗΚΗ ΕΝΑΛΛΑΣΣΟΜΕΝΟΥ ΦΟΝΤΟΥ (ZEBRA STRIPING) & ΕΝΤΟΝΩΝ ΓΡΑΜΜΩΝ ---
+    # 1. Εναλλασσόμενο φόντο
+    for day_index in range(7):
+        day_indices = [idx for idx, val in enumerate(y_category_order[::-1]) if val.startswith(f"day_{day_index}_")]
+        if day_indices:
+            min_idx = min(day_indices)
+            max_idx = max(day_indices)
+            
+            # Αχνή σκίαση εναλλάξ στις μέρες για να ξεχωρίζουν
+            if day_index % 2 != 0:
+                fig.add_hrect(
+                    y0=min_idx - 0.5, 
+                    y1=max_idx + 0.5, 
+                    fillcolor="rgba(0, 0, 0, 0.05)", 
+                    opacity=1, 
+                    layer="below", 
+                    line_width=0
+                )
+
+    # 2. Παχιές μαύρες διαχωριστικές γραμμές
     for idx in range(len(y_category_order) - 1):
         row_below = y_category_order[::-1][idx]
         row_above = y_category_order[::-1][idx+1]
@@ -937,10 +956,10 @@ if menu == "Ταμπλό Gantt":
         day_above = row_above.split('_')[1]
         
         if day_below != day_above:
-            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#1f2937", width=2))
+            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
-    fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=-0.5, y1=-0.5, yref="y", line=dict(color="#1f2937", width=2))
-    fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=len(y_category_order)-0.5, y1=len(y_category_order)-0.5, yref="y", line=dict(color="#1f2937", width=2))
+    fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=-0.5, y1=-0.5, yref="y", line=dict(color="#000000", width=4))
+    fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=len(y_category_order)-0.5, y1=len(y_category_order)-0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΕΠΙΣΗΜΑΝΣΗ ΤΗΣ ΣΗΜΕΡΙΝΗΣ ΗΜΕΡΑΣ ---
     today_date = date.today()
@@ -2087,7 +2106,7 @@ elif menu == "Άδειες":
                 emp_name = get_employee_name(lv['employeeId'])
                 leave_options[lv['id']] = f"{emp_name} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})"
             
-            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", 
+            leave_to_edit_id = st.selectbox("Επιλέξ Άδεια για Επεξεργασία", 
                                             options=list(leave_options.keys()),
                                             format_func=lambda x: leave_options[x])
             
