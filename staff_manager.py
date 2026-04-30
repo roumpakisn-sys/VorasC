@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
@@ -19,6 +20,38 @@ except ImportError:
 
 # --- Ρύθμιση σελίδας ---
 st.set_page_config(page_title="Staff Manager Pro", layout="wide")
+
+# --- GLOBAL STYLING & ΨΗΦΙΑΚΟ ΡΟΛΟΙ ---
+# Προσθήκη CSS για ελαφριά εξωτερική σκίαση στο πλευρικό μενού (Sidebar)
+st.markdown("""
+    <style>
+    [data-testid="stSidebar"] {
+        box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
+        border-right: 1px solid #e2e8f0 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Προσθήκη αιωρούμενου Ψηφιακού Ρολογιού πάνω δεξιά με Javascript (χωρίς να μπλοκάρει το Streamlit)
+components.html("""
+    <script>
+        const doc = window.parent.document;
+        let clockDiv = doc.getElementById("staff_pro_clock");
+        if (!clockDiv) {
+            clockDiv = doc.createElement("div");
+            clockDiv.id = "staff_pro_clock";
+            clockDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
+            doc.body.appendChild(clockDiv);
+            
+            function updateClock() {
+                const now = new Date();
+                clockDiv.innerHTML = now.toLocaleTimeString('el-GR', {hour12: false});
+            }
+            setInterval(updateClock, 1000);
+            updateClock();
+        }
+    </script>
+""", height=0, width=0)
 
 # --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
 if "authenticated" not in st.session_state:
@@ -2106,7 +2139,7 @@ elif menu == "Άδειες":
                 emp_name = get_employee_name(lv['employeeId'])
                 leave_options[lv['id']] = f"{emp_name} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})"
             
-            leave_to_edit_id = st.selectbox("Επιλέξ Άδεια για Επεξεργασία", 
+            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", 
                                             options=list(leave_options.keys()),
                                             format_func=lambda x: leave_options[x])
             
