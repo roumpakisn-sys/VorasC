@@ -32,7 +32,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Προσθήκη αιωρούμενου Ψηφιακού Ρολογιού πάνω δεξιά με Javascript (χωρίς να μπλοκάρει το Streamlit)
+# Προσθήκη αιωρούμενου Ψηφιακού Ρολογιού πιο αριστερά με Javascript (χωρίς να μπλοκάρει το Streamlit)
 components.html("""
     <script>
         const doc = window.parent.document;
@@ -40,7 +40,8 @@ components.html("""
         if (!clockDiv) {
             clockDiv = doc.createElement("div");
             clockDiv.id = "staff_pro_clock";
-            clockDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
+            // Αλλάξαμε το right: 20px σε right: 280px για να μην κρύβει τα εικονίδια του Streamlit
+            clockDiv.style.cssText = "position: fixed; top: 12px; right: 280px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
             doc.body.appendChild(clockDiv);
             
             function updateClock() {
