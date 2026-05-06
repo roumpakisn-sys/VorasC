@@ -664,8 +664,8 @@ if menu == "Ταμπλό Gantt":
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        selected_date = st.date_input("Αφετηρία (7 Ημέρες)", key="view_week_date")
-        start_of_week = selected_date # Το διάγραμμα θα ξεκινάει πλέον από την επιλεγμένη ημερομηνία (π.χ. Σήμερα)
+        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
+        start_of_week = selected_date - timedelta(days=selected_date.weekday())
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -688,10 +688,10 @@ if menu == "Ταμπλό Gantt":
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
     
-    # Διατρέχουμε και τις 7 μέρες του προγράμματος
+    # Διατρέχουμε και τις 7 μέρες της εβδομάδας
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[curr_date.weekday()]} {curr_date.strftime('%d/%m')}"
+        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         
         # Υπολογισμός αδειών για την τρέχουσα μέρα με αναφορά στον Αντικαταστάτη
         leaves_today = []
@@ -911,7 +911,7 @@ if menu == "Ταμπλό Gantt":
             # Προσθήκη δεδομένων για το αρχείο Excel
             export_data.append({
                 'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
-                'Ημέρα': day_names_gr[curr_date.weekday()],
+                'Ημέρα': day_names_gr[i],
                 'Έργο': g['Project'],
                 'Προσωπικό': ", ".join(g['Employees']),
                 'Ώρα Έναρξης': g['StartTime'],
@@ -981,8 +981,34 @@ if menu == "Ταμπλό Gantt":
     else:
         # Κλείδωμα ύψους στα 750px συνολικά για Sticky Άξονα
         dynamic_height = 750
-        # Το Plotly ζωγραφίζει από κάτω προς τα πάνω. Ορίζουμε να φαίνονται οι κορυφαίες visible_rows_count
-        yaxis_range = [total_rows - visible_rows_count - 0.5, total_rows - 0.5]
+        
+        # Βρίσκουμε ποια μέρα είναι "σήμερα" σε σχέση με την εβδομάδα που προβάλλεται
+        today_date_local = date.today()
+        day_offset = (today_date_local - start_of_week).days
+        
+        # Αν η σημερινή μέρα είναι μέσα στην εβδομάδα που προβάλλεται
+        if 0 <= day_offset <= 6:
+            # Βρίσκουμε τα indices των γραμμών της σημερινής ημέρας (στον reversed πίνακα)
+            today_indices = [idx for idx, val in enumerate(y_category_order[::-1]) if val.startswith(f"day_{day_offset}_")]
+            if today_indices:
+                center_idx = sum(today_indices) / len(today_indices)
+                top_range = center_idx + (visible_rows_count / 2)
+                bottom_range = center_idx - (visible_rows_count / 2)
+                
+                # Διορθώσεις για να μην βγαίνουμε εκτός ορίων
+                if top_range > total_rows - 0.5:
+                    top_range = total_rows - 0.5
+                    bottom_range = top_range - visible_rows_count
+                if bottom_range < -0.5:
+                    bottom_range = -0.5
+                    top_range = bottom_range + visible_rows_count
+                    
+                yaxis_range = [bottom_range, top_range]
+            else:
+                yaxis_range = [total_rows - visible_rows_count - 0.5, total_rows - 0.5]
+        else:
+            # Αν κοιτάμε άλλη εβδομάδα, δείχνουμε από Δευτέρα (πάνω-πάνω)
+            yaxis_range = [total_rows - visible_rows_count - 0.5, total_rows - 0.5]
     
     # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 17:00 το απόγευμα)
     view_start = datetime(1970, 1, 1, 6, 0)
@@ -1283,7 +1309,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -2210,7 +2236,7 @@ elif menu == "Άδειες":
                 emp_name = get_employee_name(lv['employeeId'])
                 leave_options[lv['id']] = f"{emp_name} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})"
             
-            leave_to_edit_id = st.selectbox("Επιλέξ Άδεια για Επεξεργασία", 
+            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", 
                                             options=list(leave_options.keys()),
                                             format_func=lambda x: leave_options[x])
             
