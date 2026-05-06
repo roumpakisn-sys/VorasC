@@ -2161,6 +2161,12 @@ elif menu == "Ομάδα Προσωπικού":
 elif menu == "Άδειες":
     st.title("🏖️ Διαχείριση Αδειών")
     
+    # Initialize state variables for leave conflicts
+    if "pending_leave" not in st.session_state:
+        st.session_state.pending_leave = None
+    if "leave_conflicts" not in st.session_state:
+        st.session_state.leave_conflicts = []
+    
     tab_list, tab_add, tab_edit = st.tabs(["📋 Λίστα Αδειών", "➕ Καταχώρηση", "✏️ Επεξεργασία"])
     
     with tab_add:
@@ -2186,6 +2192,8 @@ elif menu == "Άδειες":
             
         if clear_leave:
             st.session_state.leave_reset_counter += 1
+            if 'pending_leave' in st.session_state: st.session_state.pending_leave = None
+            if 'leave_conflicts' in st.session_state: st.session_state.leave_conflicts = []
             st.rerun()
             
         if submit_leave:
@@ -2196,22 +2204,25 @@ elif menu == "Άδειες":
             elif l_emp == l_sub_emp:
                 st.error("Ο αντικαταστάτης δεν μπορεί να είναι το ίδιο πρόσωπο με αυτόν που παίρνει άδεια.")
             else:
-                # Έλεγχος αν ο υπάλληλος εργάζεται ήδη κάποια από τις μέρες της άδειας
-                conflict_errors = []
+                # Εύρεση επικαλύψεων με βάρδιες
+                conflicts = []
                 curr_date = l_start
                 while curr_date <= l_end:
                     for a in st.session_state.assignments:
                         if a['employeeId'] == l_emp and a['date'] == curr_date:
-                            proj = get_project_info(a['projectId'])
-                            proj_name = proj['name'] if proj else "Άγνωστο Έργο"
-                            emp_name = get_employee_name(l_emp)
-                            conflict_errors.append(f"Ο/Η {emp_name} δεν μπορεί να πάρει άδεια στις {curr_date.strftime('%d/%m/%Y')} διότι εργάζεται στο έργο: {proj_name}.")
-                            break # Αρκεί μία επικάλυψη για να μπλοκάρει τη μέρα
+                            conflicts.append(a)
                     curr_date += timedelta(days=1)
                 
-                if conflict_errors:
-                    for err in conflict_errors:
-                        st.error(err)
+                if conflicts:
+                    st.session_state.pending_leave = {
+                        'id': str(uuid.uuid4()), 
+                        'employeeId': l_emp, 
+                        'startDate': l_start, 
+                        'endDate': l_end,
+                        'substituteId': l_sub_emp if l_sub_emp else None,
+                        'type': 'new'
+                    }
+                    st.session_state.leave_conflicts = conflicts
                 else:
                     new_l = {
                         'id': str(uuid.uuid4()), 
@@ -2226,6 +2237,47 @@ elif menu == "Άδειες":
                     time.sleep(1.5)
                     st.session_state.leave_reset_counter += 1
                     st.rerun()
+                    
+        if st.session_state.get('pending_leave') and st.session_state.pending_leave.get('type') == 'new' and st.session_state.get('leave_conflicts'):
+            st.markdown("---")
+            st.warning("⚠️ **Προσοχή:** Βρέθηκαν βάρδιες για τον/την υπάλληλο μέσα σε αυτό το διάστημα. Πατήστε 'Έγκριση (Αφαίρεση)' για να αφαιρέσετε το όνομα του εργαζόμενου από το έργο (η βάρδια θα μείνει χωρίς προσωπικό) και να επιτρέψετε την άδεια.")
+            
+            resolved_any = False
+            for a in st.session_state.leave_conflicts:
+                col_err, col_btn = st.columns([4, 1])
+                proj = get_project_info(a['projectId'])
+                pname = proj['name'] if proj else "Άγνωστο Έργο"
+                emp_name = get_employee_name(a['employeeId'])
+                date_str = a['date'].strftime('%d/%m/%Y')
+                
+                col_err.error(f"Ο/Η {emp_name} δεν μπορεί να πάρει άδεια στις {date_str} διότι εργάζεται στο έργο: {pname} ({a['startTime']}-{a['endTime']}).")
+                
+                if col_btn.button("✅ Έγκριση (Αφαίρεση)", key=f"res_new_{a['id']}", use_container_width=True):
+                    # Αφαίρεση υπαλλήλου από τη βάρδια
+                    target_a = next((assign for assign in st.session_state.assignments if assign['id'] == a['id']), None)
+                    if target_a:
+                        old_a = dict(target_a)
+                        target_a['employeeId'] = ""  # Ορφανή βάρδια
+                        db_update('assignments', target_a['id'], target_a, old_data=old_a)
+                        
+                        st.session_state.leave_conflicts = [c for c in st.session_state.leave_conflicts if c['id'] != a['id']]
+                        resolved_any = True
+            
+            if resolved_any:
+                if not st.session_state.leave_conflicts:
+                    new_l = {k: v for k, v in st.session_state.pending_leave.items() if k != 'type'}
+                    st.session_state.leaves.append(new_l)
+                    db_insert('leaves', new_l)
+                    st.session_state.pending_leave = None
+                    st.success("Όλες οι επικαλύψεις επιλύθηκαν! Η άδεια καταχωρήθηκε με επιτυχία.")
+                    time.sleep(1.5)
+                    st.session_state.leave_reset_counter += 1
+                st.rerun()
+                
+            if st.button("❌ Ακύρωση", key="cancel_new_leave"):
+                st.session_state.pending_leave = None
+                st.session_state.leave_conflicts = []
+                st.rerun()
 
     with tab_edit:
         if not st.session_state.leaves:
@@ -2266,22 +2318,25 @@ elif menu == "Άδειες":
                 elif ed_l_emp == ed_l_sub_emp:
                     st.error("Ο αντικαταστάτης δεν μπορεί να είναι το ίδιο πρόσωπο με αυτόν που παίρνει άδεια.")
                 else:
-                    # Έλεγχος conflict για τις νέες ημερομηνίες/υπάλληλο
-                    conflict_errors = []
+                    conflicts = []
                     curr_date = ed_l_start
                     while curr_date <= ed_l_end:
                         for a in st.session_state.assignments:
                             if a['employeeId'] == ed_l_emp and a['date'] == curr_date:
-                                proj = get_project_info(a['projectId'])
-                                proj_name = proj['name'] if proj else "Άγνωστο Έργο"
-                                emp_name = get_employee_name(ed_l_emp)
-                                conflict_errors.append(f"Ο/Η {emp_name} δεν μπορεί να πάρει άδεια στις {curr_date.strftime('%d/%m/%Y')} διότι εργάζεται στο έργο: {proj_name}.")
-                                break
+                                conflicts.append(a)
                         curr_date += timedelta(days=1)
                     
-                    if conflict_errors:
-                        for err in conflict_errors:
-                            st.error(err)
+                    if conflicts:
+                        st.session_state.pending_leave = {
+                            'id': leave_to_edit_id, 
+                            'employeeId': ed_l_emp, 
+                            'startDate': ed_l_start, 
+                            'endDate': ed_l_end,
+                            'substituteId': ed_l_sub_emp if ed_l_sub_emp else None,
+                            'type': 'edit',
+                            'old_data': dict(leave_to_edit)
+                        }
+                        st.session_state.leave_conflicts = conflicts
                     else:
                         old_leave_data = dict(leave_to_edit)
                         leave_to_edit['employeeId'] = ed_l_emp
@@ -2293,6 +2348,53 @@ elif menu == "Άδειες":
                         st.success("Οι αλλαγές στην άδεια αποθηκεύτηκαν!")
                         time.sleep(1)
                         st.rerun()
+
+            if st.session_state.get('pending_leave') and st.session_state.pending_leave.get('type') == 'edit' and st.session_state.get('leave_conflicts'):
+                st.markdown("---")
+                st.warning("⚠️ **Προσοχή:** Βρέθηκαν βάρδιες για τον/την υπάλληλο μέσα σε αυτό το διάστημα. Πατήστε 'Έγκριση (Αφαίρεση)' για να αφαιρέσετε το όνομα του εργαζόμενου από το έργο (η βάρδια θα μείνει χωρίς προσωπικό) και να επιτρέψετε την άδεια.")
+                
+                resolved_any = False
+                for a in st.session_state.leave_conflicts:
+                    col_err, col_btn = st.columns([4, 1])
+                    proj = get_project_info(a['projectId'])
+                    pname = proj['name'] if proj else "Άγνωστο Έργο"
+                    emp_name = get_employee_name(a['employeeId'])
+                    date_str = a['date'].strftime('%d/%m/%Y')
+                    
+                    col_err.error(f"Ο/Η {emp_name} δεν μπορεί να πάρει άδεια στις {date_str} διότι εργάζεται στο έργο: {pname} ({a['startTime']}-{a['endTime']}).")
+                    
+                    if col_btn.button("✅ Έγκριση (Αφαίρεση)", key=f"res_edit_{a['id']}", use_container_width=True):
+                        target_a = next((assign for assign in st.session_state.assignments if assign['id'] == a['id']), None)
+                        if target_a:
+                            old_a = dict(target_a)
+                            target_a['employeeId'] = ""  # Ορφανή βάρδια
+                            db_update('assignments', target_a['id'], target_a, old_data=old_a)
+                            
+                            st.session_state.leave_conflicts = [c for c in st.session_state.leave_conflicts if c['id'] != a['id']]
+                            resolved_any = True
+                
+                if resolved_any:
+                    if not st.session_state.leave_conflicts:
+                        leave_id = st.session_state.pending_leave['id']
+                        leave_obj = next(l for l in st.session_state.leaves if l['id'] == leave_id)
+                        
+                        leave_obj['employeeId'] = st.session_state.pending_leave['employeeId']
+                        leave_obj['startDate'] = st.session_state.pending_leave['startDate']
+                        leave_obj['endDate'] = st.session_state.pending_leave['endDate']
+                        leave_obj['substituteId'] = st.session_state.pending_leave['substituteId']
+                        
+                        old_data = st.session_state.pending_leave['old_data']
+                        
+                        db_update('leaves', leave_id, leave_obj, old_data=old_data)
+                        st.session_state.pending_leave = None
+                        st.success("Όλες οι επικαλύψεις επιλύθηκαν! Οι αλλαγές αποθηκεύτηκαν.")
+                        time.sleep(1.5)
+                    st.rerun()
+                    
+                if st.button("❌ Ακύρωση", key="cancel_edit_leave"):
+                    st.session_state.pending_leave = None
+                    st.session_state.leave_conflicts = []
+                    st.rerun()
 
     with tab_list:
         if st.session_state.leaves:
