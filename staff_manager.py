@@ -966,8 +966,23 @@ if menu == "Ταμπλό Gantt":
         textangle=0 # Διασφαλίζει ότι το κείμενο παραμένει πάντα οριζόντιο
     )
     
-    # ΜΕΙΩΣΗ ΥΨΟΥΣ: Το κάθε 'lane' παίρνει πλέον 90px * zoom_factor (επειδή οι μπάρες θα εφάπτονται)
-    dynamic_height = max(500, int(len(y_category_order) * 90 * zoom_factor) + 100)
+    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
+    total_rows = len(y_category_order)
+    row_height = 90 * zoom_factor # Το ιδανικό ύψος κάθε γραμμής
+    
+    # Διαθέσιμος χώρος σχεδίασης μέσα στο γράφημα (αφαιρώντας τα περιθώρια)
+    plot_area_height = 650 
+    visible_rows_count = plot_area_height / row_height
+    
+    if presentation_mode or total_rows <= visible_rows_count:
+        # Κανονικό ύψος χωρίς εσωτερικό scroll (όταν χωράνε όλα ή είμαστε σε Presentation mode)
+        dynamic_height = max(500, int(total_rows * row_height) + 100)
+        yaxis_range = None
+    else:
+        # Κλείδωμα ύψους στα 750px συνολικά για Sticky Άξονα
+        dynamic_height = 750
+        # Το Plotly ζωγραφίζει από κάτω προς τα πάνω. Ορίζουμε να φαίνονται οι κορυφαίες visible_rows_count
+        yaxis_range = [total_rows - visible_rows_count - 0.5, total_rows - 0.5]
     
     # Αρχικά όρια προβολής άξονα Χ (από 06:00 το πρωί έως 17:00 το απόγευμα)
     view_start = datetime(1970, 1, 1, 6, 0)
@@ -1000,7 +1015,8 @@ if menu == "Ταμπλό Gantt":
         yaxis=dict(
             title="",
             tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"),
-            fixedrange=False
+            fixedrange=False,
+            range=yaxis_range # <--- ΕΔΩ ΕΦΑΡΜΟΖΕΤΑΙ ΤΟ ΕΥΡΟΣ ΓΙΑ ΤΟ STICKY ΕΦΕ
         ),
         dragmode="pan"
     )
@@ -1084,10 +1100,12 @@ if menu == "Ταμπλό Gantt":
         st.plotly_chart(fig, use_container_width=True)
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
+    hint_text = "💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ σε μια μπάρα** για επεξεργασία. **2)** **Σύρετε (Drag) το γράφημα πάνω-κάτω** για κύλιση στις μέρες με σταθερό τον άξονα ωρών!"
+    
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
         with col_hint:
-            st.caption("💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ πάνω σε μια μπάρα** για να την επεξεργαστείτε αμέσως παρακάτω! **2)** Σύρετε το διάγραμμα με το ποντίκι ή την κάτω μπάρα κύλισης.")
+            st.caption(hint_text)
         with col_btn:
             df_export = pd.DataFrame(export_data)
             buffer = io.BytesIO()
@@ -1102,7 +1120,7 @@ if menu == "Ταμπλό Gantt":
                 use_container_width=True
             )
     else:
-        st.caption("💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ πάνω σε μια μπάρα** για να την επεξεργαστείτε αμέσως παρακάτω! **2)** Σύρετε το διάγραμμα με το ποντίκι ή την κάτω μπάρα κύλισης.")
+        st.caption(hint_text)
 
     if not presentation_mode:
         st.divider()
