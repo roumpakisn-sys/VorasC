@@ -55,7 +55,10 @@ components.html("""
             const now = new Date();
             const el = doc.getElementById("staff_pro_clock");
             if (el) {
-                el.innerHTML = now.toLocaleTimeString('el-GR', {hour12: false});
+                const dateOptions = { day: 'numeric', month: 'long', year: 'numeric' };
+                const dateStr = now.toLocaleDateString('el-GR', dateOptions);
+                const timeStr = now.toLocaleTimeString('el-GR', {hour12: false});
+                el.innerHTML = dateStr + " | " + timeStr;
             }
         }
         
