@@ -624,6 +624,36 @@ if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
 # --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ (Για τις φόρμες επιλογής) ---
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
+# --- ΣΥΣΤΗΜΑ ΕΙΔΟΠΟΙΗΣΕΩΝ (ALERTS) ---
+# Εντοπισμός "ορφανών" βαρδιών για τις επόμενες 7 ημέρες
+today_date = date.today()
+next_week_date = today_date + timedelta(days=7)
+orphan_count = 0
+orphan_details = []
+
+for a in st.session_state.assignments:
+    shift_date = a.get('date')
+    # Έλεγχος αν η βάρδια είναι μέσα στις επόμενες 7 ημέρες
+    if today_date <= shift_date <= next_week_date:
+        # Αν η βάρδια δεν έχει υπάλληλο και ΔΕΝ είναι σημασμένη ως ακυρωμένη
+        if not a.get('employeeId') and not a.get('is_cancelled', False):
+            orphan_count += 1
+            proj = get_project_info(a['projectId'])
+            proj_name = proj['name'] if proj else "Άγνωστο Έργο"
+            
+            # Μορφοποίηση της ημερομηνίας για όμορφη εμφάνιση
+            date_str = shift_date.strftime('%d/%m/%Y')
+            orphan_details.append(f"• **{date_str}** | Ώρες: {a['startTime']}-{a['endTime']} | Έργο: **{proj_name}**")
+
+# Εμφάνιση του Alert αν υπάρχουν ορφανές βάρδιες (Εμφανίζεται σε όλες τις καρτέλες, ψηλά)
+if orphan_count > 0:
+    st.error(f"🚨 **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
+    with st.expander("👁️ Δείτε αναλυτικά τις ορφανές βάρδιες"):
+        for detail in orphan_details:
+            st.markdown(detail)
+    st.write("---") # Διαχωριστική γραμμή για να ξεχωρίζει από το υπόλοιπο UI
+# -------------------------------------
+
 # --- VIEW: DASHBOARD (GANTT) ---
 if menu == "Ταμπλό Gantt":
     st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
@@ -1296,7 +1326,7 @@ if menu == "Ταμπλό Gantt":
                                                 errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
                                             elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
                                                 errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
-                                            
+                                    
                                     if errors:
                                         for err in errors:
                                             st.error(err)
@@ -1698,7 +1728,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             if curr_date.weekday() in selected_weekday_ints:
                                                 dates_to_assign.append(curr_date)
                                             curr_date += timedelta(days=1)
-                                    
+                                
                                     for d in dates_to_assign:
                                         for eid in emps_to_process:
                                             if eid:
@@ -1734,7 +1764,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     'cancel_reason': ""
                                                 }
                                                 new_assignments_batch.append(new_assign)
-                                    
+                                
                                     # 3. Ενημερώνουμε τα δεδομένα του Pattern
                                     old_pat = dict(pat)
                                     pat['projectId'] = final_e_proj_id
@@ -1755,7 +1785,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         for i in range(0, len(new_assignments_batch), chunk_size):
                                             db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
                                         actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
-                                    
+                                
                                     add_transaction(actions)
                                     
                                 st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
