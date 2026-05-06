@@ -664,8 +664,8 @@ if menu == "Ταμπλό Gantt":
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
-        start_of_week = selected_date - timedelta(days=selected_date.weekday())
+        selected_date = st.date_input("Αφετηρία (7 Ημέρες)", key="view_week_date")
+        start_of_week = selected_date # Το διάγραμμα θα ξεκινάει πλέον από την επιλεγμένη ημερομηνία (π.χ. Σήμερα)
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -688,10 +688,10 @@ if menu == "Ταμπλό Gantt":
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
     
-    # Διατρέχουμε και τις 7 μέρες της εβδομάδας
+    # Διατρέχουμε και τις 7 μέρες του προγράμματος
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
+        day_str = f"{day_names_gr[curr_date.weekday()]} {curr_date.strftime('%d/%m')}"
         
         # Υπολογισμός αδειών για την τρέχουσα μέρα με αναφορά στον Αντικαταστάτη
         leaves_today = []
@@ -911,7 +911,7 @@ if menu == "Ταμπλό Gantt":
             # Προσθήκη δεδομένων για το αρχείο Excel
             export_data.append({
                 'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
-                'Ημέρα': day_names_gr[i],
+                'Ημέρα': day_names_gr[curr_date.weekday()],
                 'Έργο': g['Project'],
                 'Προσωπικό': ", ".join(g['Employees']),
                 'Ώρα Έναρξης': g['StartTime'],
@@ -942,7 +942,7 @@ if menu == "Ταμπλό Gantt":
         text="Ετικέτα"
     )
     
-    # Αντιστροφή της λίστας για να φαίνεται η Δευτέρα πάνω-πάνω
+    # Αντιστροφή της λίστας για να φαίνεται η πρώτη μέρα (σήμερα) πάνω-πάνω
     fig.update_yaxes(
         categoryorder='array', 
         categoryarray=y_category_order[::-1],
@@ -1072,7 +1072,7 @@ if menu == "Ταμπλό Gantt":
                 line_width=0
             )
 
-    st.markdown(f"### 🗓️ Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} έως {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}")
+    st.markdown(f"### 🗓️ Πρόγραμμα: {start_of_week.strftime('%d/%m/%Y')} έως {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}")
     
     # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
     clicked_key = None
@@ -2210,7 +2210,7 @@ elif menu == "Άδειες":
                 emp_name = get_employee_name(lv['employeeId'])
                 leave_options[lv['id']] = f"{emp_name} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})"
             
-            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", 
+            leave_to_edit_id = st.selectbox("Επιλέξ Άδεια για Επεξεργασία", 
                                             options=list(leave_options.keys()),
                                             format_func=lambda x: leave_options[x])
             
