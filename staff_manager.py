@@ -1157,8 +1157,10 @@ if menu == "Ταμπλό Gantt":
                                     emp_name = get_employee_name(eid)
                                     if is_on_leave(eid, add_date):
                                         errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
+                                        st.toast(f"🛑 Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="🛑")
                                     elif has_time_conflict(eid, add_date, str_start, str_end):
-                                        errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει στις {add_date.strftime('%d/%m')}.")
+                                        errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ (Double-booking): Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει ({str_start} - {str_end}).")
+                                        st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                             
                             if errors:
                                 for err in errors:
@@ -1263,7 +1265,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1324,8 +1326,10 @@ if menu == "Ταμπλό Gantt":
                                             emp_name = get_employee_name(eid)
                                             if is_on_leave(eid, edit_date):
                                                 errors.append(f"Ο/Η {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
+                                                st.toast(f"🛑 Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="🛑")
                                             elif has_time_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds']):
-                                                errors.append(f"Ο/Η {emp_name} έχει ήδη εργασία που συμπίπτει.")
+                                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ (Double-booking): Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει.")
+                                                st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                                     
                                     if errors:
                                         for err in errors:
@@ -1508,7 +1512,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                     elif has_time_conflict(eid, d, str_start, str_end):
                                         conflict_count += 1
-                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                                        conflict_details.append(f"⚠️ Διπλοκράτηση: {d.strftime('%d/%m/%Y')} - {emp_name} (Σύγκρουση ωραρίου)")
+                                        st.toast(f"🚨 Διπλοκράτηση: {emp_name} στις {d.strftime('%d/%m')}", icon="🚨")
                                     else:
                                         new_assign = {
                                             'id': str(uuid.uuid4()),
@@ -1732,7 +1737,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     for d in dates_to_assign:
                                         for eid in emps_to_process:
                                             if eid:
-                                                if not is_on_leave(eid, d) and not has_time_conflict(eid, d, str_start, str_end):
+                                                if is_on_leave(eid, d):
+                                                    st.toast(f"🛑 Παραλείφθηκε: Ο/Η {get_employee_name(eid)} έχει άδεια στις {d.strftime('%d/%m')}", icon="🛑")
+                                                elif has_time_conflict(eid, d, str_start, str_end):
+                                                    st.toast(f"🚨 Διπλοκράτηση: Παραλείφθηκε ο/η {get_employee_name(eid)} στις {d.strftime('%d/%m')}", icon="🚨")
+                                                else:
                                                     new_assign = {
                                                         'id': str(uuid.uuid4()),
                                                         'recurring_id': selected_pattern_id,
