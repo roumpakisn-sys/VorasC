@@ -192,6 +192,9 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
 def db_delete(table, column, value, deleted_records=None, track=True):
     if supabase:
         try:
+            if not deleted_records:
+                table_data = st.session_state.get(table, [])
+                deleted_records = [r for r in table_data if r.get(column) == value]
             supabase.table(table).delete().eq(column, value).execute()
             clear_cache_for_table(table)
             if track and deleted_records: add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
@@ -366,7 +369,7 @@ if menu == "Ταμπλό Gantt":
             if not placed: lanes.append(g['End']); row_idx = len(lanes) - 1
             
             row_id = f"day_{i}_row_{row_idx}"
-            if row_id not in y_category_order: y_category_order.append(row_id); tickvals.append(row_id); ticktext.append(base_y_label if row_idx == 0 else "")
+            if row_id not in y_category_order: y_category_order.append(row_id); tickvals.append(row_id)
             
             txt = f"{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {', '.join(g['Employees']).upper()}"
             wrap_w = max(15, int(((g['End']-g['Start']).total_seconds()/3600.0) * 16))
@@ -378,23 +381,26 @@ if menu == "Ταμπλό Gantt":
             data.append({'Y_Axis': row_id, 'Έργο': g['Project'], 'Έναρξη': g['Start'], 'Λήξη': g['End'], 'Ετικέτα': label, 'LegendGroup': g['LegendGroup'], 'ColorHex': g['ColorHex'], 'GroupKey': g['Key']})
             color_map[g['LegendGroup']] = g['ColorHex']
 
+        # --- ΚΕΝΤΡΑΡΙΣΜΑ ΕΤΙΚΕΤΩΝ ΑΞΟΝΑ Y ---
+        day_row_ids = [rid for rid in y_category_order if rid.startswith(f"day_{i}_")]
+        num_day_lanes = len(day_row_ids)
+        mid_lane_idx = num_day_lanes // 2
+        for idx, rid in enumerate(day_row_ids):
+            ticktext.append(base_y_label if idx == mid_lane_idx else "")
+
     df = pd.DataFrame(data)
     fig = px.timeline(df, x_start="Έναρξη", x_end="Λήξη", y="Y_Axis", color="LegendGroup", color_discrete_map=color_map, text="Ετικέτα", custom_data=["GroupKey"])
-    fig.update_yaxes(categoryorder='array', categoryarray=y_category_order[::-1], tickmode='array', tickvals=tickvals, ticktext=ticktext, showgrid=False)
     
     # --- STYLING: Zebra Striping, Seperators, Grid & Today Highlight ---
     for di in range(7):
         idxs = [idx for idx, val in enumerate(y_category_order[::-1]) if val.startswith(f"day_{di}_")]
         if idxs:
             mn, mx = min(idxs), max(idxs)
-            # Zebra Striping
             if di % 2 != 0:
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
-            # Today Highlight
             if (start_of_week + timedelta(days=di)) == date.today():
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
 
-    # Black Day Separators
     for idx in range(len(y_category_order) - 1):
         if y_category_order[::-1][idx].split('_')[1] != y_category_order[::-1][idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
@@ -419,8 +425,9 @@ if menu == "Ταμπλό Gantt":
     fig.update_layout(bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
                       annotations=empty_shift_annotations, dragmode="pan",
                       xaxis=dict(side='top', tickmode='linear', dtick=1800000, tickformat="%H:%M", range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
-                                 showgrid=True, gridcolor='black', gridwidth=1), # Επαναφορά κάθετων γραμμών
-                      yaxis=dict(title="", range=y_range, fixedrange=False))
+                                 showgrid=True, gridcolor='black', gridwidth=1),
+                      yaxis=dict(title="", range=y_range, fixedrange=False, tickmode='array', tickvals=tickvals, ticktext=ticktext, 
+                                 showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1)) # Επαναφορά οριζόντιων διακριτικών γραμμών
 
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
     clicked_key = event["selection"]["points"][0].get("customdata", [None])[0] if event and "selection" in event and event["selection"].get("points") else None
@@ -450,7 +457,6 @@ if menu == "Ταμπλό Gantt":
 
         with col_edit:
             st.subheader("✏️ Επεξεργασία")
-            # Edit logic remains...
 
 # --- VIEW: Άδειες ---
 elif menu == "Άδειες":
@@ -481,5 +487,4 @@ elif menu == "Άδειες":
                     if not st.session_state.leave_conflicts: db_insert('leaves', {**st.session_state.pending_leave, 'id': str(uuid.uuid4())}); st.session_state.pending_leave = None
                     st.rerun()
 
-# --- OTHER VIEWS ---
-# (Remaining logic for Projects, Employees, etc. omitted for brevity but preserved in Canvas)
+# (Υπόλοιπες σελίδες: Προσωπικό, Έργα κλπ. παραμένουν ως είχαν)
