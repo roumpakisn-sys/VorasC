@@ -305,9 +305,9 @@ active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('sta
 BASIC_COLORS = {"Μπλε": "#4a86e8", "Κόκκινο": "#e00000", "Πράσινο": "#6aa84f", "Κίτρινο": "#f1c232", "Μωβ": "#8e7cc3", "Πορτοκαλί": "#e69138", "Γαλάζιο": "#00ffff", "Ροζ": "#c90076", "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"}
 
 # --- ALERTS ---
-today = date.today()
-next_week = today + timedelta(days=7)
-orphans = [a for a in st.session_state.assignments if today <= a['date'] <= next_week and not a.get('employeeId') and not a.get('is_cancelled')]
+today_dt = date.today()
+next_week_dt = today_dt + timedelta(days=7)
+orphans = [a for a in st.session_state.assignments if today_dt <= a['date'] <= next_week_dt and not a.get('employeeId') and not a.get('is_cancelled')]
 if orphans:
     st.error(f"🚨 **Προσοχή: {len(orphans)} βάρδια/ες έμειναν ορφανές!**")
     with st.expander("👁️ Λεπτομέρειες"):
@@ -319,19 +319,20 @@ if orphans:
 if menu == "Ταμπλό Gantt":
     st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
-    with col_nav1: st.write(""); st.button("⬅️ Προν", on_click=go_prev_week, use_container_width=True)
+    with col_nav1: st.write(""); st.button("⬅️ Προν", on_click=go_prev_week, key="btn_prev", use_container_width=True)
     with col_date:
         selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
         start_of_week = selected_date - timedelta(days=selected_date.weekday())
-    with col_nav2: st.write(""); st.button("Επόμ ➡️", on_click=go_next_week, use_container_width=True)
-    with col_today: st.write(""); st.button("🏠 Σήμερα", on_click=go_to_today, use_container_width=True)
+    with col_nav2: st.write(""); st.button("Επόμ ➡️", on_click=go_next_week, key="btn_next", use_container_width=True)
+    with col_today: st.write(""); st.button("🏠 Σήμερα", on_click=go_to_today, key="btn_today", use_container_width=True)
     with col_zoom: zoom_level = st.slider("🔍 Ζουμ (%)", 50, 200, 100, 5)
     with col_pres: st.write(""); st.write(""); presentation_mode = st.checkbox("🖥️ Πλήρης Προβολή")
     zoom_factor = zoom_level / 100.0
 
-    data, color_map, y_category_order, tickvals, ticktext, empty_shift_annotations = [], {}, [], [], [], []
+    data, color_map, y_category_order, tickvals_map, empty_shift_annotations = [], {}, [], {}, []
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
+    # Διατρέχουμε και τις 7 μέρες της εβδομάδας (0-6)
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
@@ -346,88 +347,104 @@ if menu == "Ταμπλό Gantt":
         base_y_label = f"<b>{day_str}</b>{leaves_info}"
         day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_date]
         
+        day_row_ids = []
         if not day_assignments:
             row_id = f"day_{i}_row_0"
-            y_category_order.append(row_id); tickvals.append(row_id); ticktext.append(base_y_label)
+            day_row_ids.append(row_id)
             data.append({'Y_Axis': row_id, 'Έργο': 'Κενό', 'Έναρξη': datetime(1970, 1, 1, 8, 0), 'Λήξη': datetime(1970, 1, 1, 8, 0), 'ColorHex': 'rgba(0,0,0,0)', 'GroupKey': 'Empty', 'Ετικέτα': '', 'LegendGroup': 'Κενό'})
-            color_map['Κενό'] = 'rgba(0,0,0,0)'; continue
+            color_map['Κενό'] = 'rgba(0,0,0,0)'
+        else:
+            groups = {}
+            for a in day_assignments:
+                proj = get_project_info(a['projectId'])
+                c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
+                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{a.get('notes', '')}_{a.get('is_cancelled', False)}"
+                if key not in groups:
+                    groups[key] = {'Project': proj['name'] if proj else "?", 'StartTime': a['startTime'], 'EndTime': a['endTime'], 'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'], "%H:%M").time()), 'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'], "%H:%M").time()), 'Employees': [], 'ColorHex': c_hex, 'is_cancelled': a.get('is_cancelled', False), 'cancel_reason': a.get('cancel_reason', ''), 'LegendGroup': f"{proj['name'] if proj else '?'} ({a.get('colorName', 'Default')})", 'Key': key}
+                groups[key]['Employees'].append(get_employee_name(a['employeeId']))
 
-        groups = {}
-        for a in day_assignments:
-            proj = get_project_info(a['projectId'])
-            c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
-            key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{a.get('notes', '')}_{a.get('is_cancelled', False)}"
-            if key not in groups:
-                groups[key] = {'Project': proj['name'] if proj else "?", 'StartTime': a['startTime'], 'EndTime': a['endTime'], 'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'], "%H:%M").time()), 'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'], "%H:%M").time()), 'Employees': [], 'ColorHex': c_hex, 'is_cancelled': a.get('is_cancelled', False), 'cancel_reason': a.get('cancel_reason', ''), 'LegendGroup': f"{proj['name'] if proj else '?'} ({a.get('colorName', 'Default')})", 'Key': key}
-            groups[key]['Employees'].append(get_employee_name(a['employeeId']))
+            lanes = []
+            for g in sorted(groups.values(), key=lambda x: x['Start']):
+                placed = False
+                for idx, end in enumerate(lanes):
+                    if g['Start'] >= end: lanes[idx] = g['End']; row_idx = idx; placed = True; break
+                if not placed: lanes.append(g['End']); row_idx = len(lanes) - 1
+                
+                row_id = f"day_{i}_row_{row_idx}"
+                if row_id not in day_row_ids: day_row_ids.append(row_id)
+                
+                txt = f"{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {', '.join(g['Employees']).upper()}"
+                wrap_w = max(15, int(((g['End']-g['Start']).total_seconds()/3600.0) * 16))
+                wrapped = "<br>".join(textwrap.wrap(txt, width=wrap_w))
+                if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in txt:
+                    empty_shift_annotations.append(dict(x=g['End'], y=row_id, text="🔴", showarrow=False, xanchor='right', yanchor='middle', xshift=-4, yshift=int(35*zoom_factor), font=dict(size=max(10, int(14*zoom_factor)))))
+                
+                label = f"<s>{wrapped}</s><br><span style='color:#dc2626;'><b>{g['cancel_reason']}</b></span>" if g['is_cancelled'] else wrapped
+                data.append({'Y_Axis': row_id, 'Έργο': g['Project'], 'Έναρξη': g['Start'], 'Λήξη': g['End'], 'Ετικέτα': label, 'LegendGroup': g['LegendGroup'], 'ColorHex': g['ColorHex'], 'GroupKey': g['Key']})
+                color_map[g['LegendGroup']] = g['ColorHex']
 
-        lanes = []
-        for g in sorted(groups.values(), key=lambda x: x['Start']):
-            placed = False
-            for idx, end in enumerate(lanes):
-                if g['Start'] >= end: lanes[idx] = g['End']; row_idx = idx; placed = True; break
-            if not placed: lanes.append(g['End']); row_idx = len(lanes) - 1
-            
-            row_id = f"day_{i}_row_{row_idx}"
-            if row_id not in y_category_order: y_category_order.append(row_id); tickvals.append(row_id)
-            
-            txt = f"{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {', '.join(g['Employees']).upper()}"
-            wrap_w = max(15, int(((g['End']-g['Start']).total_seconds()/3600.0) * 16))
-            wrapped = "<br>".join(textwrap.wrap(txt, width=wrap_w))
-            if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in txt:
-                empty_shift_annotations.append(dict(x=g['End'], y=row_id, text="🔴", showarrow=False, xanchor='right', yanchor='middle', xshift=-4, yshift=int(35*zoom_factor), font=dict(size=max(10, int(14*zoom_factor)))))
-            
-            label = f"<s>{wrapped}</s><br><span style='color:#dc2626;'><b>{g['cancel_reason']}</b></span>" if g['is_cancelled'] else wrapped
-            data.append({'Y_Axis': row_id, 'Έργο': g['Project'], 'Έναρξη': g['Start'], 'Λήξη': g['End'], 'Ετικέτα': label, 'LegendGroup': g['LegendGroup'], 'ColorHex': g['ColorHex'], 'GroupKey': g['Key']})
-            color_map[g['LegendGroup']] = g['ColorHex']
-
-        # --- ΚΕΝΤΡΑΡΙΣΜΑ ΕΤΙΚΕΤΩΝ ΑΞΟΝΑ Y ---
-        day_row_ids = [rid for rid in y_category_order if rid.startswith(f"day_{i}_")]
-        num_day_lanes = len(day_row_ids)
-        mid_lane_idx = num_day_lanes // 2
+        # Προσθήκη των IDs στο γενικό σύνολο και αντιστοίχιση Labels
+        y_category_order.extend(day_row_ids)
+        mid_idx = len(day_row_ids) // 2
         for idx, rid in enumerate(day_row_ids):
-            ticktext.append(base_y_label if idx == mid_lane_idx else "")
+            tickvals_map[rid] = base_y_label if idx == mid_idx else ""
 
     df = pd.DataFrame(data)
+    # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
+    # Επειδή θέλουμε Δευτέρα (day_0) πάνω, η categoryarray πρέπει να είναι Sunday -> Monday.
+    ordered_categories = y_category_order[::-1]
+    
     fig = px.timeline(df, x_start="Έναρξη", x_end="Λήξη", y="Y_Axis", color="LegendGroup", color_discrete_map=color_map, text="Ετικέτα", custom_data=["GroupKey"])
     
     # --- STYLING: Zebra Striping, Seperators, Grid & Today Highlight ---
     for di in range(7):
-        idxs = [idx for idx, val in enumerate(y_category_order[::-1]) if val.startswith(f"day_{di}_")]
-        if idxs:
-            mn, mx = min(idxs), max(idxs)
+        # Βρίσκουμε τις θέσεις των σειρών της συγκεκριμένης ημέρας στον αντεστραμμένο άξονα
+        day_idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{di}_")]
+        if day_idxs:
+            mn, mx = min(day_idxs), max(day_idxs)
             if di % 2 != 0:
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
             if (start_of_week + timedelta(days=di)) == date.today():
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
 
-    for idx in range(len(y_category_order) - 1):
-        if y_category_order[::-1][idx].split('_')[1] != y_category_order[::-1][idx+1].split('_')[1]:
+    # Μαύρες διαχωριστικές γραμμές μεταξύ ημερών
+    for idx in range(len(ordered_categories) - 1):
+        d_curr = ordered_categories[idx].split('_')[1]
+        d_next = ordered_categories[idx+1].split('_')[1]
+        if d_curr != d_next:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
-    # --- LAYOUT ---
+    # --- LAYOUT & AXES ---
     row_h = 90 * zoom_factor
     visible_count = 650 / row_h
-    if presentation_mode or len(y_category_order) <= visible_count:
-        dyn_h, y_range = max(500, int(len(y_category_order) * row_h) + 100), None
+    if presentation_mode or len(ordered_categories) <= visible_count:
+        dyn_h, y_range = max(500, int(len(ordered_categories) * row_h) + 100), None
     else:
         dyn_h = 750
         offset = (date.today() - start_of_week).days
         if 0 <= offset <= 6:
-            idxs = [idx for idx, val in enumerate(y_category_order[::-1]) if val.startswith(f"day_{offset}_")]
+            idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{offset}_")]
             if idxs:
                 mid = sum(idxs)/len(idxs)
-                y_range = [max(-0.5, mid - visible_count/2), min(len(y_category_order)-0.5, mid + visible_count/2)]
-            else: y_range = [len(y_category_order)-visible_count-0.5, len(y_category_order)-0.5]
-        else: y_range = [len(y_category_order)-visible_count-0.5, len(y_category_order)-0.5]
+                y_range = [max(-0.5, mid - visible_count/2), min(len(ordered_categories)-0.5, mid + visible_count/2)]
+            else: y_range = [len(ordered_categories)-visible_count-0.5, len(ordered_categories)-0.5]
+        else: y_range = [len(ordered_categories)-visible_count-0.5, len(ordered_categories)-0.5]
 
+    fig.update_yaxes(
+        categoryorder='array', 
+        categoryarray=ordered_categories, 
+        tickmode='array', 
+        tickvals=ordered_categories, 
+        ticktext=[tickvals_map[v] for v in ordered_categories],
+        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1 # Οριζόντιες διακριτικές γραμμές
+    )
+    
     fig.update_traces(textposition='inside', insidetextanchor='middle', textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black"), marker=dict(line=dict(color='black', width=1)))
     fig.update_layout(bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
                       annotations=empty_shift_annotations, dragmode="pan",
                       xaxis=dict(side='top', tickmode='linear', dtick=1800000, tickformat="%H:%M", range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
                                  showgrid=True, gridcolor='black', gridwidth=1),
-                      yaxis=dict(title="", range=y_range, fixedrange=False, tickmode='array', tickvals=tickvals, ticktext=ticktext, 
-                                 showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1)) # Επαναφορά οριζόντιων διακριτικών γραμμών
+                      yaxis=dict(title="", range=y_range, fixedrange=False))
 
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
     clicked_key = event["selection"]["points"][0].get("customdata", [None])[0] if event and "selection" in event and event["selection"].get("points") else None
