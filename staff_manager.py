@@ -28,9 +28,22 @@ st.markdown("""
         box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
         border-right: 1px solid #e2e8f0 !important;
     }
+    .stPlotlyChart {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+    }
+    /* Στυλ για τα κόκκινα alerts επικαλύψεων στις άδειες */
+    .leave-conflict-box {
+        padding: 15px;
+        border-radius: 8px;
+        background-color: #fee2e2;
+        border: 1px solid #ef4444;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
+# Ψηφιακό Ρολόι (Javascript Injection)
 components.html("""
     <script>
         const doc = window.parent.document;
@@ -56,7 +69,7 @@ components.html("""
     </script>
 """, height=0, width=0)
 
-# --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ ---
+# --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "current_user" not in st.session_state:
@@ -64,14 +77,12 @@ if "current_user" not in st.session_state:
 
 if not st.session_state.authenticated:
     st.markdown("<h1 style='text-align: center; margin-top: 10vh;'>🔒 Staff Manager Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ επιλέξτε χρήστη και εισάγετε τον κωδικό πρόσβασης.</p>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
             username = st.selectbox("Χρήστης", ["Admin", "EXOUZ", "MEMEK", "NAK", "TAN"])
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
-            submit = st.form_submit_button("Είσοδος", use_container_width=True)
-            if submit:
+            if st.form_submit_button("Είσοδος", use_container_width=True):
                 valid_passwords = {
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
                     "EXOUZ": st.secrets.get("USER1_PASSWORD", "pass1"),
@@ -96,7 +107,7 @@ def add_transaction(actions):
     st.session_state.redo_stack.clear()
     if len(st.session_state.undo_stack) > 30: st.session_state.undo_stack.pop(0)
 
-# --- SUPABASE ---
+# --- SUPABASE CONNECTION & CACHING ---
 @st.cache_resource
 def init_supabase():
     if not SUPABASE_INSTALLED: return None
@@ -105,8 +116,6 @@ def init_supabase():
     except Exception: return None
 
 supabase = init_supabase()
-
-# --- CACHING ---
 CACHE_TTL = 60 
 
 def fetch_paginated(table):
@@ -131,8 +140,7 @@ def fetch_table_projects(): return fetch_paginated("projects")
 def fetch_table_assignments():
     assigns = fetch_paginated("assignments")
     for a in assigns:
-        if isinstance(a.get('date'), str):
-            a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+        if isinstance(a.get('date'), str): a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
     return assigns
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_leaves():
@@ -165,40 +173,62 @@ def clear_all_caches():
     fetch_table_employees.clear(); fetch_table_projects.clear(); fetch_table_assignments.clear()
     fetch_table_leaves.clear(); fetch_table_patterns.clear(); fetch_table_evaluations.clear(); fetch_table_activity_logs.clear()
 
+# --- LOGGING & DB ACTIONS ---
 def serialize_dates(data):
     if isinstance(data, list): return [serialize_dates(item) for item in data]
     elif isinstance(data, dict): return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
+
+def format_log_details(table_name, records):
+    if not records: return "Καμία εγγραφή"
+    if isinstance(records, dict): records = [records]
+    lines = []
+    for r in records:
+        if not isinstance(r, dict): continue
+        if table_name == 'employees': lines.append(f"{r.get('name', 'Άγνωστος')}")
+        elif table_name == 'projects': lines.append(f"'{r.get('name', 'Έργο')}'")
+        elif table_name == 'assignments':
+            e_n = get_employee_name(r.get('employeeId'))
+            lines.append(f"Βάρδια: {e_n} ({r.get('date')})")
+        else: lines.append("Εγγραφή")
+    return " | ".join(lines[:5])
+
+def log_activity(action_type, table_name, details_raw):
+    if not supabase or table_name == 'activity_logs': return
+    user = st.session_state.get("current_user", "Άγνωστος")
+    now_gr = (datetime.utcnow() + timedelta(hours=3)).isoformat()
+    log_entry = {"id": str(uuid.uuid4()), "timestamp": now_gr, "username": user, "action_type": action_type, "table_name": table_name, "details": str(details_raw)[:2000]}
+    try: supabase.table("activity_logs").insert(log_entry).execute(); clear_cache_for_table("activity_logs")
+    except Exception: pass
 
 def db_insert(table, data, track=True):
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
             clear_cache_for_table(table)
-            if track:
-                records = data if isinstance(data, list) else [data]
-                add_transaction([{'type': 'insert', 'table': table, 'records': records}])
-        except Exception as e: st.error(f"Error: {e}")
+            if track: add_transaction([{'type': 'insert', 'table': table, 'records': data if isinstance(data, list) else [data]}])
+            log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
+        except Exception as e: st.error(f"DB Error: {e}")
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
     if supabase:
         try:
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
             clear_cache_for_table(table)
-            if track and old_data:
-                add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
-        except Exception as e: st.error(f"Error: {e}")
+            if track and old_data: add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
+            log_activity("ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_data))
+        except Exception as e: st.error(f"DB Error: {e}")
 
-def db_delete(table, column, value, deleted_records=None, track=True):
-    if supabase:
+def db_delete_in(table, column, values, track=True):
+    if supabase and values:
         try:
-            if not deleted_records:
-                table_data = st.session_state.get(table, [])
-                deleted_records = [r for r in table_data if r.get(column) == value]
-            supabase.table(table).delete().eq(column, value).execute()
+            table_data = st.session_state.get(table, [])
+            deleted_records = [r for r in table_data if r.get(column) in values]
+            supabase.table(table).delete().in_(column, values).execute()
             clear_cache_for_table(table)
-            if track and deleted_records: add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-        except Exception as e: st.error(f"Error: {e}")
+            if track: add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+            log_activity("ΔΙΑΓΡΑΦΗ", table, f"{len(values)} εγγραφές")
+        except Exception as e: st.error(f"DB Error: {e}")
 
 def perform_undo():
     if not st.session_state.undo_stack: return
@@ -232,7 +262,7 @@ def perform_redo():
 
 # --- Helpers ---
 def get_employee_name(emp_id):
-    if not emp_id: return "Χωρίς Προσωπικό"
+    if not emp_id: return "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
     for emp in st.session_state.employees:
         if emp['id'] == emp_id: return emp['name']
     return "Άγνωστος"
@@ -277,6 +307,8 @@ else:
 
 if 'view_week_date' not in st.session_state: st.session_state.view_week_date = date.today()
 is_full_admin = st.session_state.get('current_user') != "TAN"
+active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
+BASIC_COLORS = {"Μπλε": "#4a86e8", "Κόκκινο": "#e00000", "Πράσινο": "#6aa84f", "Κίτρινο": "#f1c232", "Μωβ": "#8e7cc3", "Πορτοκαλί": "#e69138", "Γαλάζιο": "#00ffff", "Ροζ": "#c90076", "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"}
 
 # --- Sidebar Navigation ---
 st.sidebar.title("STAFF.PRO")
@@ -298,210 +330,314 @@ if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=Tru
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤: **{st.session_state.get('current_user', 'Άγνωστος')}**")
-if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
-    st.session_state.authenticated = False; st.rerun()
-
-active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
-BASIC_COLORS = {"Μπλε": "#4a86e8", "Κόκκινο": "#e00000", "Πράσινο": "#6aa84f", "Κίτρινο": "#f1c232", "Μωβ": "#8e7cc3", "Πορτοκαλί": "#e69138", "Γαλάζιο": "#00ffff", "Ροζ": "#c90076", "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"}
+if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True): st.session_state.authenticated = False; st.rerun()
 
 # --- ALERTS ---
 today_dt = date.today()
-next_week_dt = today_dt + timedelta(days=7)
-orphans = [a for a in st.session_state.assignments if today_dt <= a['date'] <= next_week_dt and not a.get('employeeId') and not a.get('is_cancelled')]
+next_week_limit = today_dt + timedelta(days=7)
+orphans = [a for a in st.session_state.assignments if today_dt <= a['date'] <= next_week_limit and not a.get('employeeId') and not a.get('is_cancelled')]
 if orphans:
-    st.error(f"🚨 **Προσοχή: {len(orphans)} βάρδια/ες έμειναν ορφανές!**")
+    st.error(f"🚨 **Προσοχή: {len(orphans)} βάρδια/ες έμειναν ορφανές την ερχόμενη εβδομάδα!**")
     with st.expander("👁️ Λεπτομέρειες"):
         for a in orphans:
-            proj = get_project_info(a['projectId'])
-            st.markdown(f"• **{a['date'].strftime('%d/%m')}** | {a['startTime']}-{a['endTime']} | **{proj['name'] if proj else '?'}**")
+            p_inf = get_project_info(a['projectId'])
+            st.markdown(f"• **{a['date'].strftime('%d/%m')}** | {a['startTime']}-{a['endTime']} | **{p_inf['name'] if p_inf else '?'}**")
+    st.write("---")
 
 # --- VIEW: DASHBOARD (GANTT) ---
 if menu == "Ταμπλό Gantt":
     st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
-    col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
-    with col_nav1: st.write(""); st.button("⬅️ Προν", on_click=go_prev_week, key="btn_prev", use_container_width=True)
-    with col_date:
-        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
-        start_of_week = selected_date - timedelta(days=selected_date.weekday())
-    with col_nav2: st.write(""); st.button("Επόμ ➡️", on_click=go_next_week, key="btn_next", use_container_width=True)
-    with col_today: st.write(""); st.button("🏠 Σήμερα", on_click=go_to_today, key="btn_today", use_container_width=True)
-    with col_zoom: zoom_level = st.slider("🔍 Ζουμ (%)", 50, 200, 100, 5)
-    with col_pres: st.write(""); st.write(""); presentation_mode = st.checkbox("🖥️ Πλήρης Προβολή")
-    zoom_factor = zoom_level / 100.0
+    c_n1, c_dt, c_n2, c_today, c_zm, c_pr = st.columns([1, 2, 1, 1, 2, 2.5])
+    with c_n1: st.write(""); st.button("⬅️ Προν", on_click=go_prev_week, key="nav_prev", use_container_width=True)
+    with c_dt:
+        sel_dt = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
+        start_week = sel_dt - timedelta(days=sel_dt.weekday())
+    with c_n2: st.write(""); st.button("Επόμ ➡️", on_click=go_next_week, key="nav_next", use_container_width=True)
+    with c_today: st.write(""); st.button("🏠 Σήμερα", on_click=go_to_today, key="nav_today", use_container_width=True)
+    with c_zm: zm_level = st.slider("🔍 Ζουμ (%)", 50, 200, 100, 5)
+    with c_pr: st.write(""); st.write(""); pres_mode = st.checkbox("🖥️ Πλήρης Προβολή")
+    zoom_factor = zm_level / 100.0
 
     data, color_map, y_category_order, tickvals_map, empty_shift_annotations = [], {}, [], {}, []
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
+    wk_groups = {} 
 
-    # Διατρέχουμε και τις 7 μέρες της εβδομάδας (0-6)
     for i in range(7):
-        curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
+        curr_d = start_week + timedelta(days=i)
+        day_str = f"{day_names_gr[i]} {curr_d.strftime('%d/%m')}"
         leaves_today = []
         for l in st.session_state.leaves:
-            if l['startDate'] <= curr_date <= l['endDate']:
+            if l['startDate'] <= curr_d <= l['endDate']:
                 emp_n = get_employee_name(l['employeeId'])
                 sub_id = l.get('substituteId')
                 leaves_today.append(f"<b>{emp_n}</b>" + (f"<br><span style='font-size:10px; color:#991b1b;'>↳ Αντικ: {get_employee_name(sub_id)}</span>" if sub_id else ""))
         
         leaves_info = f"<br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{'<br>'.join(leaves_today) if leaves_today else 'Καμία'}</span>"
         base_y_label = f"<b>{day_str}</b>{leaves_info}"
-        day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_date]
+        day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_d]
         
-        day_row_ids = []
+        day_rids = []
         if not day_assignments:
-            row_id = f"day_{i}_row_0"
-            day_row_ids.append(row_id)
-            data.append({'Y_Axis': row_id, 'Έργο': 'Κενό', 'Έναρξη': datetime(1970, 1, 1, 8, 0), 'Λήξη': datetime(1970, 1, 1, 8, 0), 'ColorHex': 'rgba(0,0,0,0)', 'GroupKey': 'Empty', 'Ετικέτα': '', 'LegendGroup': 'Κενό'})
+            rid = f"day_{i}_row_0"
+            day_rids.append(rid)
+            data.append({'Y_Axis': rid, 'Έργο': 'Κενό', 'Έναρξη': datetime(1970, 1, 1, 8, 0), 'Λήξη': datetime(1970, 1, 1, 8, 0), 'ColorHex': 'rgba(0,0,0,0)', 'GroupKey': 'Empty', 'Ετικέτα': '', 'LegendGroup': 'Κενό'})
             color_map['Κενό'] = 'rgba(0,0,0,0)'
         else:
             groups = {}
             for a in day_assignments:
                 proj = get_project_info(a['projectId'])
                 c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
-                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{a.get('notes', '')}_{a.get('is_cancelled', False)}"
+                c_name = a.get('colorName', "Προεπιλογή")
+                is_canc = a.get('is_cancelled', False)
+                key = f"{curr_d}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{a.get('notes', '')}_{is_canc}"
                 if key not in groups:
-                    groups[key] = {'Project': proj['name'] if proj else "?", 'StartTime': a['startTime'], 'EndTime': a['endTime'], 'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'], "%H:%M").time()), 'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'], "%H:%M").time()), 'Employees': [], 'ColorHex': c_hex, 'is_cancelled': a.get('is_cancelled', False), 'cancel_reason': a.get('cancel_reason', ''), 'LegendGroup': f"{proj['name'] if proj else '?'} ({a.get('colorName', 'Default')})", 'Key': key}
+                    groups[key] = {'Project': proj['name'] if proj else "?", 'ProjectId': a['projectId'], 'Date': curr_d, 'StartTime': a['startTime'], 'EndTime': a['endTime'], 'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'], "%H:%M").time()), 'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'], "%H:%M").time()), 'Employees': [], 'EmployeeIds': [], 'AssignmentIds': [], 'ColorHex': c_hex, 'ColorName': c_name, 'Notes': a.get('notes', ''), 'is_cancelled': is_canc, 'cancel_reason': a.get('cancel_reason', ''), 'LegendGroup': f"{proj['name'] if proj else '?'} ({c_name})", 'Key': key}
                 groups[key]['Employees'].append(get_employee_name(a['employeeId']))
-
-            lanes = []
-            for g in sorted(groups.values(), key=lambda x: x['Start']):
+                groups[key]['EmployeeIds'].append(a['employeeId'])
+                groups[key]['AssignmentIds'].append(a['id'])
+            
+            wk_groups.update(groups)
+            
+            # Packing logic
+            non_blue = sorted([g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"], key=lambda x: x['Start'])
+            blue = sorted([g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"], key=lambda x: x['Start'])
+            
+            final_pack = []
+            nb_lanes = []
+            for g in non_blue:
                 placed = False
-                for idx, end in enumerate(lanes):
-                    if g['Start'] >= end: lanes[idx] = g['End']; row_idx = idx; placed = True; break
-                if not placed: lanes.append(g['End']); row_idx = len(lanes) - 1
-                
-                row_id = f"day_{i}_row_{row_idx}"
-                if row_id not in day_row_ids: day_row_ids.append(row_id)
-                
+                for idx, end in enumerate(nb_lanes):
+                    if g['Start'] >= end: nb_lanes[idx] = g['End']; final_pack.append((g, idx)); placed = True; break
+                if not placed: nb_lanes.append(g['End']); final_pack.append((g, len(nb_lanes)-1))
+            
+            offset = len(nb_lanes)
+            b_lanes = []
+            for g in blue:
+                placed = False
+                for idx, end in enumerate(b_lanes):
+                    if g['Start'] >= end: b_lanes[idx] = g['End']; final_pack.append((g, idx + offset)); placed = True; break
+                if not placed: b_lanes.append(g['End']); final_pack.append((g, len(b_lanes)-1 + offset))
+
+            for g, r_idx in final_pack:
+                rid = f"day_{i}_row_{r_idx}"
+                if rid not in day_rids: day_rids.append(rid)
                 txt = f"{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {', '.join(g['Employees']).upper()}"
                 wrap_w = max(15, int(((g['End']-g['Start']).total_seconds()/3600.0) * 16))
                 wrapped = "<br>".join(textwrap.wrap(txt, width=wrap_w))
                 if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in txt:
-                    empty_shift_annotations.append(dict(x=g['End'], y=row_id, text="🔴", showarrow=False, xanchor='right', yanchor='middle', xshift=-4, yshift=int(35*zoom_factor), font=dict(size=max(10, int(14*zoom_factor)))))
+                    empty_shift_annotations.append(dict(x=g['End'], y=rid, text="🔴", showarrow=False, xanchor='right', yanchor='middle', xshift=-4, yshift=int(35*zoom_factor), font=dict(size=max(10, int(14*zoom_factor)))))
                 
                 label = f"<s>{wrapped}</s><br><span style='color:#dc2626;'><b>{g['cancel_reason']}</b></span>" if g['is_cancelled'] else wrapped
-                data.append({'Y_Axis': row_id, 'Έργο': g['Project'], 'Έναρξη': g['Start'], 'Λήξη': g['End'], 'Ετικέτα': label, 'LegendGroup': g['LegendGroup'], 'ColorHex': g['ColorHex'], 'GroupKey': g['Key']})
+                data.append({'Y_Axis': rid, 'Έργο': g['Project'], 'Έναρξη': g['Start'], 'Λήξη': g['End'], 'Ετικέτα': label, 'LegendGroup': g['LegendGroup'], 'ColorHex': g['ColorHex'], 'GroupKey': g['Key']})
                 color_map[g['LegendGroup']] = g['ColorHex']
 
-        # Προσθήκη των IDs στο γενικό σύνολο και αντιστοίχιση Labels
-        y_category_order.extend(day_row_ids)
-        mid_idx = len(day_row_ids) // 2
-        for idx, rid in enumerate(day_row_ids):
+        y_category_order.extend(day_rids)
+        mid_idx = len(day_rids) // 2
+        for idx, rid in enumerate(day_rids):
             tickvals_map[rid] = base_y_label if idx == mid_idx else ""
 
     df = pd.DataFrame(data)
-    # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
-    # Επειδή θέλουμε Δευτέρα (day_0) πάνω, η categoryarray πρέπει να είναι Sunday -> Monday.
-    ordered_categories = y_category_order[::-1]
+    ordered_cats = y_category_order[::-1]
     
     fig = px.timeline(df, x_start="Έναρξη", x_end="Λήξη", y="Y_Axis", color="LegendGroup", color_discrete_map=color_map, text="Ετικέτα", custom_data=["GroupKey"])
     
-    # --- STYLING: Zebra Striping, Seperators, Grid & Today Highlight ---
+    # Zebra striping & Highlights
     for di in range(7):
-        # Βρίσκουμε τις θέσεις των σειρών της συγκεκριμένης ημέρας στον αντεστραμμένο άξονα
-        day_idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{di}_")]
-        if day_idxs:
-            mn, mx = min(day_idxs), max(day_idxs)
-            if di % 2 != 0:
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
-            if (start_of_week + timedelta(days=di)) == date.today():
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
+        idxs = [idx for idx, val in enumerate(ordered_cats) if val.startswith(f"day_{di}_")]
+        if idxs:
+            mn, mx = min(idxs), max(idxs)
+            if di % 2 != 0: fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
+            if (start_week + timedelta(days=di)) == date.today(): fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
 
-    # Μαύρες διαχωριστικές γραμμές μεταξύ ημερών
-    for idx in range(len(ordered_categories) - 1):
-        d_curr = ordered_categories[idx].split('_')[1]
-        d_next = ordered_categories[idx+1].split('_')[1]
-        if d_curr != d_next:
+    for idx in range(len(ordered_cats) - 1):
+        if ordered_cats[idx].split('_')[1] != ordered_cats[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
-    # --- LAYOUT & AXES ---
+    # STICKY AXIS CALC
     row_h = 90 * zoom_factor
-    visible_count = 650 / row_h
-    if presentation_mode or len(ordered_categories) <= visible_count:
-        dyn_h, y_range = max(500, int(len(ordered_categories) * row_h) + 100), None
+    vis_count = 650 / row_h
+    if pres_mode or len(ordered_cats) <= vis_count: dyn_h, y_range = max(500, int(len(ordered_cats) * row_h) + 100), None
     else:
         dyn_h = 750
-        offset = (date.today() - start_of_week).days
+        offset = (date.today() - start_week).days
         if 0 <= offset <= 6:
-            idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{offset}_")]
-            if idxs:
-                mid = sum(idxs)/len(idxs)
-                y_range = [max(-0.5, mid - visible_count/2), min(len(ordered_categories)-0.5, mid + visible_count/2)]
-            else: y_range = [len(ordered_categories)-visible_count-0.5, len(ordered_categories)-0.5]
-        else: y_range = [len(ordered_categories)-visible_count-0.5, len(ordered_categories)-0.5]
+            idxs = [idx for idx, val in enumerate(ordered_cats) if val.startswith(f"day_{offset}_")]
+            mid = sum(idxs)/len(idxs) if idxs else (len(ordered_cats) - vis_count/2)
+            y_range = [max(-0.5, mid - vis_count/2), min(len(ordered_cats)-0.5, mid + vis_count/2)]
+        else: y_range = [len(ordered_cats)-vis_count-0.5, len(ordered_cats)-0.5]
 
-    fig.update_yaxes(
-        categoryorder='array', 
-        categoryarray=ordered_categories, 
-        tickmode='array', 
-        tickvals=ordered_categories, 
-        ticktext=[tickvals_map[v] for v in ordered_categories],
-        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1 # Οριζόντιες διακριτικές γραμμές
-    )
-    
+    fig.update_yaxes(categoryorder='array', categoryarray=ordered_cats, tickmode='array', tickvals=ordered_cats, ticktext=[tickvals_map[v] for v in ordered_cats], showgrid=True, gridcolor='rgba(0,0,0,0.1)')
     fig.update_traces(textposition='inside', insidetextanchor='middle', textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black"), marker=dict(line=dict(color='black', width=1)))
-    fig.update_layout(bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
-                      annotations=empty_shift_annotations, dragmode="pan",
-                      xaxis=dict(side='top', tickmode='linear', dtick=1800000, tickformat="%H:%M", range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
-                                 showgrid=True, gridcolor='black', gridwidth=1),
-                      yaxis=dict(title="", range=y_range, fixedrange=False))
+    fig.update_layout(bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10), annotations=empty_shift_annotations, dragmode="pan", xaxis=dict(side='top', tickmode='linear', dtick=1800000, tickformat="%H:%M", range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)], showgrid=True, gridcolor='black'), yaxis=dict(title="", range=y_range, fixedrange=False))
 
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
     clicked_key = event["selection"]["points"][0].get("customdata", [None])[0] if event and "selection" in event and event["selection"].get("points") else None
 
-    st.caption("💡 **Tip:** Σύρετε (Drag) το γράφημα πάνω-κάτω για κύλιση. Κάντε κλικ σε μια μπάρα για επεξεργασία.")
-
-    if not presentation_mode and is_full_admin:
-        st.divider()
+    # --- FORMS ---
+    st.divider()
+    if is_full_admin:
         col_add, col_edit = st.columns(2)
         with col_add:
             st.subheader("➕ Νέα Τοποθέτηση")
-            with st.form("quick_add", clear_on_submit=True):
-                a_date = st.date_input("Ημερομηνία", value=selected_date)
+            with st.form("qa_form", clear_on_submit=True):
+                a_dt = st.date_input("Ημερομηνία", value=sel_dt)
                 p_id = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id']==x))
                 e_ids = st.multiselect("Προσωπικό", options=active_employee_ids, format_func=get_employee_name)
                 c_name = st.selectbox("Χρώμα", options=list(BASIC_COLORS.keys()))
-                t_s, t_e = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time()), st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time())
+                ts, te = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time()), st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time())
                 if st.form_submit_button("Καταχώρηση"):
-                    if t_s >= t_e: st.error("Λάθος ώρες")
-                    else:
-                        new_batch = []
-                        for eid in (e_ids if e_ids else [""]):
-                            if eid and is_on_leave(eid, a_date): st.toast(f"🛑 Άδεια: {get_employee_name(eid)}", icon="🛑"); continue
-                            if eid and has_time_conflict(eid, a_date, t_s.strftime("%H:%M"), t_e.strftime("%H:%M")): st.toast(f"🚨 Διπλοκράτηση: {get_employee_name(eid)}", icon="🚨"); continue
-                            new_batch.append({'id': str(uuid.uuid4()), 'employeeId': eid, 'projectId': p_id, 'date': a_date, 'startTime': t_s.strftime("%H:%M"), 'endTime': t_e.strftime("%H:%M"), 'colorName': c_name, 'colorHex': BASIC_COLORS[c_name]})
-                        if new_batch: db_insert("assignments", new_batch); st.rerun()
+                    new_b = []
+                    for eid in (e_ids if e_ids else [""]):
+                        if eid and is_on_leave(eid, a_dt): st.toast(f"🛑 Άδεια: {get_employee_name(eid)}", icon="🛑"); continue
+                        if eid and has_time_conflict(eid, a_dt, ts.strftime("%H:%M"), te.strftime("%H:%M")): st.toast(f"🚨 Διπλοκράτηση: {get_employee_name(eid)}", icon="🚨"); continue
+                        new_b.append({'id': str(uuid.uuid4()), 'employeeId': eid, 'projectId': p_id, 'date': a_dt, 'startTime': ts.strftime("%H:%M"), 'endTime': te.strftime("%H:%M"), 'colorName': c_name, 'colorHex': BASIC_COLORS[c_name]})
+                    if new_b: db_insert("assignments", new_b); st.rerun()
 
         with col_edit:
             st.subheader("✏️ Επεξεργασία")
+            g_keys = sorted(list(wk_groups.keys()), key=lambda x: (wk_groups[x]['Date'], wk_groups[x]['StartTime']))
+            def_idx = g_keys.index(clicked_key) + 1 if clicked_key in g_keys else 0
+            sel_k = st.selectbox("Επιλογή Μπάρας", options=[""] + g_keys, index=def_idx, format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']}")
+            if sel_k != "":
+                trg = wk_groups[sel_k]
+                with st.form("qe_form"):
+                    e_d = st.date_input("Ημερομηνία", value=trg['Date'])
+                    e_p = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], index=[p['id'] for p in st.session_state.projects].index(trg['ProjectId']), format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id']==x))
+                    vids = list(set(active_employee_ids + [eid for eid in trg['EmployeeIds'] if eid]))
+                    e_emps = st.multiselect("Προσωπικό", options=vids, default=[eid for eid in trg['EmployeeIds'] if eid], format_func=get_employee_name)
+                    e_cn = st.selectbox("Χρώμα", options=list(BASIC_COLORS.keys()), index=list(BASIC_COLORS.keys()).index(trg['ColorName']) if trg['ColorName'] in BASIC_COLORS else 0)
+                    e_not = st.text_input("Παρατηρήσεις", value=trg['Notes'])
+                    new_ts = st.time_input("Έναρξη", value=datetime.strptime(trg['StartTime'], "%H:%M").time())
+                    new_te = st.time_input("Λήξη", value=datetime.strptime(trg['EndTime'], "%H:%M").time())
+                    is_c = st.checkbox("Ακυρωμένη", value=trg['is_cancelled'])
+                    can_r = st.text_input("Λόγος Ακύρωσης", value=trg['cancel_reason'])
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("💾 Αποθήκευση"):
+                        db_delete_in('assignments', 'id', trg['AssignmentIds'], track=False)
+                        new_batch = []
+                        for eid in (e_emps if e_emps else [""]):
+                            new_batch.append({'id': str(uuid.uuid4()), 'employeeId': eid, 'projectId': e_p, 'date': e_d, 'startTime': new_ts.strftime("%H:%M"), 'endTime': new_te.strftime("%H:%M"), 'colorName': e_cn, 'colorHex': BASIC_COLORS[e_cn], 'notes': e_not, 'is_cancelled': is_c, 'cancel_reason': can_r})
+                        db_insert('assignments', new_batch); st.rerun()
+                    if b2.form_submit_button("🗑️ Διαγραφή"):
+                        db_delete_in('assignments', 'id', trg['AssignmentIds']); st.rerun()
 
-# --- VIEW: Άδειες ---
+# --- VIEW: PROJECTS ---
+elif menu == "Διαχείριση Έργων":
+    st.title("🏗️ Έργα")
+    if is_full_admin:
+        with st.expander("Νέο Έργο"):
+            with st.form("np_form"):
+                pn = st.text_input("Όνομα Έργου")
+                pc = st.color_picker("Χρώμα", "#4a86e8")
+                if st.form_submit_button("Δημιουργία"):
+                    db_insert('projects', {'id': str(uuid.uuid4()), 'name': pn, 'color': pc}); st.rerun()
+    for p in st.session_state.projects:
+        c1, c2 = st.columns([4, 1])
+        c1.write(f"**{p['name']}**")
+        if is_full_admin and c2.button("Διαγραφή", key=f"pj_{p['id']}"):
+            db_delete_in('projects', 'id', [p['id']]); st.rerun()
+
+# --- VIEW: TEAM ---
+elif menu == "Ομάδα Προσωπικού":
+    st.title("👥 Προσωπικό")
+    tl, ta, ti = st.tabs(["📋 Λίστα", "➕ Προσθήκη", "📥 Εισαγωγή"])
+    with ta:
+        with st.form("ne_form"):
+            n, po = st.text_input("Όνομα"), st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"])
+            if st.form_submit_button("Προσθήκη"):
+                db_insert('employees', {'id': str(uuid.uuid4()), 'name': n, 'position': po, 'status': 'Ενεργός'}); st.rerun()
+    with tl:
+        for e in st.session_state.employees:
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.write(f"**{e['name']}** ({e['position']})"); c2.write(e['status'])
+            if c3.button("❌", key=f"de_{e['id']}"): db_delete_in('employees', 'id', [e['id']]); st.rerun()
+    with ti:
+        upf = st.file_uploader("Αρχείο Excel/CSV", type=['xlsx', 'csv'])
+        if st.button("Εκτέλεση Εισαγωγής") and upf:
+            df = pd.read_excel(upf) if upf.name.endswith('xlsx') else pd.read_csv(upf)
+            batch = []
+            for _, r in df.iterrows():
+                nm = str(r.get('Ονοματεπώνυμο', r.get('Name', ''))).strip()
+                if nm and nm != 'nan': batch.append({'id': str(uuid.uuid4()), 'name': nm, 'position': 'ΕΡΓΑΤΗΣ', 'status': 'Ενεργός'})
+            if batch: db_insert('employees', batch); st.rerun()
+
+# --- VIEW: LEAVES (WITH APPROVAL) ---
 elif menu == "Άδειες":
     st.title("🏖️ Διαχείριση Αδειών")
     if "pending_leave" not in st.session_state: st.session_state.pending_leave = None
     if "leave_conflicts" not in st.session_state: st.session_state.leave_conflicts = []
-    tab_list, tab_add = st.tabs(["📋 Λίστα", "➕ Καταχώρηση"])
-    with tab_add:
-        with st.form("l_form"):
-            l_emp = st.selectbox("Υπάλληλος", options=active_employee_ids, format_func=get_employee_name)
-            l_s, l_e = st.date_input("Από"), st.date_input("Έως")
-            l_sub = st.selectbox("Αντικαταστάτης", options=[""] + active_employee_ids, format_func=lambda x: get_employee_name(x) if x else "Κανείς")
-            if st.form_submit_button("Έλεγχος & Καταχώρηση"):
-                conflicts = [a for a in st.session_state.assignments if a['employeeId'] == l_emp and l_s <= a['date'] <= l_e]
-                if conflicts: st.session_state.pending_leave = {'employeeId': l_emp, 'startDate': l_s, 'endDate': l_e, 'substituteId': l_sub if l_sub else None}; st.session_state.leave_conflicts = conflicts
-                else: db_insert('leaves', {'id': str(uuid.uuid4()), 'employeeId': l_emp, 'startDate': l_s, 'endDate': l_e, 'substituteId': l_sub if l_sub else None}); st.success("Έγινε!"); time.sleep(1); st.rerun()
-
+    t_l, t_a = st.tabs(["📋 Λίστα", "➕ Καταχώρηση"])
+    with t_a:
+        with st.form("l_f"):
+            le = st.selectbox("Υπάλληλος", options=active_employee_ids, format_func=get_employee_name)
+            ls, lee = st.date_input("Από"), st.date_input("Έως")
+            lsub = st.selectbox("Αντικαταστάτης", options=[""] + active_employee_ids, format_func=lambda x: get_employee_name(x) if x else "Κανείς")
+            if st.form_submit_button("Καταχώρηση"):
+                confs = [a for a in st.session_state.assignments if a['employeeId'] == le and ls <= a['date'] <= lee]
+                if confs:
+                    st.session_state.pending_leave = {'employeeId': le, 'startDate': ls, 'endDate': lee, 'substituteId': lsub if lsub else None}
+                    st.session_state.leave_conflicts = confs
+                else:
+                    db_insert('leaves', {'id': str(uuid.uuid4()), 'employeeId': le, 'startDate': ls, 'endDate': lee, 'substituteId': lsub if lsub else None})
+                    st.success("Έγινε!"); time.sleep(1); st.rerun()
         if st.session_state.pending_leave and st.session_state.leave_conflicts:
-            st.warning("⚠️ **Εμπλοκή με βάρδιες:** Πατήστε 'Έγκριση' για αφαίρεση εργαζόμενου από το έργο.")
+            st.warning("⚠️ **Εμπλοκή με βάρδιες:** Ο εργαζόμενος δουλεύει τις παρακάτω μέρες. Πατήστε 'Έγκριση' για αφαίρεση εργαζόμενου από το έργο.")
             for a in st.session_state.leave_conflicts:
                 c1, c2 = st.columns([4, 1])
-                c1.error(f"📍 {a['date'].strftime('%d/%m')} στο έργο '{next((p['name'] for p in st.session_state.projects if p['id']==a['projectId']), '?')}'")
-                if c2.button("✅ Έγκριση", key=f"appr_{a['id']}"):
-                    target = next(assign for assign in st.session_state.assignments if assign['id'] == a['id'])
-                    old = dict(target); target['employeeId'] = ""
-                    db_update('assignments', target['id'], target, old_data=old)
+                pj = get_project_info(a['projectId'])
+                c1.error(f"📍 {a['date'].strftime('%d/%m')} στο έργο '{pj['name'] if pj else '?'}'")
+                if c2.button("✅ Έγκριση", key=f"ap_{a['id']}"):
+                    trg = next(assign for assign in st.session_state.assignments if assign['id'] == a['id'])
+                    old = dict(trg); trg['employeeId'] = "" 
+                    db_update('assignments', trg['id'], trg, old_data=old)
                     st.session_state.leave_conflicts = [c for c in st.session_state.leave_conflicts if c['id'] != a['id']]
-                    if not st.session_state.leave_conflicts: db_insert('leaves', {**st.session_state.pending_leave, 'id': str(uuid.uuid4())}); st.session_state.pending_leave = None
+                    if not st.session_state.leave_conflicts:
+                        db_insert('leaves', {**st.session_state.pending_leave, 'id': str(uuid.uuid4())})
+                        st.session_state.pending_leave = None
                     st.rerun()
 
-# (Υπόλοιπες σελίδες: Προσωπικό, Έργα κλπ. παραμένουν ως είχαν)
+# --- RECURRING TASKS ---
+elif menu == "Επαναλαμβανόμενες Εργασίες":
+    st.title("🔄 Επαναλαμβανόμενες Εργασίες")
+    with st.form("rec_f"):
+        p_id = st.selectbox("Έργο", options=[p['id'] for p in st.session_state.projects], format_func=lambda x: next(p['name'] for p in st.session_state.projects if p['id']==x))
+        e_ids = st.multiselect("Προσωπικό", options=active_employee_ids, format_func=get_employee_name)
+        s_date = st.date_input("Έναρξη")
+        t_s, t_e = st.time_input("Έναρξη"), st.time_input("Λήξη")
+        if st.form_submit_button("Δημιουργία (3 Έτη)"):
+            pid = str(uuid.uuid4()); batch = []; curr = s_date; limit = s_date + timedelta(days=365*3)
+            while curr <= limit:
+                for eid in (e_ids if e_ids else [""]):
+                    batch.append({'id': str(uuid.uuid4()), 'employeeId': eid, 'projectId': p_id, 'date': curr, 'startTime': t_s.strftime("%H:%M"), 'endTime': t_e.strftime("%H:%M"), 'recurring_id': pid})
+                curr += timedelta(days=7)
+            db_insert('assignments', batch)
+            db_insert('recurring_patterns', {'id': pid, 'projectId': p_id, 'employeeIds': e_ids, 'type': 'Weekly', 'startDate': s_date})
+            st.success("Έγινε!"); st.rerun()
+
+# --- STATS & LOGS ---
+elif menu == "Σύνολο Αδειών":
+    st.title("📊 Σύνολο Αδειών")
+    res = [{"Όνομα": e['name'], "Ημέρες": sum(((l['endDate']-l['startDate']).days+1) for l in st.session_state.leaves if l['employeeId']==e['id'])} for e in st.session_state.employees]
+    st.table(pd.DataFrame(res))
+
+elif menu == "Ώρες Εργασιών":
+    st.title("⏱️ Σύνολο Ωρών")
+    m = st.selectbox("Μήνας", range(1, 13), index=date.today().month-1)
+    res = []
+    for e in st.session_state.employees:
+        h = sum((datetime.combine(date.today(), datetime.strptime(a['endTime'], "%H:%M").time()) - datetime.combine(date.today(), datetime.strptime(a['startTime'], "%H:%M").time())).total_seconds()/3600 for a in st.session_state.assignments if a['employeeId']==e['id'] and a['date'].month==m)
+        res.append({"Όνομα": e['name'], "Ώρες": round(h, 2)})
+    st.table(pd.DataFrame(res))
+
+elif menu == "Αξιολόγηση Προσωπικού":
+    st.title("⭐ Αξιολόγηση")
+    with st.form("ev_f"):
+        evals = []
+        for e in st.session_state.employees:
+            evals.append({'employeeId': e['id'], 'score': st.slider(e['name'], 1, 5, 3), 'date': date.today().isoformat()})
+        if st.form_submit_button("Αποθήκευση"):
+            db_insert('evaluations', evals); st.success("Αποθηκεύτηκε!")
+
+elif menu == "Καταγραφή Κινήσεων":
+    st.title("📜 Audit Log")
+    st.dataframe(pd.DataFrame(st.session_state.activity_logs).sort_values('timestamp', ascending=False), use_container_width=True)
