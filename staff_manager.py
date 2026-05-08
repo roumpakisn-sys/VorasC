@@ -893,7 +893,7 @@ if menu == "Ταμπλό Gantt":
                         xanchor='right',
                         yanchor='middle',
                         xshift=-4,  # Λίγο αριστερά από το τέλος της μπάρας για να μην ακουμπάει στο περίγραμμα
-                        yshift=int(35 * zoom_factor), # Μετατόπιση προς τα πάνω (κοντά στο πάνω όριο)
+                        yshift=int(28 * zoom_factor), # Μετατόπιση προς τα πάνω (κοντά στο πάνω όριο)
                         font=dict(size=max(10, int(14 * zoom_factor)))
                     ))
                 
@@ -975,7 +975,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 90 * zoom_factor
+    row_h = 75 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1014,7 +1014,7 @@ if menu == "Ταμπλό Gantt":
     )
     
     fig.update_layout(
-        bargap=0.02, 
+        bargap=0.15, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
