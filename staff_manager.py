@@ -1022,6 +1022,7 @@ if menu == "Ταμπλό Gantt":
         margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, 
         dragmode="pan",
+        uirevision="constant", # Διατηρεί το σημείο που έχεις κάνει pan/scroll μετά από κάθε κλικ
         xaxis=dict(
             side='top', 
             tickmode='linear',
@@ -1035,7 +1036,7 @@ if menu == "Ταμπλό Gantt":
             title="",
             tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
             fixedrange=False,
-            rangeslider=dict(visible=True, thickness=0.04, bgcolor="#e2e8f0")
+            rangeslider=dict(visible=False) # <-- Απενεργοποιήθηκε η μπάρα κύλισης που προκαλούσε το lag
         ),
         yaxis=dict(
             title="",
@@ -1048,16 +1049,15 @@ if menu == "Ταμπλό Gantt":
     # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
     clicked_key = None
     try:
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+        # Ενεργοποίηση ομαλού scrollZoom με τη ροδέλα και κρύψιμο της πάνω μπάρας (modebar)
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"scrollZoom": True, "displayModeBar": False})
         if event and "selection" in event and event["selection"].get("points"):
             clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
     except Exception:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": False})
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
-    hint_text = "💡 *Συμβουλές Προβολής:* **1)** Κάντε **κλικ σε μια μπάρα** για επεξεργασία. **2)** **Σύρετε (Drag) το γράφημα πάνω-κάτω** για κύλιση στις μέρες με σταθερό τον άξονα ωρών!"
-    
-    if export_data:
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Σύρετε το γράφημα πάνω-κάτω. **3)** Κάντε ζουμ με τη ροδέλα του ποντικιού (Scroll)."
         col_hint, col_btn = st.columns([3, 1])
         with col_hint:
             st.caption(hint_text)
