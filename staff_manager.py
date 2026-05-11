@@ -975,7 +975,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 75 * zoom_factor
+    row_h = 55 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1008,13 +1008,13 @@ if menu == "Ταμπλό Gantt":
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
-        textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black, Arial, sans-serif"),
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1)),
         textangle=0
     )
     
     fig.update_layout(
-        bargap=0.15, 
+        bargap=0.12, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
@@ -1049,15 +1049,15 @@ if menu == "Ταμπλό Gantt":
     # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
     clicked_key = None
     try:
-        # Ενεργοποίηση ομαλού scrollZoom με τη ροδέλα και κρύψιμο της πάνω μπάρας (modebar)
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"scrollZoom": True, "displayModeBar": False})
+        # Ενεργοποίηση ομαλού scrollZoom με τη ροδέλα (Απενεργοποιήθηκε για να ελέγχεται μόνο από Slider)
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event and event["selection"].get("points"):
             clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
     except Exception:
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": False})
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Σύρετε το γράφημα πάνω-κάτω. **3)** Κάντε ζουμ με τη ροδέλα του ποντικιού (Scroll)."
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Σύρετε το γράφημα πάνω-κάτω. **3)** Το ζουμ ελέγχεται αποκλειστικά από την παραπάνω μπάρα (Slider)."
     
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
