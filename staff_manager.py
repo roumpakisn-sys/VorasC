@@ -314,7 +314,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -1200,6 +1200,69 @@ if menu == "Ταμπλό Gantt":
                     if selected_key != "":
                         target_group = wk_groups[selected_key]
                         
+                        # --- ΓΡΗΓΟΡΗ ΜΕΤΑΚΙΝΗΣΗ ---
+                        st.markdown("⚡ **Γρήγορη Μετακίνηση** (Αντί για Drag & Drop)")
+                        qm_c1, qm_c2, qm_c3, qm_c4 = st.columns(4)
+                        move_m_day = qm_c1.button("⬅️ -1 Μέρα", use_container_width=True)
+                        move_p_day = qm_c2.button("➡️ +1 Μέρα", use_container_width=True)
+                        move_m_hour = qm_c3.button("⏪ -1 Ώρα", use_container_width=True)
+                        move_p_hour = qm_c4.button("⏩ +1 Ώρα", use_container_width=True)
+                        
+                        if any([move_m_day, move_p_day, move_m_hour, move_p_hour]):
+                            delta_days = -1 if move_m_day else (1 if move_p_day else 0)
+                            delta_hours = -1 if move_m_hour else (1 if move_p_hour else 0)
+                            
+                            has_error = False
+                            new_assigns = []
+                            old_assigns = []
+                            
+                            for a_id in target_group['AssignmentIds']:
+                                orig_a = next(a for a in st.session_state.assignments if a['id'] == a_id)
+                                new_a = dict(orig_a)
+                                
+                                if delta_days != 0:
+                                    new_a['date'] = orig_a['date'] + timedelta(days=delta_days)
+                                
+                                if delta_hours != 0:
+                                    dummy_date = datetime(2000, 1, 1)
+                                    s_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['startTime'], "%H:%M").time())
+                                    e_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['endTime'], "%H:%M").time())
+                                    
+                                    new_s_dt = s_dt + timedelta(hours=delta_hours)
+                                    new_e_dt = e_dt + timedelta(hours=delta_hours)
+                                    
+                                    if new_s_dt.date() != dummy_date.date() or new_e_dt.date() != dummy_date.date():
+                                        st.error("Η αλλαγή ώρας ξεπερνάει τα όρια της ημέρας.")
+                                        has_error = True
+                                        break
+                                        
+                                    new_a['startTime'] = new_s_dt.strftime("%H:%M")
+                                    new_a['endTime'] = new_e_dt.strftime("%H:%M")
+                                    
+                                if new_a['employeeId']:
+                                    emp_name = get_employee_name(new_a['employeeId'])
+                                    if is_on_leave(new_a['employeeId'], new_a['date']):
+                                        st.toast(f"🛑 Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="🛑")
+                                        has_error = True
+                                        break
+                                    if has_time_conflict(new_a['employeeId'], new_a['date'], new_a['startTime'], new_a['endTime'], exclude_ids=target_group['AssignmentIds']):
+                                        st.toast(f"🚨 Αδύνατη μετακίνηση: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
+                                        has_error = True
+                                        break
+                                
+                                old_assigns.append(orig_a)
+                                new_assigns.append(new_a)
+                                
+                            if not has_error:
+                                for old_a, new_a in zip(old_assigns, new_assigns):
+                                    db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
+                                
+                                add_transaction([{'type': 'update', 'table': 'assignments', 'old_records': old_assigns, 'new_records': new_assigns}])
+                                
+                                st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                                st.session_state.assignments.extend(new_assigns)
+                                st.rerun()
+
                         with st.form("quick_edit"):
                             edit_date = st.date_input("Αλλαγή Ημερομηνίας", value=target_group['Date'])
                             
