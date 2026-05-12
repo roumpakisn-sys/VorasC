@@ -2274,11 +2274,16 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
                             e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
                                                     index=default_proj_idx,
-                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"),
+                                                    key=f"edit_r_proj_{pat['id']}")
                                                     
-                            e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key="edit_r_custom_proj")
+                            e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key=f"edit_r_custom_proj_{pat['id']}")
                             
-                            e_type = pat.get('type', 'Εβδομαδιαία')
+                            e_type_options = ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"]
+                            current_e_type = pat.get('type', 'Εβδομαδιαία')
+                            e_type_idx = e_type_options.index(current_e_type) if current_e_type in e_type_options else 0
+                            e_type = st.selectbox("Συχνότητα Επανάληψης", e_type_options, index=e_type_idx, key=f"edit_r_type_{pat['id']}")
+                            
                             e_employee_ids_saved = pat.get('employeeIds', [])
                             
                             # Flatten active + saved ids for valid options
@@ -2296,11 +2301,15 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             e_selected_weekdays_data = {}
                             e_selected_weekdays = pat.get('weekdays', [])
                             
-                            st.write(f"**Συχνότητα Επανάληψης:** {e_type}")
-                            
                             if e_type in ["Εβδομαδιαία", "Μηνιαία"]:
-                                def_emps = [eid for eid in e_employee_ids_saved if eid] if isinstance(e_employee_ids_saved, list) else []
-                                e_emps_selection = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r, default=def_emps, format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
+                                def_emps = []
+                                if isinstance(e_employee_ids_saved, list):
+                                    def_emps = [eid for eid in e_employee_ids_saved if eid]
+                                elif isinstance(e_employee_ids_saved, dict):
+                                    def_emps = list(set([eid for lst in e_employee_ids_saved.values() for eid in lst if eid]))
+                                
+                                valid_def_emps = [eid for eid in def_emps if eid in edit_options_r]
+                                e_emps_selection = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r, default=valid_def_emps, format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'), key=f"edit_r_emps_{pat['id']}")
                             else:
                                 st.markdown("**Αλλαγή Ημερών & Προσωπικού (ανά μέρα):**")
                                 day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -2308,7 +2317,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 for i, d_name in enumerate(day_names):
                                     c_chk, c_emp = st.columns([1, 3])
                                     was_checked = d_name in pat.get('weekdays', [])
-                                    if c_chk.checkbox(d_name, value=was_checked, key=f"edit_chk_{i}"):
+                                    if c_chk.checkbox(d_name, value=was_checked, key=f"edit_chk_{i}_{pat['id']}"):
                                         e_selected_weekdays.append(d_name)
                                         
                                         def_day_emps = []
@@ -2323,21 +2332,21 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             options=edit_options_r, 
                                             default=valid_def, 
                                             format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'), 
-                                            key=f"edit_emps_day_{i}",
+                                            key=f"edit_emps_day_{i}_{pat['id']}",
                                             label_visibility="collapsed"
                                         )
                             
                             e_color_col, e_notes_col = st.columns(2)
                             with e_color_col:
                                 e_color_idx = list(BASIC_COLORS.keys()).index(pat['colorName']) if pat.get('colorName') in BASIC_COLORS else 0
-                                e_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=e_color_idx)
+                                e_color = st.selectbox("Αλλαγή Χρώματος", options=list(BASIC_COLORS.keys()), index=e_color_idx, key=f"edit_r_color_{pat['id']}")
                             with e_notes_col:
-                                e_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key="edit_r_notes")
+                                e_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key=f"edit_r_notes_{pat['id']}")
 
                         with e_col2:
-                            e_start_date = st.date_input("Αλλαγή Ημερομηνίας Έναρξης", pat['startDate'])
-                            e_start_time = st.time_input("Αλλαγή Ώρας Έναρξης", value=datetime.strptime(pat['startTime'], "%H:%M").time())
-                            e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'], "%H:%M").time())
+                            e_start_date = st.date_input("Αλλαγή Ημερομηνίας Έναρξης", value=pat['startDate'], key=f"edit_r_start_date_{pat['id']}")
+                            e_start_time = st.time_input("Αλλαγή Ώρας Έναρξης", value=datetime.strptime(pat['startTime'], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
+                            e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
                             
                         st.write("")
                         col_b1, col_b2 = st.columns(2)
