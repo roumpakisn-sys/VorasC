@@ -22,7 +22,6 @@ except ImportError:
 st.set_page_config(page_title="Staff Manager Pro", layout="wide")
 
 # --- GLOBAL STYLING & ΨΗΦΙΑΚΟ ΡΟΛΟΙ ---
-# Προσθήκη CSS για ελαφριά εξωτερική σκίαση στο πλευρικό μενού (Sidebar)
 st.markdown("""
     <style>
     [data-testid="stSidebar"] {
@@ -45,25 +44,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Προσθήκη αιωρούμενου Ψηφιακού Ρολογιού πιο αριστερά με Javascript (χωρίς να μπλοκάρει το Streamlit)
 components.html("""
     <script>
         const doc = window.parent.document;
         let clockDiv = doc.getElementById("staff_pro_clock");
         
-        // Δημιουργία του στοιχείου αν δεν υπάρχει
         if (!clockDiv) {
             clockDiv = doc.createElement("div");
             clockDiv.id = "staff_pro_clock";
             doc.body.appendChild(clockDiv);
         }
         
-        // Επιβολή του CSS σε κάθε εκτέλεση (έτσι μετακινείται σίγουρα ακόμα κι αν υπήρχε ήδη)
-        // Ρυθμίστηκε στο right: 300px για να είναι εντελώς μακριά από τα εικονίδια του Streamlit
         clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
         
-        // Η ρουτίνα ανανέωσης ΠΡΕΠΕΙ να είναι έξω από το if(!clockDiv) 
-        // ώστε το νέο iframe που φορτώνει το Streamlit να συνεχίζει να του δίνει "ζωή".
         function updateClock() {
             const now = new Date();
             const el = doc.getElementById("staff_pro_clock");
@@ -98,7 +91,6 @@ if not st.session_state.authenticated:
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # Έλεγχος κωδικών για κάθε χρήστη (Από secrets ή προεπιλεγμένοι)
                 valid_passwords = {
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
                     "EXOUZ": st.secrets.get("USER1_PASSWORD", "pass1"),
@@ -114,9 +106,7 @@ if not st.session_state.authenticated:
                 else:
                     st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
     
-    # Σταματάει την εκτέλεση του υπόλοιπου κώδικα αν δεν γίνει σύνδεση
     st.stop()
-
 
 # Check if secrets exist safely
 try:
@@ -131,10 +121,9 @@ if "redo_stack" not in st.session_state:
     st.session_state.redo_stack = []
 
 def add_transaction(actions):
-    """Καταγράφει μια λίστα ενεργειών για το Undo"""
     st.session_state.undo_stack.append(actions)
     st.session_state.redo_stack.clear()
-    if len(st.session_state.undo_stack) > 30: # Κρατάει ιστορικό 30 κινήσεων
+    if len(st.session_state.undo_stack) > 30: 
         st.session_state.undo_stack.pop(0)
 
 # --- SUPABASE CONNECTION & HELPERS ---
@@ -151,12 +140,10 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING (Micro-Caching) ---
-CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη
+CACHE_TTL = 60 
 
 def fetch_paginated(table):
-    if not supabase:
-        return []
+    if not supabase: return []
     all_rows = []
     offset = 0
     limit = 1000
@@ -174,12 +161,10 @@ def fetch_paginated(table):
     return all_rows
 
 @st.cache_data(ttl=CACHE_TTL)
-def fetch_table_employees():
-    return fetch_paginated("employees")
+def fetch_table_employees(): return fetch_paginated("employees")
 
 @st.cache_data(ttl=CACHE_TTL)
-def fetch_table_projects():
-    return fetch_paginated("projects")
+def fetch_table_projects(): return fetch_paginated("projects")
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_assignments():
@@ -209,20 +194,15 @@ def fetch_table_patterns():
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_evaluations():
-    try:
-        return fetch_paginated("evaluations")
-    except Exception:
-        return []
+    try: return fetch_paginated("evaluations")
+    except Exception: return []
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_activity_logs():
-    try:
-        return fetch_paginated("activity_logs")
-    except Exception:
-        return []
+    try: return fetch_paginated("activity_logs")
+    except Exception: return []
 
 def clear_cache_for_table(table):
-    """Καθαρίζει τη μνήμη ΜΟΝΟ για τον πίνακα που μόλις τροποποιήθηκε"""
     if table == "employees": fetch_table_employees.clear()
     elif table == "projects": fetch_table_projects.clear()
     elif table == "assignments": fetch_table_assignments.clear()
@@ -232,7 +212,6 @@ def clear_cache_for_table(table):
     elif table == "activity_logs": fetch_table_activity_logs.clear()
 
 def clear_all_caches():
-    """Εξαναγκάζει καθαρισμό σε όλους τους πίνακες (για το κουμπί Ανανέωσης)"""
     fetch_table_employees.clear()
     fetch_table_projects.clear()
     fetch_table_assignments.clear()
@@ -242,7 +221,6 @@ def clear_all_caches():
     fetch_table_activity_logs.clear()
 
 def serialize_dates(data):
-    """Μετατρέπει τα ημερολογιακά objects σε string για να μπουν σωστά στη βάση (Supabase/JSON)."""
     if isinstance(data, list):
         return [serialize_dates(item) for item in data]
     elif isinstance(data, dict):
@@ -250,7 +228,6 @@ def serialize_dates(data):
     return data
 
 def format_log_details(table_name, records):
-    """Μετατρέπει τα δεδομένα σε μορφή JSON (dict) σε φιλικό και ευανάγνωστο κείμενο."""
     if not records: return "Καμία εγγραφή"
     if isinstance(records, dict): records = [records]
     if isinstance(records, str): return records
@@ -258,32 +235,25 @@ def format_log_details(table_name, records):
     lines = []
     for r in records:
         if not isinstance(r, dict): continue
-        
         if table_name == 'employees':
             lines.append(f"{r.get('name', 'Άγνωστος')}")
-            
         elif table_name == 'projects':
             lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
-            
         elif table_name == 'assignments':
             emp_id = r.get('employeeId')
             emp_name = "Χωρίς Προσωπικό"
             if emp_id and 'employees' in st.session_state:
                 e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
                 if e_info: emp_name = e_info['name']
-            
             proj_id = r.get('projectId')
             proj_name = "Άγνωστο Έργο"
             if proj_id and 'projects' in st.session_state:
                 p_info = next((p for p in st.session_state.projects if p['id'] == proj_id), None)
                 if p_info: proj_name = p_info['name']
-                
             d = r.get('date', '')
             if isinstance(d, date): d = d.strftime('%d/%m/%Y')
             elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
-            
             lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
-            
         elif table_name == 'leaves':
             emp_id = r.get('employeeId')
             emp_name = "Άγνωστος"
@@ -294,15 +264,12 @@ def format_log_details(table_name, records):
             ed = r.get('endDate', '')
             if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
             if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
-            
             sub_str = ""
             sub_id = r.get('substituteId')
             if sub_id:
                 sub_name = next((e['name'] for e in st.session_state.employees if e['id'] == sub_id), "Άγνωστος")
                 sub_str = f" [Αντικατ: {sub_name}]"
-                
             lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
-            
         elif table_name == 'evaluations':
             emp_id = r.get('employeeId')
             emp_name = "Άγνωστος"
@@ -310,10 +277,8 @@ def format_log_details(table_name, records):
                 e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
                 if e_info: emp_name = e_info['name']
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
-            
         elif table_name == 'recurring_patterns':
             lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
-            
         else:
             lines.append("Εγγραφή")
             
@@ -323,35 +288,25 @@ def format_log_details(table_name, records):
     return " | ".join(lines)
 
 def parse_old_log_details(table_name, details_str):
-    """Παίρνει παλιές ακατέργαστες εγγραφές (raw dict/list strings) από τη βάση και τις μετατρέπει σε φιλικό κείμενο δυναμικά."""
     if not isinstance(details_str, str): return details_str
     if not (details_str.startswith("[{") or details_str.startswith("{")): return details_str
-    
     try:
-        # Αντικαθιστούμε τα datetime.date(Y, M, D) με απλά strings μορφής 'D/M/Y' για να περάσουν από την eval
         clean_str = re.sub(r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)", r"'\3/\2/\1'", details_str)
         parsed_data = ast.literal_eval(clean_str)
         return format_log_details(table_name, parsed_data)
     except Exception:
-        # Αν αποτύχει η μετατροπή, επέστρεψε απλά την παλιά μορφή
         return details_str
 
 def log_activity(action_type, table_name, details_raw):
-    """Καταγράφει την ενέργεια του χρήστη στον πίνακα activity_logs"""
     if not supabase: return
-    if table_name == 'activity_logs': return # Αποτροπή ατέρμονου βρόχου (infinite loop)
-    
+    if table_name == 'activity_logs': return 
     user = st.session_state.get("current_user", "Άγνωστος")
-    
-    # Μετατροπή της ώρας σε Ώρα Ελλάδος
     try:
         from zoneinfo import ZoneInfo
         now_gr = datetime.now(ZoneInfo("Europe/Athens")).isoformat()
     except Exception:
         now_gr = (datetime.utcnow() + timedelta(hours=3)).isoformat()
-        
-    detail_str = str(details_raw)[:2000] # Περιορισμός μεγέθους για ασφάλεια
-    
+    detail_str = str(details_raw)[:2000] 
     log_entry = {
         "id": str(uuid.uuid4()),
         "timestamp": now_gr,
@@ -367,7 +322,6 @@ def log_activity(action_type, table_name, details_raw):
         print(f"Σφάλμα αποθήκευσης στο Ιστορικό (activity_logs): {e}")
 
 def db_insert(table, data, track=True):
-    """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση."""
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
@@ -375,79 +329,60 @@ def db_insert(table, data, track=True):
             if track:
                 records = data if isinstance(data, list) else [data]
                 add_transaction([{'type': 'insert', 'table': table, 'records': records}])
-            
-            # Προσθήκη στο Audit Log με τα καθαρά Ελληνικά ονόματα!
             details_str = format_log_details(table, data)
             log_activity("ΠΡΟΣΘΗΚΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
 
 def db_delete(table, column, value, deleted_records=None, track=True):
-    """Διαγράφει εγγραφές με βάση μια συνθήκη."""
     if supabase:
         try:
             if not deleted_records:
                 table_data = st.session_state.get(table, [])
                 deleted_records = [r for r in table_data if r.get(column) == value]
-                
             supabase.table(table).delete().eq(column, value).execute()
             clear_cache_for_table(table)
-            
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-                
-            # Προσθήκη στο Audit Log
             details_str = format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}"
             log_activity("ΔΙΑΓΡΑΦΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
-    """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
     if supabase and values:
         try:
             if not deleted_records:
                 table_data = st.session_state.get(table, [])
                 deleted_records = [r for r in table_data if r.get(column) in values]
-                
             supabase.table(table).delete().in_(column, values).execute()
             clear_cache_for_table(table)
-            
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-                
-            # Προσθήκη στο Audit Log
             details_str = format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές"
             log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
-    """Ενημερώνει μια εγγραφή με βάση το ID της."""
     if supabase:
         try:
             if track and not old_data:
                 table_data = st.session_state.get(table, [])
                 old_data = next((r for r in table_data if r.get('id') == id_val), None)
-                
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
             clear_cache_for_table(table)
-            
             if track and old_data:
                 add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
-                
-            # Προσθήκη στο Audit Log
             details_str = format_log_details(table, new_data)
             log_activity("ΕΝΗΜΕΡΩΣΗ", table, details_str)
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
 def perform_undo():
-    """Εκτελεί αναίρεση της τελευταίας καταγεγραμμένης συναλλαγής."""
     if not st.session_state.undo_stack: return
     transaction = st.session_state.undo_stack.pop()
     st.session_state.redo_stack.append(transaction)
-    
     for act in reversed(transaction):
         if act['type'] == 'insert':
             ids = [r['id'] for r in act['records']]
@@ -457,15 +392,12 @@ def perform_undo():
         elif act['type'] == 'update':
             for old_r in act['old_records']:
                 db_update(act['table'], old_r['id'], old_r, track=False)
-    
     clear_all_caches()
 
 def perform_redo():
-    """Εκτελεί επανάληψη της τελευταίας αναιρεμένης συναλλαγής."""
     if not st.session_state.redo_stack: return
     transaction = st.session_state.redo_stack.pop()
     st.session_state.undo_stack.append(transaction)
-    
     for act in transaction:
         if act['type'] == 'insert':
             db_insert(act['table'], act['records'], track=False)
@@ -475,21 +407,13 @@ def perform_redo():
         elif act['type'] == 'update':
             for new_r in act['new_records']:
                 db_update(act['table'], new_r['id'], new_r, track=False)
-                
     clear_all_caches()
 
 # --- 10 Βασικά Χρώματα ---
 BASIC_COLORS = {
-    "Μπλε": "#4a86e8",
-    "Κόκκινο": "#e00000",
-    "Πράσινο": "#6aa84f",
-    "Κίτρινο": "#f1c232",
-    "Μωβ": "#8e7cc3",
-    "Πορτοκαλί": "#e69138",
-    "Γαλάζιο": "#00ffff",
-    "Ροζ": "#c90076",
-    "Σκούρο Πράσινο": "#38761d",
-    "Γκρι": "#999999"
+    "Μπλε": "#4a86e8", "Κόκκινο": "#e00000", "Πράσινο": "#6aa84f", "Κίτρινο": "#f1c232",
+    "Μωβ": "#8e7cc3", "Πορτοκαλί": "#e69138", "Γαλάζιο": "#00ffff", "Ροζ": "#c90076",
+    "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"
 }
 
 # --- Συνεχής Φόρτωση Δεδομένων (Real-time Sync Logic) ---
@@ -503,7 +427,6 @@ if supabase:
     st.session_state.activity_logs = fetch_table_activity_logs()
     st.session_state.is_cloud = True
 else:
-    # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
     if 'local_data_loaded' not in st.session_state:
         st.session_state.local_data_loaded = True
         st.session_state.is_cloud = False
@@ -527,17 +450,14 @@ if 'view_week_date' not in st.session_state:
 
 # --- Helpers ---
 def get_employee_name(emp_id):
-    if not emp_id:
-        return "Χωρίς Προσωπικό"
+    if not emp_id: return "Χωρίς Προσωπικό"
     for emp in st.session_state.employees:
-        if emp['id'] == emp_id:
-            return emp['name']
+        if emp['id'] == emp_id: return emp['name']
     return "Άγνωστος"
 
 def get_project_info(proj_id):
     for proj in st.session_state.projects:
-        if proj['id'] == proj_id:
-            return proj
+        if proj['id'] == proj_id: return proj
     return None
 
 def is_on_leave(emp_id, check_date):
@@ -554,8 +474,7 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
     προσαρμόζει ΑΥΤΟΜΑΤΑ την ώρα έναρξής του για να μη χτυπάει σφάλμα (διπλοκράτηση).
     """
     if not emp_id: return t_start, t_end, False, ""
-    if exclude_ids is None:
-        exclude_ids = []
+    if exclude_ids is None: exclude_ids = []
         
     try:
         new_s = datetime.strptime(t_start[:5], "%H:%M").time()
@@ -574,20 +493,13 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
         except Exception:
             continue
             
-        # Έλεγχος επικάλυψης (αυστηρό overlap)
         if new_s < ea_e and new_e > ea_s:
-            # Αν η υπάρχουσα βάρδια προηγείται και μπαίνει μέσα στη νέα
-            if ea_s <= new_s < ea_e:
-                new_s = ea_e
+            if ea_e < new_e and ea_s <= new_s:
+                new_s = max(new_s, ea_e)
                 adjusted = True
-            # Αν η υπάρχουσα βάρδια έπεται και η νέα μπαίνει μέσα της
-            elif new_s < ea_s:
-                if new_e <= ea_e:
-                    new_e = ea_s
-                    adjusted = True
-                else:
-                    return t_start, t_end, True, "Μη επιλύσιμη επικάλυψη (απαιτείται σπάσιμο βάρδιας)"
-                    
+            else:
+                return t_start, t_end, True, "Μη επιλύσιμη επικάλυψη (απαιτείται σπάσιμο βάρδιας)"
+                
     if new_s >= new_e:
         return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια"
         
@@ -602,31 +514,15 @@ def go_next_week():
 def go_to_today():
     st.session_state.view_week_date = date.today()
 
-# Μεταβλητή για τον έλεγχο Read-Only πρόσβασης (ο TAN δεν μπορεί να πειράξει το Gantt και τα έργα)
 is_full_admin = st.session_state.get('current_user') != "TAN"
 
 # --- Sidebar Navigation ---
 st.sidebar.title("STAFF.PRO")
-
-menu_options = [
-    "Ταμπλό Gantt", 
-    "Διαχείριση Έργων", 
-    "Ομάδα Προσωπικού", 
-    "Άδειες",
-    "Σύνολο Αδειών",
-    "Επαναλαμβανόμενες Εργασίες",
-    "Ώρες Εργασιών",
-    "Αξιολόγηση Προσωπικού"
-]
-
-# Το Μενού "Καταγραφή Κινήσεων" εμφανίζεται ΜΟΝΟ στον Admin
-if st.session_state.get('current_user') == "Admin":
-    menu_options.append("Καταγραφή Κινήσεων")
-
+menu_options = ["Ταμπλό Gantt", "Διαχείριση Έργων", "Ομάδα Προσωπικού", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
+if st.session_state.get('current_user') == "Admin": menu_options.append("Καταγραφή Κινήσεων")
 menu = st.sidebar.radio("Μενού", menu_options)
 
 st.sidebar.write("---")
-
 st.sidebar.subheader("Ενέργειες")
 col_u, col_r = st.sidebar.columns(2)
 with col_u:
@@ -640,8 +536,6 @@ with col_r:
 
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
-
-# Διαγνωστικός Έλεγχος & Έλεγχος Αποσύνδεσης
 if st.session_state.get('is_cloud'):
     st.sidebar.success(f"✅ Cloud Sync (Ανανέωση {CACHE_TTL}s)")
     if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
@@ -650,11 +544,9 @@ if st.session_state.get('is_cloud'):
 else:
     st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
     if not SUPABASE_INSTALLED:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'.")
     elif not HAS_SECRETS:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
-    else:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets.")
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
@@ -663,11 +555,10 @@ if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
     st.session_state.current_user = None
     st.rerun()
 
-# --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ (Για τις φόρμες επιλογής) ---
+# --- ΛΙΣΤΑ ΜΟΝΟ ΕΝΕΡΓΩΝ ΥΠΑΛΛΗΛΩΝ ---
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
 # --- ΣΥΣΤΗΜΑ ΕΙΔΟΠΟΙΗΣΕΩΝ (ALERTS) ---
-# Εντοπισμός "ορφανών" βαρδιών για τις επόμενες 7 ημέρες
 today_date = date.today()
 next_week_date = today_date + timedelta(days=7)
 orphan_count = 0
@@ -675,32 +566,25 @@ orphan_details = []
 
 for a in st.session_state.assignments:
     shift_date = a.get('date')
-    # Έλεγχος αν η βάρδια είναι μέσα στις επόμενες 7 ημέρες
     if today_date <= shift_date <= next_week_date:
-        # Αν η βάρδια δεν έχει υπάλληλο και ΔΕΝ είναι σημασμένη ως ακυρωμένη
         if not a.get('employeeId') and not a.get('is_cancelled', False):
             orphan_count += 1
             proj = get_project_info(a['projectId'])
             proj_name = proj['name'] if proj else "Άγνωστο Έργο"
-            
-            # Μορφοποίηση της ημερομηνίας για όμορφη εμφάνιση
             date_str = shift_date.strftime('%d/%m/%Y')
             orphan_details.append(f"• **{date_str}** | Ώρες: {a['startTime']}-{a['endTime']} | Έργο: **{proj_name}**")
 
-# Εμφάνιση του Alert αν υπάρχουν ορφανές βάρδιες (Εμφανίζεται σε όλες τις καρτέλες, ψηλά)
 if orphan_count > 0:
     st.error(f"🚨 **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
     with st.expander("👁️ Δείτε αναλυτικά τις ορφανές βάρδιες"):
         for detail in orphan_details:
             st.markdown(detail)
-    st.write("---") # Διαχωριστική γραμμή για να ξεχωρίζει από το υπόλοιπο UI
-# -------------------------------------
+    st.write("---") 
 
 # --- VIEW: DASHBOARD (GANTT) ---
 if menu == "Ταμπλό Gantt":
     st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
     
-    # Μενού πλοήγησης εβδομάδων με Προσθήκη επιλογέα ZOOM
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
     with col_nav1:
         st.write("")
@@ -724,27 +608,23 @@ if menu == "Ταμπλό Gantt":
     zoom_factor = zoom_level / 100.0
     
     data = []
-    export_data = [] # Λίστα για τα δεδομένα που θα εξαχθούν στο Excel
+    export_data = [] 
     color_map = {}
     y_category_order = []
     tickvals_map = {}
-    empty_shift_annotations = [] # Λίστα για τα κυκλάκια "Χωρίς Προσωπικό"
+    empty_shift_annotations = [] 
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
-    
-    wk_groups = {} # Για την επεξεργασία
+    wk_groups = {} 
 
-    # Διατρέχουμε και τις 7 μέρες της εβδομάδας
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         
-        # Υπολογισμός αδειών για την τρέχουσα μέρα με αναφορά στον Αντικαταστάτη
         leaves_today = []
         for l in st.session_state.leaves:
             if l['startDate'] <= curr_date <= l['endDate']:
                 emp_full = get_employee_name(l['employeeId'])
-                # Συντόμευση Ονόματος: π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.
                 emp_parts = emp_full.split()
                 emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
                 
@@ -753,25 +633,20 @@ if menu == "Ταμπλό Gantt":
                     sub_full = get_employee_name(sub_id)
                     sub_parts = sub_full.split()
                     sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
-                    
                     leaves_today.append(f"<b>{emp_n}</b><br><span style='font-size:10px; color:#991b1b;'>↳ Αντικατ: <b>{sub_n}</b></span>")
                 else:
                     leaves_today.append(f"<b>{emp_n}</b>")
                     
-        # Διαχωρισμός πολλαπλών αδειών με αλλαγή γραμμής (<br>) αντί για κόμμα
         leaves_str = "<br><br>".join(leaves_today) if leaves_today else "Καμία"
         
-        # Η βασική ετικέτα του άξονα Y για αυτή τη μέρα
         if leaves_today:
             base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
         else:
             base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
         
         day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_date]
-        
         day_row_ids = []
         
-        # Αν η μέρα δεν έχει καθόλου εργασίες, δημιουργούμε μια διάφανη καταχώρηση
         if not day_assignments:
             row_id = f"day_{i}_row_0"
             day_row_ids.append(row_id)
@@ -790,7 +665,6 @@ if menu == "Ταμπλό Gantt":
             })
             color_map['Κενό'] = 'rgba(0,0,0,0)'
         else:
-            # Ομαδοποίηση εργασιών της τρέχουσας μέρας
             groups = {}
             for a in day_assignments:
                 proj = get_project_info(a['projectId'])
@@ -800,7 +674,6 @@ if menu == "Ταμπλό Gantt":
                 is_canc = a.get('is_cancelled', False)
                 c_reason = a.get('cancel_reason', '')
                 
-                # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
                 key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
                 if key not in groups:
                     legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
@@ -824,7 +697,6 @@ if menu == "Ταμπλό Gantt":
                         'LegendGroup': legend_val
                     }
                 
-                # Μορφοποίηση ονόματος: Επώνυμο + Αρχικό Ονόματος (π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.)
                 if not a.get('employeeId'):
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
                 else:
@@ -837,39 +709,32 @@ if menu == "Ταμπλό Gantt":
                     else:
                         formatted_name = full_name
                         
-                    # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
-                    # Χρησιμοποιούμε τη σωστή μετατροπή ώρας για να βρούμε προηγούμενη βάρδια
                     prev_assigns = []
                     for pa in day_assignments:
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
                             try:
                                 t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
                                 t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                # Αν η προηγούμενη βάρδια τελειώνει πριν ή ακριβώς τη στιγμή που ξεκινάει η νέα
                                 if t_pa_end_val <= t_a_start_val:
                                     prev_assigns.append(pa)
-                            except Exception as e:
+                            except Exception:
                                 pass
                                 
                     if prev_assigns:
-                        # Ταξινόμηση για να βρούμε την πιο πρόσφατη βάρδια πριν από τη συγκεκριμένη
                         prev_assigns.sort(key=lambda x: datetime.strptime(x['endTime'][:5], "%H:%M").time(), reverse=True)
                         prev_proj = get_project_info(prev_assigns[0]['projectId'])
                         if prev_proj:
-                            formatted_name = f"μετά από '{prev_proj['name']}' {formatted_name}"
+                            formatted_name = f"(μετά από '{prev_proj['name']}') {formatted_name}"
                     
                 groups[key]['Employees'].append(formatted_name)
                 groups[key]['EmployeeIds'].append(a['employeeId'])
                 groups[key]['AssignmentIds'].append(a['id'])
 
-            # Ενημέρωση για το Edit View
             wk_groups.update(groups)
 
-            # Διαχωρισμός σε "Μπλε" και "Μη-Μπλε" μπάρες
             non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
             blue_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
             
-            # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΗ ΜΠΛΕ (Μπαίνουν πάνω)
             non_blue_lanes = [] 
             group_row_mapping = []
             
@@ -890,7 +755,6 @@ if menu == "Ταμπλό Gantt":
 
             num_non_blue_lanes = len(non_blue_lanes)
 
-            # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΠΛΕ (Μπαίνουν κάτω)
             blue_lanes = []
             for g in sorted(blue_groups, key=lambda x: x['Start']):
                 placed = False
@@ -905,10 +769,8 @@ if menu == "Ταμπλό Gantt":
                     blue_lanes.append(g['End'])
                     row_idx = len(blue_lanes) - 1
                 
-                # Προσθέτουμε το offset των non-blue lanes ώστε να μπουν από κάτω
                 group_row_mapping.append((g, row_idx + num_non_blue_lanes))
 
-            # Δημιουργία τελικών δεδομένων προς σχεδίαση
             for g, row_idx in group_row_mapping:
                 row_id = f"day_{i}_row_{row_idx}"
                 if row_id not in day_row_ids:
@@ -918,19 +780,15 @@ if menu == "Ταμπλό Gantt":
                 proj_name = g['Project'].upper()
                 times_str = f"{g['StartTime']}-{g['EndTime']}"
                 
-                # Δημιουργία του βασικού κειμένου
                 base_text = f"{times_str} {proj_name} // {emps_str}"
                 if g['Notes']:
                     base_text += f" ({g['Notes'].upper()})"
                     
-                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (αυξημένο πλάτος για να χωράει το "μετά από")
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
                 wrap_w = max(20, int(duration_hours * 16))
 
-                # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
                 
-                # Εάν η βάρδια είναι "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ", προσθέτουμε ένα Annotation (🔴) στην πάνω δεξιά γωνία
                 if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
                     empty_shift_annotations.append(dict(
                         x=g['End'],
@@ -944,7 +802,6 @@ if menu == "Ταμπλό Gantt":
                         font=dict(size=max(10, int(14 * zoom_factor)))
                     ))
                 
-                # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
                 if g['is_cancelled']:
                     label_text = f"<s>{wrapped_base}</s>"
                     if g['cancel_reason']:
@@ -966,7 +823,6 @@ if menu == "Ταμπλό Gantt":
                     'GroupKey': g['Key']
                 })
                 
-                # Προσθήκη δεδομένων για το αρχείο Excel
                 export_data.append({
                     'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
                     'Ημέρα': day_names_gr[i],
@@ -981,19 +837,14 @@ if menu == "Ταμπλό Gantt":
                 
                 color_map[g['LegendGroup']] = g['ColorHex']
                 
-        # Προσθήκη των IDs στο γενικό σύνολο και αντιστοίχιση Labels στο κέντρο της μέρας
         y_category_order.extend(day_row_ids)
         mid_idx = len(day_row_ids) // 2
         for idx, rid in enumerate(day_row_ids):
             tickvals_map[rid] = base_y_label if idx == mid_idx else ""
             
     df = pd.DataFrame(data)
-    
-    # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
-    # Επειδή θέλουμε Δευτέρα (day_0) πάνω, η categoryarray πρέπει να είναι Sunday -> Monday.
     ordered_categories = y_category_order[::-1]
     
-    # Σχεδιασμός Γραφήματος
     fig = px.timeline(
         df, 
         x_start="Έναρξη", 
@@ -1001,12 +852,11 @@ if menu == "Ταμπλό Gantt":
         y="Y_Axis", 
         color="LegendGroup",
         color_discrete_map=color_map,
-        custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
+        custom_data=["GroupKey"], 
         hover_data=["Έργο", "Προσωπικό", "Παρατηρήσεις"],
         text="Ετικέτα"
     )
     
-    # --- ΠΡΟΣΘΗΚΗ ΕΝΑΛΛΑΣΣΟΜΕΝΟΥ ΦΟΝΤΟΥ (ZEBRA STRIPING) & HIGHLIGHTS ---
     for di in range(7):
         day_idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{di}_")]
         if day_idxs:
@@ -1016,12 +866,10 @@ if menu == "Ταμπλό Gantt":
             if (start_of_week + timedelta(days=di)) == date.today():
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
 
-    # Μαύρες διαχωριστικές γραμμές μεταξύ ημερών
     for idx in range(len(ordered_categories) - 1):
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
-    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
     row_h = 55 * zoom_factor
     visible_count = 650 / row_h
     
@@ -1049,7 +897,7 @@ if menu == "Ταμπλό Gantt":
         ticktext=[tickvals_map[v] for v in ordered_categories],
         showgrid=True, 
         gridcolor='rgba(0,0,0,0.1)', 
-        gridwidth=1 # Οριζόντιες διακριτικές γραμμές
+        gridwidth=1
     )
     
     fig.update_traces(
@@ -1069,7 +917,7 @@ if menu == "Ταμπλό Gantt":
         margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, 
         dragmode="pan",
-        uirevision="constant", # Διατηρεί το σημείο που έχεις κάνει pan/scroll μετά από κάθε κλικ
+        uirevision="constant", 
         xaxis=dict(
             side='top', 
             tickmode='linear',
@@ -1083,7 +931,7 @@ if menu == "Ταμπλό Gantt":
             title="",
             tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
             fixedrange=False,
-            rangeslider=dict(visible=False) # <-- Απενεργοποιήθηκε η μπάρα κύλισης που προκαλούσε το lag
+            rangeslider=dict(visible=False) 
         ),
         yaxis=dict(
             title="",
@@ -1093,10 +941,8 @@ if menu == "Ταμπλό Gantt":
         )
     )
     
-    # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
     clicked_key = None
     try:
-        # Ενεργοποίηση ομαλού scrollZoom με τη ροδέλα (Απενεργοποιήθηκε για να ελέγχεται μόνο από Slider)
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event and event["selection"].get("points"):
             clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
@@ -1334,7 +1180,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
