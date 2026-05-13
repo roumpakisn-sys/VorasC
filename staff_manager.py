@@ -834,15 +834,9 @@ if menu == "Ταμπλό Gantt":
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
                             try:
                                 t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
-                                t_pa_start_val = datetime.strptime(pa['startTime'][:5], "%H:%M").time()
                                 t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                t_a_end_val = datetime.strptime(a['endTime'][:5], "%H:%M").time()
-                                
-                                overlap = (t_pa_start_val < t_a_end_val) and (t_a_start_val < t_pa_end_val)
-                                back_to_back = (t_pa_end_val == t_a_start_val)
-                                
-                                # Προσθήκη στην "προηγούμενη" βάρδια ΑΝ επικαλύπτονται και τελειώνει πιο νωρίς, Ή αν είναι back-to-back
-                                if (overlap and t_pa_end_val < t_a_end_val) or back_to_back:
+                                # Το εμφανίζουμε ΜΟΝΟ αν η νέα βάρδια ξεκινάει ακριβώς εκεί που τελειώνει η προηγούμενη
+                                if t_pa_end_val == t_a_start_val:
                                     prev_assigns.append(pa)
                             except Exception:
                                 pass
@@ -852,7 +846,7 @@ if menu == "Ταμπλό Gantt":
                         prev_assigns.sort(key=lambda x: datetime.strptime(x['endTime'][:5], "%H:%M").time(), reverse=True)
                         prev_proj = get_project_info(prev_assigns[0]['projectId'])
                         if prev_proj:
-                            formatted_name = f"(μετά από '{prev_proj['name']}') {formatted_name}"
+                            formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' {formatted_name}]"
                     
                 groups[key]['Employees'].append(formatted_name)
                 groups[key]['EmployeeIds'].append(a['employeeId'])
