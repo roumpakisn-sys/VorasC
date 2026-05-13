@@ -791,7 +791,7 @@ if menu == "Ταμπλό Gantt":
                 notes = a.get('notes', '')
                 is_canc = a.get('is_cancelled', False)
                 c_reason = a.get('cancel_reason', '')
-                arrival_time = a.get('arrivalTime', a['startTime'])[:5]
+                arrival_time = (a.get('arrivalTime') or a.get('startTime', '00:00'))[:5]
                 
                 # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
                 key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}_{arrival_time}"
@@ -924,9 +924,9 @@ if menu == "Ταμπλό Gantt":
                 if g['Notes']:
                     base_text += f" ({g['Notes'].upper()})"
                     
-                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
+                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (αυξημένο πλάτος για να χωράει το "μετά από")
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(10, int(duration_hours * 14))
+                wrap_w = max(20, int(duration_hours * 16))
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -941,7 +941,7 @@ if menu == "Ταμπλό Gantt":
                         xanchor='right',
                         yanchor='middle',
                         xshift=-4,  
-                        yshift=int(35 * zoom_factor), 
+                        yshift=int(28 * zoom_factor), 
                         font=dict(size=max(10, int(14 * zoom_factor)))
                     ))
                 
@@ -1025,7 +1025,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 90 * zoom_factor
+    row_h = 55 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1058,14 +1058,13 @@ if menu == "Ταμπλό Gantt":
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
-        textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black"),
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1)),
-        textangle=0,
-        constraintext='none'
+        textangle=0
     )
     
     fig.update_layout(
-        bargap=0.02, 
+        bargap=0.12, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
@@ -1306,7 +1305,7 @@ if menu == "Ταμπλό Gantt":
                                     new_a['endTime'] = new_e_dt.strftime("%H:%M")
                                     
                                     if 'arrivalTime' in orig_a and orig_a['arrivalTime']:
-                                        arr_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['arrivalTime'][:5], "%H:%M").time())
+                                        arr_dt = datetime.combine(dummy_date, datetime.strptime((orig_a.get('arrivalTime') or orig_a['startTime'])[:5], "%H:%M").time())
                                         new_arr_dt = arr_dt + timedelta(hours=delta_hours)
                                         new_a['arrivalTime'] = new_arr_dt.strftime("%H:%M")
                                     
@@ -1347,7 +1346,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1366,7 +1365,7 @@ if menu == "Ταμπλό Gantt":
 
                             e_arr, e_start, e_end = st.columns(3)
                             with e_arr:
-                                new_t_arrival = st.time_input("Νέα Ώρα Προσέλευσης", value=datetime.strptime(target_group.get('ArrivalTime', target_group['StartTime'])[:5], "%H:%M").time())
+                                new_t_arrival = st.time_input("Νέα Ώρα Προσέλευσης", value=datetime.strptime((target_group.get('ArrivalTime') or target_group.get('StartTime', '00:00'))[:5], "%H:%M").time())
                             with e_start:
                                 new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'][:5], "%H:%M").time())
                             with e_end:
@@ -2455,11 +2454,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             
                             e_arr, e_start, e_end = st.columns(3)
                             with e_arr:
-                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=datetime.strptime(pat.get('arrivalTime', pat['startTime'])[:5], "%H:%M").time(), key=f"edit_r_arr_time_{pat['id']}")
+                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=datetime.strptime((pat.get('arrivalTime') or pat['startTime'])[:5], "%H:%M").time(), key=f"edit_r_arr_time_{pat['id']}")
                             with e_start:
                                 e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
                             with e_end:
-                                e_end_time = st.time_input("Αλλαγή Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
+                                e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
                             
                         st.write("")
                         col_b1, col_b2 = st.columns(2)
