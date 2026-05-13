@@ -921,11 +921,9 @@ if menu == "Ταμπλό Gantt":
                 if g['Notes']:
                     base_text += f" ({g['Notes'].upper()})"
                     
-                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (αυξημένο πλάτος για να χωράει το "μετά από")
+                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                
-                # Πιο επιθετική αναδίπλωση: ελάχιστο πλάτος 10 χαρακτήρες, αυξάνεται ελαφρώς με τη διάρκεια
-                wrap_w = max(10, int(duration_hours * 12)) 
+                wrap_w = max(15, int(duration_hours * 16))
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -940,7 +938,7 @@ if menu == "Ταμπλό Gantt":
                         xanchor='right',
                         yanchor='middle',
                         xshift=-4,  
-                        yshift=int(28 * zoom_factor), 
+                        yshift=int(35 * zoom_factor), 
                         font=dict(size=max(10, int(14 * zoom_factor)))
                     ))
                 
@@ -1022,7 +1020,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 65 * zoom_factor # Ελαφρώς αυξημένο για να χωράει τις 3-4 γραμμές κειμένου που θα προκύπτουν
+    row_h = 90 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1055,14 +1053,12 @@ if menu == "Ταμπλό Gantt":
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
-        textfont=dict(color='black', size=max(7, int(8.5*zoom_factor)), family="Arial Black, Arial, sans-serif"),
-        marker=dict(line=dict(color='black', width=1)),
-        textangle=0,
-        constraintext='none' # Λέει στο Plotly να μην εξαφανίζει το κείμενο αν νομίζει ότι δε χωράει
+        textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black"),
+        marker=dict(line=dict(color='black', width=1))
     )
     
     fig.update_layout(
-        bargap=0.12, 
+        bargap=0.02, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
