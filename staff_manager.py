@@ -828,7 +828,7 @@ if menu == "Ταμπλό Gantt":
                     else:
                         formatted_name = full_name
                         
-                    # Εντοπισμός προηγούμενου έργου ("μετά από το...") βάσει των νέων κανόνων
+                    # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
                     prev_assigns = []
                     for pa in day_assignments:
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
@@ -923,7 +923,9 @@ if menu == "Ταμπλό Gantt":
                     
                 # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (αυξημένο πλάτος για να χωράει το "μετά από")
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(28, int(duration_hours * 16))
+                
+                # Πιο επιθετική αναδίπλωση: ελάχιστο πλάτος 10 χαρακτήρες, αυξάνεται ελαφρώς με τη διάρκεια
+                wrap_w = max(10, int(duration_hours * 12)) 
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -1020,7 +1022,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 55 * zoom_factor
+    row_h = 65 * zoom_factor # Ελαφρώς αυξημένο για να χωράει τις 3-4 γραμμές κειμένου που θα προκύπτουν
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1053,9 +1055,10 @@ if menu == "Ταμπλό Gantt":
     fig.update_traces(
         textposition='inside', 
         insidetextanchor='middle',
-        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
+        textfont=dict(color='black', size=max(7, int(8.5*zoom_factor)), family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1)),
-        textangle=0
+        textangle=0,
+        constraintext='none' # Λέει στο Plotly να μην εξαφανίζει το κείμενο αν νομίζει ότι δε χωράει
     )
     
     fig.update_layout(
@@ -1542,7 +1545,7 @@ elif menu == "Ομάδα Προσωπικού":
     
     with tab_edit:
         if not st.session_state.employees:
-            st.info("Δεν υπάρχ υπάλληλοι προς επεξεργασία.")
+            st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
         else:
             emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
