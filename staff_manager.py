@@ -777,7 +777,8 @@ if menu == "Ταμπλό Gantt":
                 'Ετικέτα': '',
                 'LegendGroup': 'Κενό',
                 'ColorHex': 'rgba(0,0,0,0)',
-                'GroupKey': 'Empty'
+                'GroupKey': 'Empty',
+                'Προσέλευση': ''
             })
             color_map['Κενό'] = 'rgba(0,0,0,0)'
         else:
@@ -790,9 +791,10 @@ if menu == "Ταμπλό Gantt":
                 notes = a.get('notes', '')
                 is_canc = a.get('is_cancelled', False)
                 c_reason = a.get('cancel_reason', '')
+                arrival_time = a.get('arrivalTime', a['startTime'])[:5]
                 
                 # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
-                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}"
+                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}_{arrival_time}"
                 if key not in groups:
                     legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
                     groups[key] = {
@@ -800,8 +802,9 @@ if menu == "Ταμπλό Gantt":
                         'ProjectId': a['projectId'],
                         'Date': curr_date,
                         'Project': proj['name'] if proj else "Άγνωστο",
-                        'StartTime': a['startTime'],
-                        'EndTime': a['endTime'],
+                        'ArrivalTime': arrival_time,
+                        'StartTime': a['startTime'][:5],
+                        'EndTime': a['endTime'][:5],
                         'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'][:5], "%H:%M").time()),
                         'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'][:5], "%H:%M").time()),
                         'Employees': [],
@@ -914,7 +917,7 @@ if menu == "Ταμπλό Gantt":
                 
                 emps_str = ", ".join(g['Employees']).upper()
                 proj_name = g['Project'].upper()
-                times_str = f"{g['StartTime']}-{g['EndTime']}"
+                times_str = f"[Προσ: {g['ArrivalTime']}] {g['StartTime']}-{g['EndTime']}"
                 
                 # Δημιουργία του βασικού κειμένου
                 base_text = f"{times_str} {proj_name} // {emps_str}"
@@ -923,7 +926,7 @@ if menu == "Ταμπλό Gantt":
                     
                 # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(15, int(duration_hours * 16))
+                wrap_w = max(10, int(duration_hours * 14))
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -957,6 +960,7 @@ if menu == "Ταμπλό Gantt":
                     'Έναρξη': g['Start'],
                     'Λήξη': g['End'],
                     'Προσωπικό': ", ".join(g['Employees']),
+                    'Προσέλευση': g['ArrivalTime'],
                     'Παρατηρήσεις': g['Notes'],
                     'Ετικέτα': label_text,
                     'LegendGroup': g['LegendGroup'],
@@ -970,6 +974,7 @@ if menu == "Ταμπλό Gantt":
                     'Ημέρα': day_names_gr[i],
                     'Έργο': g['Project'],
                     'Προσωπικό': ", ".join(g['Employees']),
+                    'Ώρα Προσέλευσης': g['ArrivalTime'],
                     'Ώρα Έναρξης': g['StartTime'],
                     'Ώρα Λήξης': g['EndTime'],
                     'Παρατηρήσεις': g['Notes'],
@@ -1000,7 +1005,7 @@ if menu == "Ταμπλό Gantt":
         color="LegendGroup",
         color_discrete_map=color_map,
         custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
-        hover_data=["Έργο", "Προσωπικό", "Παρατηρήσεις"],
+        hover_data=["Έργο", "Προσωπικό", "Προσέλευση", "Παρατηρήσεις"],
         text="Ετικέτα"
     )
     
@@ -1020,7 +1025,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 45 * zoom_factor
+    row_h = 90 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1054,11 +1059,13 @@ if menu == "Ταμπλό Gantt":
         textposition='inside', 
         insidetextanchor='middle',
         textfont=dict(color='black', size=max(8, int(10*zoom_factor)), family="Arial Black"),
-        marker=dict(line=dict(color='black', width=1))
+        marker=dict(line=dict(color='black', width=1)),
+        textangle=0,
+        constraintext='none'
     )
     
     fig.update_layout(
-        bargap=0.1, 
+        bargap=0.02, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
@@ -1153,13 +1160,16 @@ if menu == "Ταμπλό Gantt":
                     with c_notes:
                         add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                     
-                    c_start, c_end = st.columns(2)
+                    c_arr, c_start, c_end = st.columns(3)
+                    with c_arr:
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
                         t_end = st.time_input("Λήξη", value=datetime.strptime("17:00", "%H:%M").time(), key=f"qa_end_{qa_rc}")
                         
                     if st.form_submit_button("Καταχώρηση"):
+                        str_arrival = t_arrival.strftime("%H:%M")
                         str_start = t_start.strftime("%H:%M")
                         str_end = t_end.strftime("%H:%M")
                         
@@ -1212,6 +1222,7 @@ if menu == "Ταμπλό Gantt":
                                         'employeeId': va['eid'],
                                         'projectId': final_proj_id,
                                         'date': add_date,
+                                        'arrivalTime': str_arrival,
                                         'startTime': va['start'],
                                         'endTime': va['end'],
                                         'colorName': color_choice,
@@ -1294,6 +1305,11 @@ if menu == "Ταμπλό Gantt":
                                     new_a['startTime'] = new_s_dt.strftime("%H:%M")
                                     new_a['endTime'] = new_e_dt.strftime("%H:%M")
                                     
+                                    if 'arrivalTime' in orig_a and orig_a['arrivalTime']:
+                                        arr_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['arrivalTime'][:5], "%H:%M").time())
+                                        new_arr_dt = arr_dt + timedelta(hours=delta_hours)
+                                        new_a['arrivalTime'] = new_arr_dt.strftime("%H:%M")
+                                    
                                 if new_a['employeeId']:
                                     emp_name = get_employee_name(new_a['employeeId'])
                                     if is_on_leave(new_a['employeeId'], new_a['date']):
@@ -1348,7 +1364,9 @@ if menu == "Ταμπλό Gantt":
                             with e_notes_col:
                                 edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'])
 
-                            e_start, e_end = st.columns(2)
+                            e_arr, e_start, e_end = st.columns(3)
+                            with e_arr:
+                                new_t_arrival = st.time_input("Νέα Ώρα Προσέλευσης", value=datetime.strptime(target_group.get('ArrivalTime', target_group['StartTime'])[:5], "%H:%M").time())
                             with e_start:
                                 new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'][:5], "%H:%M").time())
                             with e_end:
@@ -1376,6 +1394,7 @@ if menu == "Ταμπλό Gantt":
                                 st.rerun()
                                 
                             if save_edit:
+                                str_arrival = new_t_arrival.strftime("%H:%M")
                                 str_start = new_t_start.strftime("%H:%M")
                                 str_end = new_t_end.strftime("%H:%M")
                                 
@@ -1433,6 +1452,7 @@ if menu == "Ταμπλό Gantt":
                                                 'employeeId': va['eid'],
                                                 'projectId': final_edit_proj_id,
                                                 'date': edit_date,
+                                                'arrivalTime': str_arrival,
                                                 'startTime': va['start'],
                                                 'endTime': va['end'],
                                                 'colorName': edit_color,
@@ -2144,8 +2164,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             
             with r_col2:
                 r_start_date = st.date_input("Από Ημερομηνία", date.today(), key=f"new_r_start_date_{rc}")
-                r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
-                r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
+                
+                r_arr, r_start, r_end = st.columns(3)
+                with r_arr:
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
+                with r_start:
+                    r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
+                with r_end:
+                    r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
                 st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
             
@@ -2161,6 +2187,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 st.rerun()
                 
             if submit_r:
+                str_arrival = r_arrival_time.strftime("%H:%M")
                 str_start = r_start_time.strftime("%H:%M")
                 str_end = r_end_time.strftime("%H:%M")
                 
@@ -2253,6 +2280,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 'employeeId': eid,
                                                 'projectId': final_r_proj_id,
                                                 'date': d,
+                                                'arrivalTime': str_arrival,
                                                 'startTime': adj_start,
                                                 'endTime': adj_end,
                                                 'colorName': r_color,
@@ -2271,6 +2299,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         'employeeId': "",
                                         'projectId': final_r_proj_id,
                                         'date': d,
+                                        'arrivalTime': str_arrival,
                                         'startTime': str_start,
                                         'endTime': str_end,
                                         'colorName': r_color,
@@ -2291,6 +2320,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             'notes': r_notes,
                             'type': r_type,
                             'weekdays': selected_weekdays,
+                            'arrivalTime': str_arrival,
                             'startDate': r_start_date,
                             'startTime': str_start,
                             'endTime': str_end
@@ -2422,8 +2452,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
 
                         with e_col2:
                             e_start_date = st.date_input("Αλλαγή Ημερομηνίας Έναρξης", value=pat['startDate'], key=f"edit_r_start_date_{pat['id']}")
-                            e_start_time = st.time_input("Αλλαγή Ώρας Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
-                            e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
+                            
+                            e_arr, e_start, e_end = st.columns(3)
+                            with e_arr:
+                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=datetime.strptime(pat.get('arrivalTime', pat['startTime'])[:5], "%H:%M").time(), key=f"edit_r_arr_time_{pat['id']}")
+                            with e_start:
+                                e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
+                            with e_end:
+                                e_end_time = st.time_input("Αλλαγή Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
                             
                         st.write("")
                         col_b1, col_b2 = st.columns(2)
@@ -2447,6 +2483,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.rerun()
                             
                         if save_rec:
+                            str_arrival = e_arrival_time.strftime("%H:%M")
                             str_start = e_start_time.strftime("%H:%M")
                             str_end = e_end_time.strftime("%H:%M")
                             
@@ -2535,6 +2572,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                             'employeeId': eid,
                                                             'projectId': final_e_proj_id,
                                                             'date': d,
+                                                            'arrivalTime': str_arrival,
                                                             'startTime': adj_start,
                                                             'endTime': adj_end,
                                                             'colorName': e_color,
@@ -2551,6 +2589,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     'employeeId': "",
                                                     'projectId': final_e_proj_id,
                                                     'date': d,
+                                                    'arrivalTime': str_arrival,
                                                     'startTime': str_start,
                                                     'endTime': str_end,
                                                     'colorName': e_color,
@@ -2569,7 +2608,9 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     pat['employeeIds'] = final_e_employee_ids
                                     pat['colorName'] = e_color
                                     pat['notes'] = e_notes
+                                    pat['type'] = e_type
                                     pat['weekdays'] = e_selected_weekdays
+                                    pat['arrivalTime'] = str_arrival
                                     pat['startDate'] = e_start_date
                                     pat['startTime'] = str_start
                                     pat['endTime'] = str_end
