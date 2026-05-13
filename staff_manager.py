@@ -314,7 +314,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -810,6 +810,21 @@ if menu == "Ταμπλό Gantt":
                         formatted_name = f"{last_name} {first_name_initial}"
                     else:
                         formatted_name = full_name
+                        
+                    # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο
+                    prev_assigns = [
+                        pa for pa in day_assignments
+                        if pa.get('employeeId') == a['employeeId'] 
+                        and pa.get('id') != a['id']
+                        and datetime.strptime(pa['endTime'][:5], "%H:%M").time() <= datetime.strptime(a['startTime'][:5], "%H:%M").time()
+                    ]
+                    if prev_assigns:
+                        # Βρίσκουμε την πιο πρόσφατη προηγούμενη βάρδια
+                        prev_assigns.sort(key=lambda x: datetime.strptime(x['endTime'][:5], "%H:%M").time(), reverse=True)
+                        prev_a = prev_assigns[0]
+                        prev_proj = get_project_info(prev_a['projectId'])
+                        if prev_proj:
+                            formatted_name = f"μετά από το '{prev_proj['name']}' {formatted_name}"
                     
                 groups[key]['Employees'].append(formatted_name)
                 groups[key]['EmployeeIds'].append(a['employeeId'])
@@ -1271,7 +1286,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
