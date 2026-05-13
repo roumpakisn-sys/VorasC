@@ -550,8 +550,9 @@ def is_on_leave(emp_id, check_date):
 def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=None):
     """
     Ελέγχει αν υπάρχει επικάλυψη ωραρίου.
-    Αν υπάρξει μερική επικάλυψη, κόβει τη νέα βάρδια ώστε να κολλήσει
-    στην παλιά χωρίς να βγάλει σφάλμα διπλοκράτησης.
+    Εάν η νέα βάρδια τελειώνει πιο μετά από την υπάρχουσα,
+    επιτρέπουμε την καταχώρηση ΧΩΡΙΣ να αλλάξουμε την ώρα (ώστε να φαίνεται σωστά στο γράφημα),
+    και απλώς επιστρέφουμε ένα flag (AllowedOverlap) για να εμφανίσουμε το "μετά από...".
     """
     if not emp_id: return t_start, t_end, False, ""
     if exclude_ids is None: exclude_ids = []
@@ -563,9 +564,8 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
         return t_start, t_end, True, "Λάθος μορφή ώρας"
     
     emp_assigns = [a for a in st.session_state.assignments if a['employeeId'] == emp_id and a['date'] == check_date and a['id'] not in exclude_ids]
-    emp_assigns.sort(key=lambda x: datetime.strptime(x['startTime'][:5], "%H:%M").time())
     
-    adjusted = False
+    allowed_overlap = False
     for ea in emp_assigns:
         try:
             ea_s = datetime.strptime(ea['startTime'][:5], "%H:%M").time()
@@ -573,27 +573,16 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
         except Exception:
             continue
             
-        # Εάν υπάρχει γενική επικάλυψη:
+        # Εάν υπάρχει γενική επικάλυψη
         if new_s < ea_e and new_e > ea_s:
-            # 1. Η νέα βάρδια τελειώνει πιο μετά από την υπάρχουσα -> σπρώχνουμε την έναρξή της
-            if new_e > ea_e and new_s >= ea_s:
-                new_s = ea_e
-                adjusted = True
-            # 2. Η υπάρχουσα βάρδια είναι "στη μέση" της νέας -> κόβουμε το πρώτο κομμάτι 
-            elif new_e > ea_e and new_s < ea_s:
-                new_s = ea_e
-                adjusted = True
-            # 3. Η νέα βάρδια ξεκινά πιο πριν αλλά τελειώνει μέσα στην υπάρχουσα -> τραβάμε πίσω τη λήξη
-            elif new_s < ea_s and new_e <= ea_e:
-                new_e = ea_s
-                adjusted = True
+            # Αν η νέα βάρδια τελειώνει ΠΙΟ ΜΕΤΑ από την υπάρχουσα
+            if new_e > ea_e:
+                allowed_overlap = True
+                # ΔΕΝ προσαρμόζουμε το new_s, το αφήνουμε όπως είναι για να σχεδιαστεί σωστά στο γράφημα
             else:
-                return t_start, t_end, True, "Μη επιλύσιμη επικάλυψη (εσωτερική)"
+                return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
                 
-    if new_s >= new_e:
-        return t_start, t_end, True, "Μηδενικός χρόνος βάρδιας μετά την προσαρμογή"
-        
-    return new_s.strftime("%H:%M"), new_e.strftime("%H:%M"), False, "Adjusted" if adjusted else ""
+    return t_start, t_end, False, "AllowedOverlap" if allowed_overlap else ""
 
 def go_prev_week():
     st.session_state.view_week_date -= timedelta(days=7)
@@ -845,9 +834,15 @@ if menu == "Ταμπλό Gantt":
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
                             try:
                                 t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
+                                t_pa_start_val = datetime.strptime(pa['startTime'][:5], "%H:%M").time()
                                 t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                # Το εμφανίζουμε ΜΟΝΟ αν η νέα βάρδια ξεκινάει ακριβώς εκεί που τελειώνει η προηγούμενη
-                                if t_pa_end_val == t_a_start_val:
+                                t_a_end_val = datetime.strptime(a['endTime'][:5], "%H:%M").time()
+                                
+                                overlap = (t_pa_start_val < t_a_end_val) and (t_a_start_val < t_pa_end_val)
+                                back_to_back = (t_pa_end_val == t_a_start_val)
+                                
+                                # Προσθήκη στην "προηγούμενη" βάρδια ΑΝ επικαλύπτονται και τελειώνει πιο νωρίς, Ή αν είναι back-to-back
+                                if (overlap and t_pa_end_val < t_a_end_val) or back_to_back:
                                     prev_assigns.append(pa)
                             except Exception:
                                 pass
@@ -1208,8 +1203,8 @@ if menu == "Ταμπλό Gantt":
                                     
                                 new_assigns = []
                                 for va in valid_assignments:
-                                    if va['msg'] == "Adjusted":
-                                        st.toast(f"🔄 Ο/Η {va['emp_name']} ξεκινά {va['start']} λόγω προηγούμενης βάρδιας.", icon="🔄")
+                                    if va['msg'] == "AllowedOverlap":
+                                        st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου για τον/την {va['emp_name']}.", icon="ℹ️")
                                         
                                     new_assign = {
                                         'id': str(uuid.uuid4()),
@@ -1312,7 +1307,7 @@ if menu == "Ταμπλό Gantt":
                                         break
                                         
                                     new_a['startTime'], new_a['endTime'] = adj_start, adj_end
-                                    if msg == "Adjusted": st.toast(f"🔄 Αυτόματη προσαρμογή έναρξης {adj_start} ({emp_name}).", icon="🔄")
+                                    if msg == "AllowedOverlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
                                 
                                 old_assigns.append(orig_a)
                                 new_assigns.append(new_a)
@@ -1429,8 +1424,8 @@ if menu == "Ταμπλό Gantt":
                                         
                                         new_assigns = []
                                         for va in valid_assignments:
-                                            if va['msg'] == "Adjusted":
-                                                st.toast(f"🔄 Αυτόματη προσαρμογή: {va['emp_name']} ({va['start']})", icon="🔄")
+                                            if va['msg'] == "AllowedOverlap":
+                                                st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου για τον/την {va['emp_name']}.", icon="ℹ️")
                                                 
                                             new_a = {
                                                 'id': str(uuid.uuid4()),
@@ -2249,8 +2244,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                             st.toast(f"🚨 Επαναλαμβανόμενη: Διπλοκράτηση {emp_name} ({d.strftime('%d/%m')})", icon="🚨")
                                         else:
-                                            if msg == "Adjusted":
-                                                st.toast(f"🔄 Αυτόματη προσαρμογή: {emp_name} ({adj_start})", icon="🔄")
+                                            if msg == "AllowedOverlap":
+                                                st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {emp_name} ({adj_start})", icon="ℹ️")
                                             new_assign = {
                                                 'id': str(uuid.uuid4()),
                                                 'recurring_id': pattern_id,
@@ -2531,8 +2526,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     if is_conflict:
                                                         st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση για τον/την {emp_name} στις {d.strftime('%d/%m')}", icon="🚨")
                                                     else:
-                                                        if msg == "Adjusted":
-                                                            st.toast(f"🔄 Αυτόματη προσαρμογή: {emp_name} ({adj_start})", icon="🔄")
+                                                        if msg == "AllowedOverlap":
+                                                            st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {emp_name} ({adj_start})", icon="ℹ️")
                                                         new_assign = {
                                                             'id': str(uuid.uuid4()),
                                                             'recurring_id': selected_pattern_id,
