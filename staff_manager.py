@@ -152,9 +152,7 @@ def init_supabase():
 supabase = init_supabase()
 
 # --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING (Micro-Caching) ---
-# Αντί να τα κατεβάζουμε όλα μαζί, τα χωρίζουμε ανά πίνακα.
-# Έτσι, όταν αλλάζει κάτι στο Προσωπικό, ανανεώνεται ΜΟΝΟ το Προσωπικό.
-CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη για ασύλληπτη ταχύτητα στην πλοήγηση
+CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη
 
 def fetch_paginated(table):
     if not supabase:
@@ -314,7 +312,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -848,12 +846,14 @@ if menu == "Ταμπλό Gantt":
                             try:
                                 t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
                                 t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                if t_pa_end_val <= t_a_start_val:
+                                # Το εμφανίζουμε ΜΟΝΟ αν η νέα βάρδια ξεκινάει ακριβώς εκεί που τελειώνει η προηγούμενη
+                                if t_pa_end_val == t_a_start_val:
                                     prev_assigns.append(pa)
                             except Exception:
                                 pass
                                 
                     if prev_assigns:
+                        # Ταξινόμηση για να βρούμε την πιο πρόσφατη βάρδια πριν από τη συγκεκριμένη
                         prev_assigns.sort(key=lambda x: datetime.strptime(x['endTime'][:5], "%H:%M").time(), reverse=True)
                         prev_proj = get_project_info(prev_assigns[0]['projectId'])
                         if prev_proj:
