@@ -828,15 +828,23 @@ if menu == "Ταμπλό Gantt":
                     else:
                         formatted_name = full_name
                         
-                    # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
+                    # Εντοπισμός προηγούμενου έργου ("μετά από το...") βάσει των νέων κανόνων
                     prev_assigns = []
                     for pa in day_assignments:
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
                             try:
+                                t_pa_start_val = datetime.strptime(pa['startTime'][:5], "%H:%M").time()
                                 t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
                                 t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                # Το εμφανίζουμε ΜΟΝΟ αν η νέα βάρδια ξεκινάει ακριβώς εκεί που τελειώνει η προηγούμενη
-                                if t_pa_end_val == t_a_start_val:
+                                t_a_end_val = datetime.strptime(a['endTime'][:5], "%H:%M").time()
+                                
+                                # Ελέγχουμε αν υπάρχει επικάλυψη (overlap)
+                                is_overlapping = (t_pa_start_val < t_a_end_val) and (t_a_start_val < t_pa_end_val)
+                                
+                                # Το εμφανίζουμε ΑΝ: 
+                                # 1) Συμπίπτουν χρονικά (is_overlapping) ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
+                                # 2) Ή αν οι βάρδιες είναι ακριβώς συνεχόμενες (back-to-back)
+                                if (is_overlapping and t_pa_end_val <= t_a_end_val) or (t_pa_end_val == t_a_start_val):
                                     prev_assigns.append(pa)
                             except Exception:
                                 pass
@@ -915,7 +923,7 @@ if menu == "Ταμπλό Gantt":
                     
                 # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap (αυξημένο πλάτος για να χωράει το "μετά από")
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(20, int(duration_hours * 16))
+                wrap_w = max(28, int(duration_hours * 16))
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -1324,7 +1332,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1419,7 +1427,7 @@ if menu == "Ταμπλό Gantt":
                                         new_assigns = []
                                         for va in valid_assignments:
                                             if va['msg'] == "AllowedOverlap":
-                                                st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου για τον/την {va['emp_name']}.", icon="ℹ️")
+                                                st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
                                                 
                                             new_a = {
                                                 'id': str(uuid.uuid4()),
@@ -1534,7 +1542,7 @@ elif menu == "Ομάδα Προσωπικού":
     
     with tab_edit:
         if not st.session_state.employees:
-            st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
+            st.info("Δεν υπάρχ υπάλληλοι προς επεξεργασία.")
         else:
             emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
