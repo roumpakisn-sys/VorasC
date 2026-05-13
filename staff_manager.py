@@ -187,11 +187,6 @@ def fetch_table_assignments():
     for a in assigns:
         if isinstance(a.get('date'), str):
             a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-        # Καθαρισμός των δευτερολέπτων από τη βάση δεδομένων για αποφυγή ValueError
-        if isinstance(a.get('startTime'), str):
-            a['startTime'] = a['startTime'][:5]
-        if isinstance(a.get('endTime'), str):
-            a['endTime'] = a['endTime'][:5]
     return assigns
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -210,10 +205,6 @@ def fetch_table_patterns():
     for p in patterns:
         if isinstance(p.get('startDate'), str):
             p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-        if isinstance(p.get('startTime'), str):
-            p['startTime'] = p['startTime'][:5]
-        if isinstance(p.get('endTime'), str):
-            p['endTime'] = p['endTime'][:5]
     return patterns
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -321,7 +312,7 @@ def format_log_details(table_name, records):
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
             
         elif table_name == 'recurring_patterns':
-            lines.append(f"Επαναλαμβανόμε σειρά: {r.get('type')}")
+            lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
             
         else:
             lines.append("Εγγραφή")
@@ -847,6 +838,7 @@ if menu == "Ταμπλό Gantt":
                         formatted_name = full_name
                         
                     # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
+                    # Χρησιμοποιούμε τη σωστή μετατροπή ώρας για να βρούμε προηγούμενη βάρδια
                     prev_assigns = []
                     for pa in day_assignments:
                         if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
@@ -1342,7 +1334,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -2256,6 +2248,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                             st.toast(f"🚨 Επαναλαμβανόμενη: Διπλοκράτηση {emp_name} ({d.strftime('%d/%m')})", icon="🚨")
                                         else:
+                                            if msg == "Adjusted":
+                                                st.toast(f"🔄 Αυτόματη προσαρμογή: {emp_name} ({adj_start})", icon="🔄")
                                             new_assign = {
                                                 'id': str(uuid.uuid4()),
                                                 'recurring_id': pattern_id,
@@ -2528,21 +2522,24 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         
                                         for eid in emps_to_process:
                                             if eid:
+                                                emp_name = get_employee_name(eid)
                                                 if is_on_leave(eid, d):
-                                                    st.toast(f"🛑 Παραλείφθηκε: {get_employee_name(eid)} έχει άδεια στις {d.strftime('%d/%m')}", icon="🛑")
+                                                    st.toast(f"🛑 Παραλείφθηκε: {emp_name} έχει άδεια στις {d.strftime('%d/%m')}", icon="🛑")
                                                 else:
-                                                    adj_s, adj_e, is_conf, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
-                                                    if is_conf:
-                                                        st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση για τον/την {get_employee_name(eid)} στις {d.strftime('%d/%m')}", icon="🚨")
+                                                    adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                                                    if is_conflict:
+                                                        st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση για τον/την {emp_name} στις {d.strftime('%d/%m')}", icon="🚨")
                                                     else:
+                                                        if msg == "Adjusted":
+                                                            st.toast(f"🔄 Αυτόματη προσαρμογή: {emp_name} ({adj_start})", icon="🔄")
                                                         new_assign = {
                                                             'id': str(uuid.uuid4()),
                                                             'recurring_id': selected_pattern_id,
                                                             'employeeId': eid,
                                                             'projectId': final_e_proj_id,
                                                             'date': d,
-                                                            'startTime': adj_s,
-                                                            'endTime': adj_e,
+                                                            'startTime': adj_start,
+                                                            'endTime': adj_end,
                                                             'colorName': e_color,
                                                             'colorHex': BASIC_COLORS[e_color],
                                                             'notes': e_notes,
@@ -2574,197 +2571,4 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     pat['projectId'] = final_e_proj_id
                                     pat['employeeIds'] = final_e_employee_ids
                                     pat['colorName'] = e_color
-                                    pat['notes'] = e_notes
-                                    pat['weekdays'] = e_selected_weekdays
-                                    pat['startDate'] = e_start_date
-                                    pat['startTime'] = str_start
-                                    pat['endTime'] = str_end
-                                    
-                                    db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
-                                    actions.append({'type': 'update', 'table': 'recurring_patterns', 'old_records': [old_pat], 'new_records': [dict(pat)]})
-                                    
-                                    if new_assignments_batch:
-                                        st.session_state.assignments.extend(new_assignments_batch)
-                                        chunk_size = 500
-                                        for i in range(0, len(new_assignments_batch), chunk_size):
-                                            db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
-                                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
-                                
-                                    add_transaction(actions)
-                                    
-                                st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
-                                time.sleep(1.5)
-                                st.rerun()
-
-# --- VIEW: ΑΞΙΟΛΟΓΗΣΗ ΠΡΟΣΩΠΙΚΟΥ ---
-elif menu == "Αξιολόγηση Προσωπικού":
-    st.markdown("""
-        <style>
-        /* Απόλυτα αιωρούμενο (floating) κουμπί σε όλη την οθόνη */
-        div[data-testid="stFormSubmitButton"] {
-            position: fixed !important;
-            bottom: 40px !important;
-            right: 40px !important;
-            z-index: 99999 !important;
-        }
-        div[data-testid="stFormSubmitButton"] button {
-            box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4) !important;
-            border: 3px solid #16a34a !important;
-            border-radius: 50px !important;
-            font-weight: bold !important;
-            padding: 15px 30px !important;
-            background-color: white !important;
-            color: #16a34a !important;
-            transition: all 0.2s ease-in-out !important;
-        }
-        div[data-testid="stFormSubmitButton"] button:hover {
-            background-color: #16a34a !important;
-            color: white !important;
-            transform: scale(1.05) !important;
-        }
-        div[data-testid="stForm"] {
-            padding-bottom: 120px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.title("⭐ Αξιολόγηση Προσωπικού")
-
-    months = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", 
-              "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"]
-    current_month_index = date.today().month - 1
-    current_year = date.today().year
-    years = list(range(2020, 2036))
-
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_month_name = st.selectbox("Επιλογή Μήνα", months, index=current_month_index, key="eval_month")
-        eval_month = months.index(selected_month_name) + 1
-    with col2:
-        eval_year = st.selectbox("Επιλογή Έτους", years, index=years.index(current_year), key="eval_year")
-
-    st.divider()
-
-    # --- Υπολογισμός "Υπάλληλος του Μήνα" ---
-    month_evals = [e for e in st.session_state.evaluations if e['month'] == eval_month and e['year'] == eval_year]
-
-    if month_evals:
-        # Υπολογισμός μέσου όρου για κάθε αξιολόγηση
-        for ev in month_evals:
-            ev['avg'] = (ev.get('cooperation', 0) + ev.get('willingness', 0) + ev.get('behavior', 0)) / 3.0
-
-        max_avg = max([ev['avg'] for ev in month_evals])
-
-        # Εύρεση όλων των υπαλλήλων με τη μέγιστη βαθμολογία (για ισοβαθμίες)
-        top_evals = [ev for ev in month_evals if ev['avg'] == max_avg]
-
-        st.markdown("### 🏆 Υπάλληλος του Μήνα")
-        if max_avg > 0:
-            for ev in top_evals:
-                emp_name = get_employee_name(ev['employeeId'])
-                st.success(f"🌟 **{emp_name}** — Υψηλότερος Μέσος Όρος: **{max_avg:.2f} / 5** 🌟")
-        else:
-            st.info("Οι βαθμολογίες για αυτόν τον μήνα είναι στο 0.")
-    else:
-        st.info("Δεν υπάρχουν ακόμα αποθηκευμένες βαθμολογίες για τον επιλεγμένο μήνα.")
-
-    st.divider()
-    
-    col_title, col_reset = st.columns([3, 1])
-    with col_title:
-        st.write("### 📝 Φόρμα Βαθμολόγησης")
-    with col_reset:
-        if is_full_admin:
-            if st.button("🔄 Επαναφορά Βαθμολογιών", use_container_width=True):
-                evals_to_delete = [e['id'] for e in month_evals]
-                if evals_to_delete:
-                    st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
-                    db_delete_in('evaluations', 'id', evals_to_delete, deleted_records=month_evals)
-                
-                # Καθαρισμός του session state για να επιστρέψουν τα κουτάκια στο 3
-                for emp in active_employee_ids:
-                    k_c = f"coop_{emp}_{eval_month}_{eval_year}"
-                    k_w = f"will_{emp}_{eval_month}_{eval_year}"
-                    k_b = f"behav_{emp}_{eval_month}_{eval_year}"
-                    if k_c in st.session_state: del st.session_state[k_c]
-                    if k_w in st.session_state: del st.session_state[k_w]
-                    if k_b in st.session_state: del st.session_state[k_b]
-                        
-                st.rerun()
-
-    if not is_full_admin:
-        st.info("⚠️ Έχετε δικαιώματα μόνο για ανάγνωση. Δεν μπορείτε να αποθηκεύσετε νέες αξιολογήσεις.")
-
-    with st.form("evaluations_form"):
-        # Επικεφαλίδες
-        hc1, hc2, hc3, hc4, hc5 = st.columns([2, 1.5, 1.5, 1.5, 1])
-        hc1.write("**Ονοματεπώνυμο**")
-        hc2.write("**Συνεργασία (1-5)**")
-        hc3.write("**Προθυμία (1-5)**")
-        hc4.write("**Συμπεριφορά (1-5)**")
-        hc5.write("**Μ.Ό.**")
-        st.markdown("---")
-
-        eval_inputs = {}
-        
-        is_readonly = not is_full_admin
-
-        # Εμφάνιση μόνο των Ενεργών υπαλλήλων
-        for emp in active_employee_ids:
-            emp_info = next(e for e in st.session_state.employees if e['id'] == emp)
-            
-            # Εύρεση αν υπάρχει ήδη αξιολόγηση για αυτόν τον μήνα
-            existing_eval = next((e for e in month_evals if e['employeeId'] == emp), None)
-
-            default_coop = existing_eval['cooperation'] if existing_eval else 3
-            default_will = existing_eval['willingness'] if existing_eval else 3
-            default_behav = existing_eval['behavior'] if existing_eval else 3
-
-            c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 1.5, 1])
-            c1.write(f"\n**{emp_info['name']}**")
-
-            eval_inputs[emp] = {
-                'coop': c2.selectbox("Συνεργασία", [1, 2, 3, 4, 5], index=default_coop - 1, key=f"coop_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
-                'will': c3.selectbox("Προθυμία", [1, 2, 3, 4, 5], index=default_will - 1, key=f"will_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
-                'behav': c4.selectbox("Συμπεριφορά", [1, 2, 3, 4, 5], index=default_behav - 1, key=f"behav_{emp}_{eval_month}_{eval_year}", label_visibility="collapsed", disabled=is_readonly),
-                'existing_id': existing_eval['id'] if existing_eval else None
-            }
-
-            # Υπολογισμός τρέχοντος εμφανιζόμενου Μ.Ο.
-            current_avg = (default_coop + default_will + default_behav) / 3.0
-            c5.write(f"\n**{current_avg:.2f}**")
-
-        st.markdown("---")
-        
-        # Το κουμπί πιάνει όλο το πλάτος και αιωρείται!
-        submit_eval = st.form_submit_button("💾 Αποθήκευση Αξιολογήσεων", type="primary", use_container_width=True, disabled=is_readonly)
-
-        if submit_eval and not is_readonly:
-            updates_made = False
-            actions = []
-            
-            with st.spinner("Αποθήκευση αξιολογήσεων..."):
-                for emp_id, data in eval_inputs.items():
-                    new_coop = data['coop']
-                    new_will = data['will']
-                    new_behav = data['behav']
-                    existing_id = data['existing_id']
-
-                    if existing_id:
-                        # Υπάρχει ήδη, ελέγχουμε αν άλλαξε κάτι για να το κάνουμε update
-                        ev_to_update = next(e for e in st.session_state.evaluations if e['id'] == existing_id)
-                        if ev_to_update['cooperation'] != new_coop or ev_to_update['willingness'] != new_will or ev_to_update['behavior'] != new_behav:
-                            old_ev = dict(ev_to_update)
-                            
-                            ev_to_update['cooperation'] = new_coop
-                            ev_to_update['willingness'] = new_will
-                            ev_to_update['behavior'] = new_behav
-                            
-                            # Στέλνουμε στη βάση μόνο τα πεδία που υπάρχουν στον πίνακα (αφαιρούμε το 'avg')
-                            payload = {k: v for k, v in ev_to_update.items() if k != 'avg'}
-                            old_payload = {k: v for k, v in old_ev.items() if k != 'avg'}
-                            
-                            db_update('evaluations', existing_id, payload, track=False)
-                            actions.append({'type': 'update', 'table': 'evaluations', 'old_records': [old_payload], 'new_records': [payload]})
-                            updates_made = True
-                    else:
+                                    pat['
