@@ -537,6 +537,15 @@ for a in st.session_state.assignments:
     assign_date_map[d].append(a)
 st.session_state.assignments_by_date = assign_date_map
 
+leaves_by_emp = {}
+for l in st.session_state.leaves:
+    eid = l['employeeId']
+    if eid not in leaves_by_emp:
+        leaves_by_emp[eid] = []
+    leaves_by_emp[eid].append(l)
+st.session_state.leaves_by_emp = leaves_by_emp
+
+
 # --- Helpers ---
 def get_employee_name(emp_id):
     if not emp_id:
@@ -549,8 +558,9 @@ def get_project_info(proj_id):
 
 def is_on_leave(emp_id, check_date):
     if not emp_id: return False
-    for l in st.session_state.leaves:
-        if l['employeeId'] == emp_id and l['startDate'] <= check_date <= l['endDate']:
+    emp_leaves = st.session_state.leaves_by_emp.get(emp_id, [])
+    for l in emp_leaves:
+        if l['startDate'] <= check_date <= l['endDate']:
             return True
     return False
 
@@ -564,11 +574,8 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
     if not emp_id: return t_start, t_end, False, ""
     if exclude_ids is None: exclude_ids = []
         
-    try:
-        new_s = datetime.strptime(t_start[:5], "%H:%M").time()
-        new_e = datetime.strptime(t_end[:5], "%H:%M").time()
-    except Exception:
-        return t_start, t_end, True, "Λάθος μορφή ώρας"
+    new_s = str(t_start)[:5]
+    new_e = str(t_end)[:5]
     
     # Γρήγορη αναζήτηση μόνο για την ημέρα!
     day_assigns = st.session_state.assignments_by_date.get(check_date, [])
@@ -576,11 +583,8 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
     
     allowed_overlap = False
     for ea in emp_assigns:
-        try:
-            ea_s = datetime.strptime(ea['startTime'][:5], "%H:%M").time()
-            ea_e = datetime.strptime(ea['endTime'][:5], "%H:%M").time()
-        except Exception:
-            continue
+        ea_s = str(ea['startTime'])[:5]
+        ea_e = str(ea['endTime'])[:5]
             
         # Εάν υπάρχει γενική επικάλυψη
         if new_s < ea_e and new_e > ea_s:
@@ -667,25 +671,21 @@ if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
 # --- ΣΥΣΤΗΜΑ ΕΙΔΟΠΟΙΗΣΕΩΝ (ALERTS) ---
-# Εντοπισμός "ορφανών" βαρδιών για τις επόμενες 7 ημέρες
+# Εντοπισμός "ορφανών" βαρδιών για τις επόμενες 7 ημέρες (Tαχύτατα με O(1))
 today_date = date.today()
-next_week_date = today_date + timedelta(days=7)
 orphan_count = 0
 orphan_details = []
 
-for a in st.session_state.assignments:
-    shift_date = a.get('date')
-    # Έλεγχος αν η βάρδια είναι μέσα στις επόμενες 7 ημέρες
-    if today_date <= shift_date <= next_week_date:
-        # Αν η βάρδια δεν έχει υπάλληλο και ΔΕΝ είναι σημασμένη ως ακυρωμένη
+for i in range(8):
+    check_d = today_date + timedelta(days=i)
+    day_assigns = st.session_state.assignments_by_date.get(check_d, [])
+    for a in day_assigns:
         if not a.get('employeeId') and not a.get('is_cancelled', False):
             orphan_count += 1
             proj = get_project_info(a['projectId'])
             proj_name = proj['name'] if proj else "Άγνωστο Έργο"
-            
-            # Μορφοποίηση της ημερομηνίας για όμορφη εμφάνιση
-            date_str = shift_date.strftime('%d/%m/%Y')
-            orphan_details.append(f"• **{date_str}** | Ώρες: {a['startTime']}-{a['endTime']} | Έργο: **{proj_name}**")
+            date_str = check_d.strftime('%d/%m/%Y')
+            orphan_details.append(f"• **{date_str}** | Ώρες: {a['startTime'][:5]}-{a['endTime'][:5]} | Έργο: **{proj_name}**")
 
 # Εμφάνιση του Alert αν υπάρχουν ορφανές βάρδιες (Εμφανίζεται σε όλες τις καρτέλες, ψηλά)
 if orphan_count > 0:
@@ -792,6 +792,14 @@ if menu == "Ταμπλό Gantt":
             })
             color_map['Κενό'] = 'rgba(0,0,0,0)'
         else:
+            # Προ-ομαδοποίηση ανά υπάλληλο για γρήγορο έλεγχο επικαλύψεων της ίδιας μέρας
+            emp_day_assigns = {}
+            for da in day_assignments:
+                eid = da.get('employeeId')
+                if eid:
+                    if eid not in emp_day_assigns: emp_day_assigns[eid] = []
+                    emp_day_assigns[eid].append(da)
+                    
             # Ομαδοποίηση εργασιών της τρέχουσας μέρας
             groups = {}
             for a in day_assignments:
@@ -815,10 +823,10 @@ if menu == "Ταμπλό Gantt":
                         'Date': curr_date,
                         'Project': proj['name'] if proj else "Άγνωστο",
                         'ArrivalTime': arrival_time,
-                        'StartTime': a['startTime'][:5],
-                        'EndTime': a['endTime'][:5],
-                        'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['startTime'][:5], "%H:%M").time()),
-                        'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(a['endTime'][:5], "%H:%M").time()),
+                        'StartTime': str(a['startTime'])[:5],
+                        'EndTime': str(a['endTime'])[:5],
+                        'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['startTime'])[:5], "%H:%M").time()),
+                        'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
                         'Employees': [],
                         'EmployeeIds': [],
                         'AssignmentIds': [],
@@ -844,28 +852,29 @@ if menu == "Ταμπλό Gantt":
                         formatted_name = full_name
                         
                     # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
+                    # ΤΑΧΥΤΑΤΟΣ ΕΛΕΓΧΟΣ: Χρήση του emp_day_assigns και string parsing
                     prev_assigns = []
-                    for pa in day_assignments:
-                        if pa.get('employeeId') == a['employeeId'] and pa.get('id') != a['id']:
-                            try:
-                                t_pa_start_val = datetime.strptime(pa['startTime'][:5], "%H:%M").time()
-                                t_pa_end_val = datetime.strptime(pa['endTime'][:5], "%H:%M").time()
-                                t_a_start_val = datetime.strptime(a['startTime'][:5], "%H:%M").time()
-                                t_a_end_val = datetime.strptime(a['endTime'][:5], "%H:%M").time()
+                    my_eid = a.get('employeeId')
+                    if my_eid in emp_day_assigns:
+                        t_a_start_str = str(a['startTime'])[:5]
+                        t_a_end_str = str(a['endTime'])[:5]
+                        
+                        for pa in emp_day_assigns[my_eid]:
+                            if pa.get('id') != a['id']:
+                                t_pa_start_str = str(pa['startTime'])[:5]
+                                t_pa_end_str = str(pa['endTime'])[:5]
                                 
-                                # Ελέγχουμε αν υπάρχει επικάλυψη (overlap)
-                                is_overlapping = (t_pa_start_val < t_a_end_val) and (t_a_start_val < t_pa_end_val)
+                                # Ελέγχουμε αν υπάρχει επικάλυψη (overlap) - O αλφαριθμητικός έλεγχος λειτουργεί τέλεια στις 24h μορφές
+                                is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
                                 
                                 # Το εμφανίζουμε ΜΟΝΟ ΑΝ: 
                                 # Υπάρχει πραγματική επικάλυψη ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
-                                if (is_overlapping and t_pa_end_val <= t_a_end_val):
+                                if is_overlapping and (t_pa_end_str <= t_a_end_str):
                                     prev_assigns.append(pa)
-                            except Exception:
-                                pass
                                 
                     if prev_assigns:
-                        # Ταξινόμηση για να βρούμε την πιο πρόσφατη βάρδια πριν από τη συγκεκριμένη
-                        prev_assigns.sort(key=lambda x: datetime.strptime(x['endTime'][:5], "%H:%M").time(), reverse=True)
+                        # Ταξινόμηση (string sort works perfectly for HH:MM)
+                        prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
                         prev_proj = get_project_info(prev_assigns[0]['projectId'])
                         if prev_proj:
                             formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' {formatted_name}]"
@@ -1306,8 +1315,8 @@ if menu == "Ταμπλό Gantt":
                                 
                                 if delta_hours != 0:
                                     dummy_date = datetime(2000, 1, 1)
-                                    s_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['startTime'][:5], "%H:%M").time())
-                                    e_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['endTime'][:5], "%H:%M").time())
+                                    s_dt = datetime.combine(dummy_date, datetime.strptime(str(orig_a['startTime'])[:5], "%H:%M").time())
+                                    e_dt = datetime.combine(dummy_date, datetime.strptime(str(orig_a['endTime'])[:5], "%H:%M").time())
                                     
                                     new_s_dt = s_dt + timedelta(hours=delta_hours)
                                     new_e_dt = e_dt + timedelta(hours=delta_hours)
@@ -1321,7 +1330,7 @@ if menu == "Ταμπλό Gantt":
                                     new_a['endTime'] = new_e_dt.strftime("%H:%M")
                                     
                                     if orig_a.get('arrivalTime'):
-                                        arr_dt = datetime.combine(dummy_date, datetime.strptime(orig_a['arrivalTime'][:5], "%H:%M").time())
+                                        arr_dt = datetime.combine(dummy_date, datetime.strptime(str(orig_a['arrivalTime'])[:5], "%H:%M").time())
                                         new_arr_dt = arr_dt + timedelta(hours=delta_hours)
                                         new_a['arrivalTime'] = new_arr_dt.strftime("%H:%M")
                                     
@@ -1387,9 +1396,9 @@ if menu == "Ταμπλό Gantt":
                                 def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(target_group['StartTime'][:5], "%H:%M").time()
                                 new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
                             with e_start:
-                                new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'][:5], "%H:%M").time())
+                                new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time())
                             with e_end:
-                                new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(target_group['EndTime'][:5], "%H:%M").time())
+                                new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(str(target_group['EndTime'])[:5], "%H:%M").time())
                                 
                             st.markdown("---")
                             st.write("🛑 **Ακύρωση / Διαγραφή Βάρδιας (Διαγράμμιση)**")
@@ -2110,12 +2119,17 @@ elif menu == "Ώρες Εργασιών":
     for a in st.session_state.assignments:
         d = a['date']
         if d.month == selected_month and d.year == selected_year:
-            start = datetime.strptime(a['startTime'][:5], "%H:%M")
-            end = datetime.strptime(a['endTime'][:5], "%H:%M")
-            delta = end - start
-            hours = delta.total_seconds() / 3600.0
-            if a['employeeId'] in employee_hours:
-                employee_hours[a['employeeId']] += hours
+            # ΤΑΧΥΤΑΤΟΣ ΥΠΟΛΟΓΙΣΜΟΣ (αντί για datetime.strptime)
+            start_str = str(a['startTime'])[:5]
+            end_str = str(a['endTime'])[:5]
+            try:
+                start_h, start_m = map(int, start_str.split(':'))
+                end_h, end_m = map(int, end_str.split(':'))
+                delta_hours = (end_h - start_h) + (end_m - start_m) / 60.0
+                if a['employeeId'] in employee_hours:
+                    employee_hours[a['employeeId']] += delta_hours
+            except:
+                pass
                 
     table_data = []
     for emp in st.session_state.employees:
@@ -2189,7 +2203,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
                 with r_start:
                     r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end:
@@ -2480,7 +2494,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             with e_arr:
                                 use_arr_rec_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr_rec), key=f"edit_chk_arr_{pat['id']}")
                                 def_arr = datetime.strptime(existing_arr_rec, "%H:%M").time() if existing_arr_rec else datetime.strptime(pat['startTime'][:5], "%H:%M").time()
-                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}")
+                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}", disabled=not use_arr_rec_edit)
                             with e_start:
                                 e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
                             with e_end:
