@@ -443,6 +443,10 @@ def get_employee_name(emp_id):
     emp = st.session_state.emp_map.get(emp_id)
     return emp['name'] if emp else "Άγνωστος"
 
+def get_project_name(proj_id):
+    proj = st.session_state.proj_map.get(proj_id)
+    return proj['name'] if proj else "Άγνωστο Έργο"
+
 def get_project_info(proj_id):
     return st.session_state.proj_map.get(proj_id)
 
@@ -982,7 +986,6 @@ if menu == "Ταμπλό Gantt":
             gridwidth=1 
         )
         
-        # --- ΑΠΟΛΥΤΗ ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ ΤΟΥ ΘΟΛΩΜΑΤΟΣ (FADE) ΑΠΟ ΤΟ PLOTLY ---
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle',
@@ -1005,7 +1008,7 @@ if menu == "Ταμπλό Gantt":
             margin=dict(l=10, r=10, t=50, b=10),
             annotations=empty_shift_annotations, 
             dragmode="pan",
-            clickmode="event+select", # Βοηθάει στην άμεση αναγνώριση των κλικ
+            clickmode="event+select",
             uirevision="constant", 
             xaxis=dict(
                 side='top', 
@@ -1035,7 +1038,6 @@ if menu == "Ταμπλό Gantt":
         st.session_state.cached_export_data = export_data
         st.session_state.last_gantt_params = current_gantt_params
     
-    # --- ΕΛΕΓΧΟΣ ΚΛΙΚ ΣΤΟ ΔΙΑΓΡΑΜΜΑ (1 ΚΛΙΚ ΕΠΙΛΟΓΗ / 1 ΚΛΙΚ ΚΕΝΟ ΓΙΑ ΑΠΟΕΠΙΛΟΓΗ) ---
     clicked_key = None
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
@@ -1045,11 +1047,10 @@ if menu == "Ταμπλό Gantt":
                 if cd != "Empty":
                     clicked_key = cd
             else:
-                clicked_key = None # Κλικ σε κενό = Ακαριαία αποεπιλογή
+                clicked_key = None
     except Exception:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
-    # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
     hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
     
     if export_data:
@@ -1089,12 +1090,12 @@ if menu == "Ταμπλό Gantt":
                     add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
                     
                     proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                             format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"qa_proj_{qa_rc}")
+                                             format_func=get_project_name, key=f"qa_proj_{qa_rc}")
                     
                     custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
                     
                     emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids,
-                                               format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"qa_emps_{qa_rc}")
+                                               format_func=get_employee_name, key=f"qa_emps_{qa_rc}")
                     
                     c_color, c_notes = st.columns(2)
                     with c_color:
@@ -1179,7 +1180,7 @@ if menu == "Ταμπλό Gantt":
                                 db_insert("assignments", new_assigns, track=False)
                                 
                                 st.success("Η ανάθεση ολοκληρώθηκε!")
-                                time.sleep(0.5) # Μικρότερη αναμονή χάρη στο background save
+                                time.sleep(0.5) 
                                 st.session_state.qa_rc += 1
                                 st.rerun()
 
@@ -1205,7 +1206,6 @@ if menu == "Ταμπλό Gantt":
                     if selected_key != "":
                         target_group = wk_groups[selected_key]
                         
-                        # --- ΓΡΗΓΟΡΗ ΜΕΤΑΚΙΝΗΣΗ ---
                         st.markdown("⚡ **Γρήγορη Μετακίνηση** (Αντί για Drag & Drop)")
                         qm_c1, qm_c2, qm_c3, qm_c4 = st.columns(4)
                         move_m_day = qm_c1.button("⬅️ -1 Μέρα", use_container_width=True)
@@ -1284,7 +1284,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=get_project_name)
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1292,7 +1292,7 @@ if menu == "Ταμπλό Gantt":
                             edit_options = list(set(active_employee_ids + valid_emp_ids))
                             edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options,
                                                        default=valid_emp_ids,
-                                                       format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'))
+                                                       format_func=get_employee_name)
                             
                             e_color_col, e_notes_col = st.columns(2)
                             with e_color_col:
@@ -1500,7 +1500,7 @@ elif menu == "Ομάδα Προσωπικού":
         else:
             emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
-                                          format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
+                                          format_func=get_employee_name)
             
             emp_to_edit = next(e for e in st.session_state.employees if e['id'] == emp_to_edit_id)
             
@@ -1666,7 +1666,7 @@ elif menu == "Ομάδα Προσωπικού":
             emps_to_delete = st.multiselect(
                 "Επιλέξτε τους υπαλλήλους που θέλετε να διαγράψετε (εμφανίζονται τα αποτελέσματα αναζήτησης):",
                 options=[e['id'] for e in filtered_emps],
-                format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"),
+                format_func=get_employee_name,
                 key="bulk_delete_emps"
             )
             if st.button("Οριστική Διαγραφή", type="primary", key="btn_bulk_del"):
@@ -1727,11 +1727,11 @@ elif menu == "Άδειες":
         c1, c2 = st.columns(2)
         with c1:
             l_emp = st.selectbox("Υπάλληλος (Μόνο Ενεργοί)", options=active_employee_ids, 
-                                 format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"l_emp_{lrc}")
+                                 format_func=get_employee_name, key=f"l_emp_{lrc}")
             l_start = st.date_input("Από", key=f"l_start_{lrc}")
         with c2:
             l_sub_emp = st.selectbox("Αντικαταστάτης (Προαιρετικό)", options=[""] + active_employee_ids, 
-                                     format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"l_sub_{lrc}")
+                                     format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else get_employee_name(x), key=f"l_sub_{lrc}")
             l_end = st.date_input("Έως", key=f"l_end_{lrc}")
             
         col_b1, col_b2 = st.columns([1, 1])
@@ -1846,7 +1846,7 @@ elif menu == "Άδειες":
                 emp_options_safe = active_employee_ids + [leave_to_edit['employeeId']] if leave_to_edit['employeeId'] not in active_employee_ids else active_employee_ids
                 ed_l_emp = st.selectbox("Αλλαγή Υπαλλήλου", options=emp_options_safe,
                                         index=emp_options_safe.index(leave_to_edit['employeeId']),
-                                        format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
+                                        format_func=get_employee_name)
                 ed_l_start = st.date_input("Αλλαγή Ημερομηνίας 'Από'", value=leave_to_edit['startDate'])
             with c2:
                 current_sub = leave_to_edit.get('substituteId') or ""
@@ -1856,7 +1856,7 @@ elif menu == "Άδειες":
                     
                 ed_l_sub_emp = st.selectbox("Αλλαγή Αντικαταστάτη", options=sub_options,
                                             index=sub_options.index(current_sub),
-                                            format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"))
+                                            format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else get_employee_name(x))
                 ed_l_end = st.date_input("Αλλαγή Ημερομηνίας 'Έως'", value=leave_to_edit['endDate'])
                 
             if st.button("💾 Αποθήκευση Αλλαγών", type="primary"):
@@ -2069,7 +2069,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             
             with r_col1:
                 r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], 
-                                         format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"), key=f"new_r_proj_{rc}")
+                                         format_func=get_project_name, key=f"new_r_proj_{rc}")
                                          
                 r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"new_r_custom_proj_{rc}")
                 
@@ -2087,7 +2087,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 
                 if r_type in ["Εβδομαδιαία", "Μηνιαία"]:
                     r_emps = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids, 
-                                            format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), key=f"new_r_emps_{rc}")
+                                            format_func=get_employee_name, key=f"new_r_emps_{rc}")
                 else:
                     st.markdown("**Επιλέξτε Μέρες και Προσωπικό (ξεχωριστά ανά μέρα):**")
                     day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -2098,7 +2098,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             selected_weekdays_data[d_name] = c_emp.multiselect(
                                 f"Προσωπικό ({d_name})", 
                                 options=active_employee_ids, 
-                                format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), "Άγνωστος"), 
+                                format_func=get_employee_name, 
                                 key=f"new_r_emps_day_{i}_{rc}", 
                                 label_visibility="collapsed"
                             )
@@ -2320,7 +2320,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
                             e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
                                                     index=default_proj_idx,
-                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"),
+                                                    format_func=get_project_name,
                                                     key=f"edit_r_proj_{pat['id']}")
                                                     
                             e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key=f"edit_r_custom_proj_{pat['id']}")
@@ -2356,7 +2356,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     def_emps = list(set([eid for lst in e_employee_ids_saved.values() for eid in lst if eid]))
                                 
                                 valid_def_emps = [eid for eid in def_emps if eid in edit_options_r]
-                                e_emps_selection = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r, default=valid_def_emps, format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'), key=f"edit_r_emps_{pat['id']}")
+                                e_emps_selection = st.multiselect("Αλλαγή Προσωπικού", options=edit_options_r, default=valid_def_emps, format_func=get_employee_name, key=f"edit_r_emps_{pat['id']}")
                             else:
                                 st.markdown("**Αλλαγή Ημερών & Προσωπικού (ανά μέρα):**")
                                 day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -2378,7 +2378,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             f"Προσωπικό ({d_name})", 
                                             options=edit_options_r, 
                                             default=valid_def, 
-                                            format_func=lambda x: next((e['name'] for e in st.session_state.employees if e['id'] == x), 'Άγνωστος'), 
+                                            format_func=get_employee_name, 
                                             key=f"edit_emps_day_{i}_{pat['id']}",
                                             label_visibility="collapsed"
                                         )
