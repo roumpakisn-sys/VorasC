@@ -1210,7 +1210,7 @@ if menu == "Ταμπλό Gantt":
                                             st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                                         else:
                                             valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
-                                        else:
+                                else:
                                     valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': "", 'emp_name': ""})
                             
                             if errors:
