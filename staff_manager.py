@@ -1045,6 +1045,26 @@ if menu == "Ταμπλό Gantt":
             for idx, rid in enumerate(day_row_ids):
                 tickvals_map[rid] = base_y_label if idx == mid_idx else ""
                 
+        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
+        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το 1 κλικ στο κενό να ακυρώνει την επιλογή
+        bg_data = []
+        for rid in y_category_order:
+            bg_data.append({
+                'Y_Axis': rid,
+                'Έργο': 'Κενό',
+                'Έναρξη': datetime(1970, 1, 1, 0, 0),
+                'Λήξη': datetime(1970, 1, 1, 23, 59),
+                'Προσωπικό': '',
+                'Προσέλευση': '',
+                'Παρατηρήσεις': '',
+                'Ετικέτα': '',
+                'LegendGroup': 'Κενό',
+                'ColorHex': 'rgba(255,255,255,0.01)',
+                'GroupKey': 'Empty'
+            })
+        color_map['Κενό'] = 'rgba(255,255,255,0.01)'
+        data = bg_data + data
+        
         df = pd.DataFrame(data)
         
         # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
@@ -1109,6 +1129,7 @@ if menu == "Ταμπλό Gantt":
             gridwidth=1 # Οριζόντιες διακριτικές γραμμές
         )
         
+        # --- ΑΠΟΤΡΕΠΟΥΜΕ ΠΛΗΡΩΣ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΕΠΙΛΟΓΕΣ ---
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle',
@@ -1118,9 +1139,15 @@ if menu == "Ταμπλό Gantt":
             constraintext='none',
             hoverinfo='none',
             hovertemplate=None,
-            selected=dict(marker=dict(opacity=1)), # <--- ΑΠΟΤΡΕΠΕΙ ΤΟ ΘΟΛΩΜΑ ΣΤΗΝ ΕΠΙΛΕΓΜΕΝΗ
-            unselected=dict(marker=dict(opacity=1)) # <--- ΑΠΟΤΡΕΠΕΙ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΥΠΟΛΟΙΠΕΣ ΜΠΑΡΕΣ
+            selected=dict(marker=dict(opacity=1), textfont=dict(color='black')),
+            unselected=dict(marker=dict(opacity=1), textfont=dict(color='black'))
         )
+        
+        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες (κενές μέρες)
+        for trace in fig.data:
+            if trace.name == 'Κενό':
+                trace.marker.line.width = 0
+                trace.hoverinfo = 'skip'
         
         fig.update_layout(
             bargap=0.12, 
@@ -1173,7 +1200,7 @@ if menu == "Ταμπλό Gantt":
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό φόντο (ή εκτός μπάρας) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό φόντο για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
     
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
