@@ -846,10 +846,9 @@ if menu == "Ταμπλό Gantt":
                                 # Ελέγχουμε αν υπάρχει επικάλυψη (overlap)
                                 is_overlapping = (t_pa_start_val < t_a_end_val) and (t_a_start_val < t_pa_end_val)
                                 
-                                # Το εμφανίζουμε ΑΝ: 
-                                # 1) Συμπίπτουν χρονικά (is_overlapping) ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
-                                # 2) Ή αν οι βάρδιες είναι ακριβώς συνεχόμενες (back-to-back)
-                                if (is_overlapping and t_pa_end_val <= t_a_end_val) or (t_pa_end_val == t_a_start_val):
+                                # Το εμφανίζουμε ΜΟΝΟ ΑΝ: 
+                                # Υπάρχει πραγματική επικάλυψη ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
+                                if (is_overlapping and t_pa_end_val <= t_a_end_val):
                                     prev_assigns.append(pa)
                             except Exception:
                                 pass
