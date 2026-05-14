@@ -1018,7 +1018,6 @@ if menu == "Ταμπλό Gantt":
         color="LegendGroup",
         color_discrete_map=color_map,
         custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
-        hover_data=["Έργο", "Προσωπικό", "Προσέλευση", "Παρατηρήσεις"],
         text="Ετικέτα"
     )
     
@@ -1074,7 +1073,9 @@ if menu == "Ταμπλό Gantt":
         textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
         marker=dict(line=dict(color='black', width=1)),
         textangle=0,
-        constraintext='none'
+        constraintext='none',
+        hoverinfo='none',
+        hovertemplate=None
     )
     
     fig.update_layout(
@@ -1176,7 +1177,7 @@ if menu == "Ταμπλό Gantt":
                     c_arr, c_start, c_end = st.columns(3)
                     with c_arr:
                         use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
@@ -1361,7 +1362,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1384,7 +1385,7 @@ if menu == "Ταμπλό Gantt":
                             with e_arr:
                                 use_arr_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr), key="edit_use_arr")
                                 def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(target_group['StartTime'][:5], "%H:%M").time()
-                                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
+                                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time", disabled=not use_arr_edit)
                             with e_start:
                                 new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'][:5], "%H:%M").time())
                             with e_end:
@@ -2188,7 +2189,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
                 with r_start:
                     r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end:
