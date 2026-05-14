@@ -525,20 +525,27 @@ else:
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
 
+# --- FAST INDEXING ΓΙΑ ΤΕΡΑΣΤΙΑ ΑΥΞΗΣΗ ΤΑΧΥΤΗΤΑΣ ---
+st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
+st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
+
+assign_date_map = {}
+for a in st.session_state.assignments:
+    d = a['date']
+    if d not in assign_date_map:
+        assign_date_map[d] = []
+    assign_date_map[d].append(a)
+st.session_state.assignments_by_date = assign_date_map
+
 # --- Helpers ---
 def get_employee_name(emp_id):
     if not emp_id:
         return "Χωρίς Προσωπικό"
-    for emp in st.session_state.employees:
-        if emp['id'] == emp_id:
-            return emp['name']
-    return "Άγνωστος"
+    emp = st.session_state.emp_map.get(emp_id)
+    return emp['name'] if emp else "Άγνωστος"
 
 def get_project_info(proj_id):
-    for proj in st.session_state.projects:
-        if proj['id'] == proj_id:
-            return proj
-    return None
+    return st.session_state.proj_map.get(proj_id)
 
 def is_on_leave(emp_id, check_date):
     if not emp_id: return False
@@ -549,7 +556,7 @@ def is_on_leave(emp_id, check_date):
 
 def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=None):
     """
-    Ελέγχει αν υπάρχει επικάλυψη ωραρίου.
+    Ελέγχει αν υπάρχει επικάλυψη ωραρίου χρησιμοποιώντας το γρήγορο λεξικό.
     Εάν η νέα βάρδια τελειώνει πιο μετά από την υπάρχουσα,
     επιτρέπουμε την καταχώρηση ΧΩΡΙΣ να αλλάξουμε την ώρα (ώστε να φαίνεται σωστά στο γράφημα),
     και απλώς επιστρέφουμε ένα flag (AllowedOverlap) για να εμφανίσουμε το "μετά από...".
@@ -563,7 +570,9 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
     except Exception:
         return t_start, t_end, True, "Λάθος μορφή ώρας"
     
-    emp_assigns = [a for a in st.session_state.assignments if a['employeeId'] == emp_id and a['date'] == check_date and a['id'] not in exclude_ids]
+    # Γρήγορη αναζήτηση μόνο για την ημέρα!
+    day_assigns = st.session_state.assignments_by_date.get(check_date, [])
+    emp_assigns = [a for a in day_assigns if a['employeeId'] == emp_id and a['id'] not in exclude_ids]
     
     allowed_overlap = False
     for ea in emp_assigns:
@@ -758,7 +767,8 @@ if menu == "Ταμπλό Gantt":
         else:
             base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
         
-        day_assignments = [a for a in st.session_state.assignments if a['date'] == curr_date]
+        # Γρήγορο φιλτράρισμα βαρδιών ανά ημέρα χρησιμοποιώντας το Dictionary!
+        day_assignments = st.session_state.assignments_by_date.get(curr_date, [])
         
         day_row_ids = []
         
@@ -929,7 +939,7 @@ if menu == "Ταμπλό Gantt":
                     
                 # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(10, int(duration_hours * 14))
+                wrap_w = max(15, int(duration_hours * 16))
 
                 # Αυτόματη αναδίπλωση κειμένου δυναμικά
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -944,7 +954,7 @@ if menu == "Ταμπλό Gantt":
                         xanchor='right',
                         yanchor='middle',
                         xshift=-4,  
-                        yshift=int(12 * zoom_factor), 
+                        yshift=int(35 * zoom_factor), 
                         font=dict(size=max(10, int(14 * zoom_factor)))
                     ))
                 
@@ -1028,7 +1038,7 @@ if menu == "Ταμπλό Gantt":
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
 
     # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 45 * zoom_factor
+    row_h = 90 * zoom_factor
     visible_count = 650 / row_h
     
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -1068,7 +1078,7 @@ if menu == "Ταμπλό Gantt":
     )
     
     fig.update_layout(
-        bargap=0.1, 
+        bargap=0.02, 
         showlegend=False, 
         plot_bgcolor='#dbece8', 
         paper_bgcolor='#ffffff',
@@ -1351,7 +1361,7 @@ if menu == "Ταμπλό Gantt":
                             
                             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, 
                                                      index=default_proj_idx,
-                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"))
+                                                     format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"))
                                                      
                             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                             
@@ -1830,8 +1840,9 @@ elif menu == "Άδειες":
                 conflicts = []
                 curr_date = l_start
                 while curr_date <= l_end:
-                    for a in st.session_state.assignments:
-                        if a['employeeId'] == l_emp and a['date'] == curr_date:
+                    day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
+                    for a in day_assigns:
+                        if a['employeeId'] == l_emp:
                             conflicts.append(a)
                     curr_date += timedelta(days=1)
                 
@@ -1940,8 +1951,9 @@ elif menu == "Άδειες":
                     conflicts = []
                     curr_date = ed_l_start
                     while curr_date <= ed_l_end:
-                        for a in st.session_state.assignments:
-                            if a['employeeId'] == ed_l_emp and a['date'] == curr_date:
+                        day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
+                        for a in day_assigns:
+                            if a['employeeId'] == ed_l_emp:
                                 conflicts.append(a)
                         curr_date += timedelta(days=1)
                     
@@ -2471,7 +2483,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             with e_start:
                                 e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
                             with e_end:
-                                e_end_time = st.time_input("Αλλαγή Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
+                                e_end_time = st.time_input("Αλλαγή Ώρας Λήξης", value=datetime.strptime(pat['endTime'][:5], "%H:%M").time(), key=f"edit_r_end_time_{pat['id']}")
                             
                         st.write("")
                         col_b1, col_b2 = st.columns(2)
