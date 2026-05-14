@@ -7,9 +7,6 @@ import uuid
 import calendar
 import io
 import time
-import copy
-import ast
-import re
 import textwrap
 import threading
 
@@ -1108,7 +1105,7 @@ if menu == "Ταμπλό Gantt":
                     c_arr, c_start, c_end = st.columns(3)
                     with c_arr:
                         use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
@@ -2768,7 +2765,7 @@ elif menu == "Καταγραφή Κινήσεων":
     col_b1, col_b2 = st.columns([1, 4])
     with col_b1:
         if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True):
-            clear_cache_for_table("activity_logs")
+            st.session_state.global_db_ts = "force_refresh"
             st.rerun()
     with col_b2:
         if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
@@ -2778,7 +2775,8 @@ elif menu == "Καταγραφή Κινήσεων":
                     chunk_size = 500
                     for i in range(0, len(log_ids), chunk_size):
                         supabase.table('activity_logs').delete().in_('id', log_ids[i:i+chunk_size]).execute()
-                    clear_cache_for_table("activity_logs")
+                    st.session_state.activity_logs = []
+                    st.session_state.global_db_ts = "force_refresh"
                     st.success("Το ιστορικό καθαρίστηκε!")
                     time.sleep(1)
                     st.rerun()
