@@ -11,6 +11,7 @@ import copy
 import ast
 import re
 import textwrap
+import threading
 
 try:
     from supabase import create_client
@@ -151,12 +152,29 @@ def init_supabase():
 
 supabase = init_supabase()
 
+# --- ΑΣΥΓΧΡΟΝΗ (BACKGROUND) ΔΙΑΧΕΙΡΙΣΗ ΒΑΣΗΣ (ΓΙΑ ΜΗΔΕΝΙΚΟ LAG ΣΤΟ UI) ---
+def bg_db_action(action, table, payload=None, col=None, val=None, in_vals=None):
+    """Εκτελεί λειτουργίες στη βάση στο παρασκήνιο χωρίς να παγώνει το UI"""
+    if not supabase: return
+    try:
+        if action == 'insert':
+            supabase.table(table).insert(payload).execute()
+        elif action == 'update':
+            supabase.table(table).update(payload).eq(col, val).execute()
+        elif action == 'delete':
+            supabase.table(table).delete().eq(col, val).execute()
+        elif action == 'delete_in':
+            supabase.table(table).delete().in_(col, in_vals).execute()
+    except Exception as e:
+        print(f"Background DB error ({action} on {table}): {e}")
+
 # --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING & OPTIMISTIC UI ---
-CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη
+CACHE_TTL = 300 # 5 λεπτά προσωρινή μνήμη (Μειώνει δραματικά τα κολλήματα)
 
 def mark_data_changed():
-    """Σημειώνει ότι τα δεδομένα άλλαξαν τοπικά, ώστε να ανανεωθεί το γράφημα χωρίς να περιμένει τη βάση"""
+    """Σημειώνει ότι τα δεδομένα άλλαξαν τοπικά, ώστε να ανανεωθεί το γράφημα και οι χάρτες χωρίς να περιμένει τη βάση"""
     st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
+    st.session_state.data_dirty = True
 
 def fetch_paginated(table):
     if not supabase:
@@ -220,8 +238,11 @@ def fetch_table_evaluations():
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_activity_logs():
+    """Κατεβάζει ΜΟΝΟ τα τελευταία 500 logs για απίστευτη ταχύτητα!"""
+    if not supabase: return {"data": [], "ts": time.time()}
     try:
-        return {"data": fetch_paginated("activity_logs"), "ts": time.time()}
+        data = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
+        return {"data": data, "ts": time.time()}
     except Exception:
         return {"data": [], "ts": time.time()}
 
@@ -354,86 +375,70 @@ def log_activity(action_type, table_name, details_raw):
         "table_name": table_name,
         "details": detail_str
     }
-    try:
-        supabase.table("activity_logs").insert(log_entry).execute()
-    except Exception as e:
-        print(f"Σφάλμα αποθήκευσης στο Ιστορικό (activity_logs): {e}")
+    # Εκτέλεση σε thread για μηδενικό lag
+    threading.Thread(target=bg_db_action, args=('insert', 'activity_logs', log_entry), daemon=True).start()
 
 def db_insert(table, data, track=True):
     """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση (χωρίς να μπλοκάρει τη ροή)."""
     mark_data_changed()
+    if track:
+        records = data if isinstance(data, list) else [data]
+        add_transaction([{'type': 'insert', 'table': table, 'records': records}])
+    
+    details_str = format_log_details(table, data)
+    log_activity("ΠΡΟΣΘΗΚΗ", table, details_str)
+    
     if supabase:
-        try:
-            supabase.table(table).insert(serialize_dates(data)).execute()
-            if track:
-                records = data if isinstance(data, list) else [data]
-                add_transaction([{'type': 'insert', 'table': table, 'records': records}])
-            
-            # Προσθήκη στο Audit Log με τα καθαρά Ελληνικά ονόματα!
-            details_str = format_log_details(table, data)
-            log_activity("ΠΡΟΣΘΗΚΗ", table, details_str)
-        except Exception as e:
-            st.error(f"Σφάλμα αποθήκευσης στη βάση (Table: {table}): {e}")
+        threading.Thread(target=bg_db_action, args=('insert', table, serialize_dates(data)), daemon=True).start()
 
 def db_delete(table, column, value, deleted_records=None, track=True):
     """Διαγράφει εγγραφές με βάση μια συνθήκη."""
     mark_data_changed()
+    if not deleted_records:
+        table_data = st.session_state.get(table, [])
+        deleted_records = [r for r in table_data if r.get(column) == value]
+        
+    if track and deleted_records:
+        add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+        
+    details_str = format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}"
+    log_activity("ΔΙΑΓΡΑΦΗ", table, details_str)
+    
     if supabase:
-        try:
-            if not deleted_records:
-                table_data = st.session_state.get(table, [])
-                deleted_records = [r for r in table_data if r.get(column) == value]
-                
-            supabase.table(table).delete().eq(column, value).execute()
-            
-            if track and deleted_records:
-                add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-                
-            # Προσθήκη στο Audit Log
-            details_str = format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}"
-            log_activity("ΔΙΑΓΡΑΦΗ", table, details_str)
-        except Exception as e:
-            st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
+        threading.Thread(target=bg_db_action, args=('delete', table, None, column, value), daemon=True).start()
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
     """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
     mark_data_changed()
-    if supabase and values:
-        try:
-            if not deleted_records:
-                table_data = st.session_state.get(table, [])
-                deleted_records = [r for r in table_data if r.get(column) in values]
-                
-            supabase.table(table).delete().in_(column, values).execute()
+    if values:
+        if not deleted_records:
+            table_data = st.session_state.get(table, [])
+            deleted_records = [r for r in table_data if r.get(column) in values]
             
-            if track and deleted_records:
-                add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-                
-            # Προσθήκη στο Audit Log
-            details_str = format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές"
-            log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, details_str)
-        except Exception as e:
-            st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
+        if track and deleted_records:
+            add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+            
+        details_str = format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές"
+        log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, details_str)
+        
+        if supabase:
+            threading.Thread(target=bg_db_action, args=('delete_in', table, None, column, None, values), daemon=True).start()
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
     """Ενημερώνει μια εγγραφή με βάση το ID της."""
     mark_data_changed()
+    if track and not old_data:
+        table_data = st.session_state.get(table, [])
+        old_data = next((r for r in table_data if r.get('id') == id_val), None)
+        
+    if track and old_data:
+        add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
+        
+    details_str = format_log_details(table, new_data)
+    log_activity("ΕΝΗΜΕΡΩΣΗ", table, details_str)
+    
     if supabase:
-        try:
-            if track and not old_data:
-                table_data = st.session_state.get(table, [])
-                old_data = next((r for r in table_data if r.get('id') == id_val), None)
-                
-            supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
-            
-            if track and old_data:
-                add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
-                
-            # Προσθήκη στο Audit Log
-            details_str = format_log_details(table, new_data)
-            log_activity("ΕΝΗΜΕΡΩΣΗ", table, details_str)
-        except Exception as e:
-            st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
+        threading.Thread(target=bg_db_action, args=('update', table, serialize_dates(new_data), 'id', id_val), daemon=True).start()
 
 def perform_undo():
     """Εκτελεί αναίρεση της τελευταίας καταγεγραμμένης συναλλαγής."""
@@ -450,8 +455,7 @@ def perform_undo():
         elif act['type'] == 'update':
             for old_r in act['old_records']:
                 db_update(act['table'], old_r['id'], old_r, track=False)
-    
-    clear_all_caches()
+    mark_data_changed()
 
 def perform_redo():
     """Εκτελεί επανάληψη της τελευταίας αναιρεμένης συναλλαγής."""
@@ -468,8 +472,7 @@ def perform_redo():
         elif act['type'] == 'update':
             for new_r in act['new_records']:
                 db_update(act['table'], new_r['id'], new_r, track=False)
-                
-    clear_all_caches()
+    mark_data_changed()
 
 # --- 10 Βασικά Χρώματα ---
 BASIC_COLORS = {
@@ -554,25 +557,28 @@ if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
 
 # --- FAST INDEXING ΓΙΑ ΤΕΡΑΣΤΙΑ ΑΥΞΗΣΗ ΤΑΧΥΤΗΤΑΣ ---
-st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
-st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
+# Ανακατασκευή χαρτών ΜΟΝΟ όταν υπάρχει πραγματική αλλαγή στα δεδομένα
+if st.session_state.get('data_dirty', True):
+    st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
+    st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
 
-assign_date_map = {}
-for a in st.session_state.assignments:
-    d = a['date']
-    if d not in assign_date_map:
-        assign_date_map[d] = []
-    assign_date_map[d].append(a)
-st.session_state.assignments_by_date = assign_date_map
+    assign_date_map = {}
+    for a in st.session_state.assignments:
+        d = a['date']
+        if d not in assign_date_map:
+            assign_date_map[d] = []
+        assign_date_map[d].append(a)
+    st.session_state.assignments_by_date = assign_date_map
 
-leaves_by_emp = {}
-for l in st.session_state.leaves:
-    eid = l['employeeId']
-    if eid not in leaves_by_emp:
-        leaves_by_emp[eid] = []
-    leaves_by_emp[eid].append(l)
-st.session_state.leaves_by_emp = leaves_by_emp
-
+    leaves_by_emp = {}
+    for l in st.session_state.leaves:
+        eid = l['employeeId']
+        if eid not in leaves_by_emp:
+            leaves_by_emp[eid] = []
+        leaves_by_emp[eid].append(l)
+    st.session_state.leaves_by_emp = leaves_by_emp
+    
+    st.session_state.data_dirty = False
 
 # --- Helpers ---
 def get_employee_name(emp_id):
@@ -1039,26 +1045,6 @@ if menu == "Ταμπλό Gantt":
             for idx, rid in enumerate(day_row_ids):
                 tickvals_map[rid] = base_y_label if idx == mid_idx else ""
                 
-        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
-        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το κλικ στο κενό να ακυρώνει την επιλογή
-        bg_data = []
-        for rid in y_category_order:
-            bg_data.append({
-                'Y_Axis': rid,
-                'Έργο': 'Κενό',
-                'Έναρξη': datetime(1970, 1, 1, 0, 0),
-                'Λήξη': datetime(1970, 1, 1, 23, 59),
-                'Προσωπικό': '',
-                'Προσέλευση': '',
-                'Παρατηρήσεις': '',
-                'Ετικέτα': '',
-                'LegendGroup': 'Κενό',
-                'ColorHex': 'rgba(255,255,255,0.01)',
-                'GroupKey': 'Empty'
-            })
-        color_map['Κενό'] = 'rgba(255,255,255,0.01)'
-        data = bg_data + data
-        
         df = pd.DataFrame(data)
         
         # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
@@ -1136,11 +1122,6 @@ if menu == "Ταμπλό Gantt":
             unselected=dict(marker=dict(opacity=1)) # <--- ΑΠΟΤΡΕΠΕΙ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΥΠΟΛΟΙΠΕΣ ΜΠΑΡΕΣ
         )
         
-        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες (κενές μέρες)
-        for trace in fig.data:
-            if trace.name == 'Κενό':
-                trace.marker.line.width = 0
-        
         fig.update_layout(
             bargap=0.12, 
             showlegend=False, 
@@ -1192,7 +1173,7 @@ if menu == "Ταμπλό Gantt":
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό φόντο για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό φόντο (ή εκτός μπάρας) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
     
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
@@ -1287,13 +1268,11 @@ if menu == "Ταμπλό Gantt":
                                 for err in errors:
                                     st.error(err)
                             else:
-                                actions = []
                                 if custom_proj_name.strip():
                                     final_proj_id = str(uuid.uuid4())
                                     new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
                                     st.session_state.projects.append(new_p)
                                     db_insert('projects', new_p, track=False)
-                                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                                 else:
                                     final_proj_id = proj_choice
                                     
@@ -1321,11 +1300,9 @@ if menu == "Ταμπλό Gantt":
                                     st.session_state.assignments.append(new_assign)
                                 
                                 db_insert("assignments", new_assigns, track=False)
-                                actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
-                                add_transaction(actions)
                                 
                                 st.success("Η ανάθεση ολοκληρώθηκε!")
-                                time.sleep(1)
+                                time.sleep(0.5) # Μικρότερη αναμονή χάρη στο background save
                                 st.session_state.qa_rc += 1
                                 st.rerun()
 
@@ -1417,8 +1394,6 @@ if menu == "Ταμπλό Gantt":
                             if not has_error:
                                 for old_a, new_a in zip(old_assigns, new_assigns):
                                     db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
-                                
-                                add_transaction([{'type': 'update', 'table': 'assignments', 'old_records': old_assigns, 'new_records': new_assigns}])
                                 
                                 st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                                 st.session_state.assignments.extend(new_assigns)
@@ -1516,20 +1491,17 @@ if menu == "Ταμπλό Gantt":
                                         for err in errors:
                                             st.error(err)
                                     else:
-                                        actions = []
                                         if edit_custom_proj_name.strip():
                                             final_edit_proj_id = str(uuid.uuid4())
                                             new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
                                             st.session_state.projects.append(new_p)
                                             db_insert('projects', new_p, track=False)
-                                            actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                                         else:
                                             final_edit_proj_id = edit_proj
                                             
                                         old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                                         st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                                         db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
-                                        actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                                         
                                         new_assigns = []
                                         for va in valid_assignments:
@@ -1555,9 +1527,6 @@ if menu == "Ταμπλό Gantt":
                                             st.session_state.assignments.append(new_a)
                                         
                                         db_insert('assignments', new_assigns, track=False)
-                                        actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
-                                        
-                                        add_transaction(actions)
                                         st.rerun()
 
 # --- VIEW: PROJECTS ---
