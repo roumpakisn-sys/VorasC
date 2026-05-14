@@ -817,6 +817,21 @@ if menu == "Ταμπλό Gantt":
             if not day_assignments:
                 row_id = f"day_{i}_row_0"
                 day_row_ids.append(row_id)
+                
+                data.append({
+                    'Y_Axis': row_id,
+                    'Έργο': 'Κενό',
+                    'Έναρξη': datetime(1970, 1, 1, 8, 0),
+                    'Λήξη': datetime(1970, 1, 1, 8, 0),
+                    'Προσωπικό': '',
+                    'Παρατηρήσεις': '',
+                    'Ετικέτα': '',
+                    'LegendGroup': 'Κενό',
+                    'ColorHex': 'rgba(0,0,0,0)',
+                    'GroupKey': 'Empty',
+                    'Προσέλευση': ''
+                })
+                color_map['Κενό'] = 'rgba(0,0,0,0)'
             else:
                 # Προ-ομαδοποίηση ανά υπάλληλο για γρήγορο έλεγχο επικαλύψεων της ίδιας μέρας
                 emp_day_assigns = {}
@@ -1038,26 +1053,6 @@ if menu == "Ταμπλό Gantt":
             for idx, rid in enumerate(day_row_ids):
                 tickvals_map[rid] = base_y_label if idx == mid_idx else ""
                 
-        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
-        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το κλικ στο κενό να ακυρώνει την επιλογή
-        bg_data = []
-        for rid in y_category_order:
-            bg_data.append({
-                'Y_Axis': rid,
-                'Έργο': 'Κενό',
-                'Έναρξη': datetime(1970, 1, 1, 0, 0),
-                'Λήξη': datetime(1970, 1, 1, 23, 59),
-                'Προσωπικό': '',
-                'Προσέλευση': '',
-                'Παρατηρήσεις': '',
-                'Ετικέτα': '',
-                'LegendGroup': 'Κενό',
-                'ColorHex': 'rgba(0,0,0,0)',
-                'GroupKey': 'Empty'
-            })
-        color_map['Κενό'] = 'rgba(0,0,0,0)'
-        data = bg_data + data
-        
         df = pd.DataFrame(data)
         
         # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
@@ -1133,7 +1128,7 @@ if menu == "Ταμπλό Gantt":
             hovertemplate=None
         )
         
-        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες φόντου (ώστε να μη φαίνεται γραμμή)
+        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες (κενές μέρες)
         for trace in fig.data:
             if trace.name == 'Κενό':
                 trace.marker.line.width = 0
@@ -1242,7 +1237,7 @@ if menu == "Ταμπλό Gantt":
                     c_arr, c_start, c_end = st.columns(3)
                     with c_arr:
                         use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
@@ -1678,7 +1673,7 @@ elif menu == "Ομάδα Προσωπικού":
                         for e in st.session_state.employees:
                             if e['id'] != emp_to_edit_id:
                                 if e['name'].strip().lower() == ed_name.strip().lower():
-                                    st.error("Υπάρχει ήδη άλλος υπάλληλος με αυτόο το όνομα.")
+                                    st.error("Υπάρχει ήδη άλλος υπάλληλος με αυτό το όνομα.")
                                     is_dup = True
                                     break
                                 elif ed_id_num.strip() and e.get('id_number', '').strip().lower() == ed_id_num.strip().lower():
