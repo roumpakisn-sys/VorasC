@@ -2944,3 +2944,45 @@ elif menu == "Καταγραφή Κινήσεων":
                     clear_cache_for_table("activity_logs")
                     st.success("Το ιστορικό καθαρίστηκε!")
                     time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Σφάλμα καθαρισμού: {e}")
+
+    if not st.session_state.activity_logs:
+        st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
+    else:
+        # Ταξινόμηση ώστε οι πιο πρόσφατες να βγαίνουν πρώτες
+        sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        TABLE_NAMES_GR = {
+            'employees': 'Προσωπικό',
+            'projects': 'Έργα',
+            'assignments': 'Βάρδιες',
+            'leaves': 'Άδειες',
+            'recurring_patterns': 'Επαν. Εργασίες',
+            'evaluations': 'Αξιολογήσεις'
+        }
+        
+        log_data = []
+        for log in sorted_logs:
+            # Μετατροπή Timestamp σε ευανάγνωστη μορφή
+            try:
+                dt_obj = datetime.fromisoformat(log.get('timestamp', ''))
+                dt_str = dt_obj.strftime("%d/%m/%Y %H:%M:%S")
+            except:
+                dt_str = log.get('timestamp', '')
+                
+            table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
+            
+            # Εφαρμογή του νέου "έξυπνου" μεταφραστή για παλιά δεδομένα
+            details_safe = parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
+                
+            log_data.append({
+                "Ημερομηνία/Ώρα": dt_str,
+                "Χρήστης": log.get('username', '-'),
+                "Ενέργεια": log.get('action_type', '-'),
+                "Πίνακας (Στοιχείο)": table_gr,
+                "Λεπτομέρειες": details_safe
+            })
+        
+        st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
