@@ -151,8 +151,12 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING (Micro-Caching) ---
+# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING & OPTIMISTIC UI ---
 CACHE_TTL = 60 # 60 δευτερόλεπτα προσωρινή μνήμη
+
+def mark_data_changed():
+    """Σημειώνει ότι τα δεδομένα άλλαξαν τοπικά, ώστε να ανανεωθεί το γράφημα χωρίς να περιμένει τη βάση"""
+    st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
 
 def fetch_paginated(table):
     if not supabase:
@@ -175,11 +179,11 @@ def fetch_paginated(table):
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_employees():
-    return fetch_paginated("employees")
+    return {"data": fetch_paginated("employees"), "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_projects():
-    return fetch_paginated("projects")
+    return {"data": fetch_paginated("projects"), "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_assignments():
@@ -187,7 +191,7 @@ def fetch_table_assignments():
     for a in assigns:
         if isinstance(a.get('date'), str):
             a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-    return assigns
+    return {"data": assigns, "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_leaves():
@@ -197,7 +201,7 @@ def fetch_table_leaves():
             l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
         if isinstance(l.get('endDate'), str):
             l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-    return leaves
+    return {"data": leaves, "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_patterns():
@@ -205,31 +209,21 @@ def fetch_table_patterns():
     for p in patterns:
         if isinstance(p.get('startDate'), str):
             p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-    return patterns
+    return {"data": patterns, "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_evaluations():
     try:
-        return fetch_paginated("evaluations")
+        return {"data": fetch_paginated("evaluations"), "ts": time.time()}
     except Exception:
-        return []
+        return {"data": [], "ts": time.time()}
 
 @st.cache_data(ttl=CACHE_TTL)
 def fetch_table_activity_logs():
     try:
-        return fetch_paginated("activity_logs")
+        return {"data": fetch_paginated("activity_logs"), "ts": time.time()}
     except Exception:
-        return []
-
-def clear_cache_for_table(table):
-    """Καθαρίζει τη μνήμη ΜΟΝΟ για τον πίνακα που μόλις τροποποιήθηκε"""
-    if table == "employees": fetch_table_employees.clear()
-    elif table == "projects": fetch_table_projects.clear()
-    elif table == "assignments": fetch_table_assignments.clear()
-    elif table == "leaves": fetch_table_leaves.clear()
-    elif table == "recurring_patterns": fetch_table_patterns.clear()
-    elif table == "evaluations": fetch_table_evaluations.clear()
-    elif table == "activity_logs": fetch_table_activity_logs.clear()
+        return {"data": [], "ts": time.time()}
 
 def clear_all_caches():
     """Εξαναγκάζει καθαρισμό σε όλους τους πίνακες (για το κουμπί Ανανέωσης)"""
@@ -362,16 +356,15 @@ def log_activity(action_type, table_name, details_raw):
     }
     try:
         supabase.table("activity_logs").insert(log_entry).execute()
-        clear_cache_for_table("activity_logs")
     except Exception as e:
         print(f"Σφάλμα αποθήκευσης στο Ιστορικό (activity_logs): {e}")
 
 def db_insert(table, data, track=True):
-    """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση."""
+    """Αποθηκεύει μία εγγραφή ή λίστα εγγραφών στη βάση (χωρίς να μπλοκάρει τη ροή)."""
+    mark_data_changed()
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(data)).execute()
-            clear_cache_for_table(table)
             if track:
                 records = data if isinstance(data, list) else [data]
                 add_transaction([{'type': 'insert', 'table': table, 'records': records}])
@@ -384,6 +377,7 @@ def db_insert(table, data, track=True):
 
 def db_delete(table, column, value, deleted_records=None, track=True):
     """Διαγράφει εγγραφές με βάση μια συνθήκη."""
+    mark_data_changed()
     if supabase:
         try:
             if not deleted_records:
@@ -391,7 +385,6 @@ def db_delete(table, column, value, deleted_records=None, track=True):
                 deleted_records = [r for r in table_data if r.get(column) == value]
                 
             supabase.table(table).delete().eq(column, value).execute()
-            clear_cache_for_table(table)
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
@@ -404,6 +397,7 @@ def db_delete(table, column, value, deleted_records=None, track=True):
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
     """Διαγράφει πολλές εγγραφές με βάση λίστα τιμών (IN)."""
+    mark_data_changed()
     if supabase and values:
         try:
             if not deleted_records:
@@ -411,7 +405,6 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 deleted_records = [r for r in table_data if r.get(column) in values]
                 
             supabase.table(table).delete().in_(column, values).execute()
-            clear_cache_for_table(table)
             
             if track and deleted_records:
                 add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
@@ -424,6 +417,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
     """Ενημερώνει μια εγγραφή με βάση το ID της."""
+    mark_data_changed()
     if supabase:
         try:
             if track and not old_data:
@@ -431,7 +425,6 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
                 old_data = next((r for r in table_data if r.get('id') == id_val), None)
                 
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
-            clear_cache_for_table(table)
             
             if track and old_data:
                 add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
@@ -492,15 +485,49 @@ BASIC_COLORS = {
     "Γκρι": "#999999"
 }
 
-# --- Συνεχής Φόρτωση Δεδομένων (Real-time Sync Logic) ---
+# --- Συνεχής Φόρτωση Δεδομένων (Optimistic Sync Logic) ---
+# Εδώ γίνεται η έξυπνη διαχείριση: Φορτώνει δεδομένα από τη βάση ΜΟΝΟ αν έληξε ο χρόνος, χωρίς να σβήνει τις τοπικές μας αλλαγές!
 if supabase:
-    st.session_state.employees = fetch_table_employees()
-    st.session_state.projects = fetch_table_projects()
-    st.session_state.assignments = fetch_table_assignments()
-    st.session_state.leaves = fetch_table_leaves()
-    st.session_state.recurring_patterns = fetch_table_patterns()
-    st.session_state.evaluations = fetch_table_evaluations()
-    st.session_state.activity_logs = fetch_table_activity_logs()
+    emp_cache = fetch_table_employees()
+    if "emp_ts" not in st.session_state or st.session_state.emp_ts != emp_cache["ts"]:
+        st.session_state.employees = copy.deepcopy(emp_cache["data"])
+        st.session_state.emp_ts = emp_cache["ts"]
+        mark_data_changed()
+        
+    proj_cache = fetch_table_projects()
+    if "proj_ts" not in st.session_state or st.session_state.proj_ts != proj_cache["ts"]:
+        st.session_state.projects = copy.deepcopy(proj_cache["data"])
+        st.session_state.proj_ts = proj_cache["ts"]
+        mark_data_changed()
+        
+    assign_cache = fetch_table_assignments()
+    if "assign_ts" not in st.session_state or st.session_state.assign_ts != assign_cache["ts"]:
+        st.session_state.assignments = copy.deepcopy(assign_cache["data"])
+        st.session_state.assign_ts = assign_cache["ts"]
+        mark_data_changed()
+        
+    leave_cache = fetch_table_leaves()
+    if "leave_ts" not in st.session_state or st.session_state.leave_ts != leave_cache["ts"]:
+        st.session_state.leaves = copy.deepcopy(leave_cache["data"])
+        st.session_state.leave_ts = leave_cache["ts"]
+        mark_data_changed()
+        
+    pat_cache = fetch_table_patterns()
+    if "pat_ts" not in st.session_state or st.session_state.pat_ts != pat_cache["ts"]:
+        st.session_state.recurring_patterns = copy.deepcopy(pat_cache["data"])
+        st.session_state.pat_ts = pat_cache["ts"]
+        mark_data_changed()
+        
+    eval_cache = fetch_table_evaluations()
+    if "eval_ts" not in st.session_state or st.session_state.eval_ts != eval_cache["ts"]:
+        st.session_state.evaluations = copy.deepcopy(eval_cache["data"])
+        st.session_state.eval_ts = eval_cache["ts"]
+        
+    log_cache = fetch_table_activity_logs()
+    if "log_ts" not in st.session_state or st.session_state.log_ts != log_cache["ts"]:
+        st.session_state.activity_logs = copy.deepcopy(log_cache["data"])
+        st.session_state.log_ts = log_cache["ts"]
+
     st.session_state.is_cloud = True
 else:
     # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
@@ -521,6 +548,7 @@ else:
         st.session_state.leaves = []
         st.session_state.evaluations = []
         st.session_state.activity_logs = []
+        mark_data_changed()
 
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
@@ -723,417 +751,435 @@ if menu == "Ταμπλό Gantt":
         
     zoom_factor = zoom_level / 100.0
     
-    data = []
-    export_data = [] # Λίστα για τα δεδομένα που θα εξαχθούν στο Excel
-    color_map = {}
-    y_category_order = []
-    tickvals_map = {}
-    empty_shift_annotations = [] # Λίστα για τα κυκλάκια "Χωρίς Προσωπικό"
-    
-    day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
-    
-    wk_groups = {} # Για την επεξεργασία
+    # --- SMART PLOTLY CACHING (ΓΙΑ ΑΣΤΡΑΠΙΑΙΑ ΕΠΙΛΟΓΗ/ΑΠΟΕΠΙΛΟΓΗ) ---
+    current_gantt_params = {
+        "week": start_of_week,
+        "zoom": zoom_factor,
+        "presentation": presentation_mode,
+        "local_version": st.session_state.get('local_gantt_version', 0)
+    }
 
-    # Διατρέχουμε και τις 7 μέρες της εβδομάδας
-    for i in range(7):
-        curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
-        
-        # Υπολογισμός αδειών για την τρέχουσα μέρα με αναφορά στον Αντικαταστάτη
-        leaves_today = []
-        for l in st.session_state.leaves:
-            if l['startDate'] <= curr_date <= l['endDate']:
-                emp_full = get_employee_name(l['employeeId'])
-                # Συντόμευση Ονόματος: π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.
-                emp_parts = emp_full.split()
-                emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
-                
-                sub_id = l.get('substituteId')
-                if sub_id:
-                    sub_full = get_employee_name(sub_id)
-                    sub_parts = sub_full.split()
-                    sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
-                    
-                    leaves_today.append(f"<b>{emp_n}</b><br><span style='font-size:10px; color:#991b1b;'>↳ Αντικατ: <b>{sub_n}</b></span>")
-                else:
-                    leaves_today.append(f"<b>{emp_n}</b>")
-                    
-        # Διαχωρισμός πολλαπλών αδειών με αλλαγή γραμμής (<br>) αντί για κόμμα
-        leaves_str = "<br><br>".join(leaves_today) if leaves_today else "Καμία"
-        
-        # Η βασική ετικέτα του άξονα Y για αυτή τη μέρα
-        if leaves_today:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
-        else:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
-        
-        # Γρήγορο φιλτράρισμα βαρδιών ανά ημέρα χρησιμοποιώντας το Dictionary!
-        day_assignments = st.session_state.assignments_by_date.get(curr_date, [])
-        
-        day_row_ids = []
-        
-        # Αν η μέρα δεν έχει καθόλου εργασίες
-        if not day_assignments:
-            row_id = f"day_{i}_row_0"
-            day_row_ids.append(row_id)
-        else:
-            # Προ-ομαδοποίηση ανά υπάλληλο για γρήγορο έλεγχο επικαλύψεων της ίδιας μέρας
-            emp_day_assigns = {}
-            for da in day_assignments:
-                eid = da.get('employeeId')
-                if eid:
-                    if eid not in emp_day_assigns: emp_day_assigns[eid] = []
-                    emp_day_assigns[eid].append(da)
-                    
-            # Ομαδοποίηση εργασιών της τρέχουσας μέρας
-            groups = {}
-            for a in day_assignments:
-                proj = get_project_info(a['projectId'])
-                c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
-                c_name = a.get('colorName', "Προεπιλογή")
-                notes = a.get('notes', '')
-                is_canc = a.get('is_cancelled', False)
-                c_reason = a.get('cancel_reason', '')
-                
-                arrival_time = a.get('arrivalTime', '')
-                if arrival_time: arrival_time = arrival_time[:5]
-                
-                # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
-                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}_{arrival_time}"
-                if key not in groups:
-                    legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
-                    groups[key] = {
-                        'Key': key,
-                        'ProjectId': a['projectId'],
-                        'Date': curr_date,
-                        'Project': proj['name'] if proj else "Άγνωστο",
-                        'ArrivalTime': arrival_time,
-                        'StartTime': str(a['startTime'])[:5],
-                        'EndTime': str(a['endTime'])[:5],
-                        'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['startTime'])[:5], "%H:%M").time()),
-                        'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
-                        'Employees': [],
-                        'EmployeeIds': [],
-                        'AssignmentIds': [],
-                        'ColorHex': c_hex,
-                        'ColorName': c_name,
-                        'Notes': notes,
-                        'is_cancelled': is_canc,
-                        'cancel_reason': c_reason,
-                        'LegendGroup': legend_val
-                    }
-                
-                # Μορφοποίηση ονόματος: Επώνυμο + Αρχικό Ονόματος (π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.)
-                if not a.get('employeeId'):
-                    formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
-                else:
-                    full_name = get_employee_name(a['employeeId'])
-                    name_parts = full_name.split()
-                    if len(name_parts) > 1:
-                        first_name_initial = name_parts[0][0] + "."
-                        last_name = name_parts[-1]
-                        formatted_name = f"{last_name} {first_name_initial}"
-                    else:
-                        formatted_name = full_name
-                        
-                    # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
-                    # ΤΑΧΥΤΑΤΟΣ ΕΛΕΓΧΟΣ: Χρήση του emp_day_assigns και string parsing
-                    prev_assigns = []
-                    my_eid = a.get('employeeId')
-                    if my_eid in emp_day_assigns:
-                        t_a_start_str = str(a['startTime'])[:5]
-                        t_a_end_str = str(a['endTime'])[:5]
-                        
-                        for pa in emp_day_assigns[my_eid]:
-                            if pa.get('id') != a['id']:
-                                t_pa_start_str = str(pa['startTime'])[:5]
-                                t_pa_end_str = str(pa['endTime'])[:5]
-                                
-                                # Ελέγχουμε αν υπάρχει επικάλυψη (overlap) - O αλφαριθμητικός έλεγχος λειτουργεί τέλεια στις 24h μορφές
-                                is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
-                                
-                                # Το εμφανίζουμε ΜΟΝΟ ΑΝ: 
-                                # Υπάρχει πραγματική επικάλυψη ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
-                                if is_overlapping and (t_pa_end_str <= t_a_end_str):
-                                    prev_assigns.append(pa)
-                                
-                    if prev_assigns:
-                        # Ταξινόμηση (string sort works perfectly for HH:MM)
-                        prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
-                        prev_proj = get_project_info(prev_assigns[0]['projectId'])
-                        if prev_proj:
-                            formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' {formatted_name}]"
-                    
-                groups[key]['Employees'].append(formatted_name)
-                groups[key]['EmployeeIds'].append(a['employeeId'])
-                groups[key]['AssignmentIds'].append(a['id'])
-
-            # Ενημέρωση για το Edit View
-            wk_groups.update(groups)
-
-            # Διαχωρισμός σε "Μπλε" και "Μη-Μπλε" μπάρες
-            non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
-            blue_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
-            
-            # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΗ ΜΠΛΕ (Μπαίνουν πάνω)
-            non_blue_lanes = [] 
-            group_row_mapping = []
-            
-            for g in sorted(non_blue_groups, key=lambda x: x['Start']):
-                placed = False
-                for lane_idx, lane_end in enumerate(non_blue_lanes):
-                    if g['Start'] >= lane_end:
-                        row_idx = lane_idx
-                        non_blue_lanes[lane_idx] = g['End']
-                        placed = True
-                        break
-                
-                if not placed:
-                    non_blue_lanes.append(g['End'])
-                    row_idx = len(non_blue_lanes) - 1
-                
-                group_row_mapping.append((g, row_idx))
-
-            num_non_blue_lanes = len(non_blue_lanes)
-
-            # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΠΛΕ (Μπαίνουν κάτω)
-            blue_lanes = []
-            for g in sorted(blue_groups, key=lambda x: x['Start']):
-                placed = False
-                for lane_idx, lane_end in enumerate(blue_lanes):
-                    if g['Start'] >= lane_end:
-                        row_idx = lane_idx
-                        blue_lanes[lane_idx] = g['End']
-                        placed = True
-                        break
-                
-                if not placed:
-                    blue_lanes.append(g['End'])
-                    row_idx = len(blue_lanes) - 1
-                
-                # Προσθέτουμε το offset των non-blue lanes ώστε να μπουν από κάτω
-                group_row_mapping.append((g, row_idx + num_non_blue_lanes))
-
-            # Δημιουργία τελικών δεδομένων προς σχεδίαση
-            for g, row_idx in group_row_mapping:
-                row_id = f"day_{i}_row_{row_idx}"
-                if row_id not in day_row_ids:
-                    day_row_ids.append(row_id)
-                
-                emps_str = ", ".join(g['Employees']).upper()
-                proj_name = g['Project'].upper()
-                
-                arrival_str = f"[Προσ: {g['ArrivalTime']}] " if g['ArrivalTime'] else ""
-                times_str = f"{arrival_str}{g['StartTime']}-{g['EndTime']}"
-                
-                # Δημιουργία του βασικού κειμένου
-                base_text = f"{times_str} {proj_name} // {emps_str}"
-                if g['Notes']:
-                    base_text += f" ({g['Notes'].upper()})"
-                    
-                # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
-                duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(15, int(duration_hours * 16))
-
-                # Αυτόματη αναδίπλωση κειμένου δυναμικά
-                wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
-                
-                # Εάν η βάρδια είναι "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ", προσθέτουμε ένα Annotation (🔴) στην πάνω δεξιά γωνία
-                if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
-                    empty_shift_annotations.append(dict(
-                        x=g['End'],
-                        y=row_id,
-                        text="🔴",
-                        showarrow=False,
-                        xanchor='right',
-                        yanchor='middle',
-                        xshift=-4,  
-                        yshift=int(28 * zoom_factor), 
-                        font=dict(size=max(10, int(14 * zoom_factor)))
-                    ))
-                
-                # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
-                if g['is_cancelled']:
-                    label_text = f"<s>{wrapped_base}</s>"
-                    if g['cancel_reason']:
-                        wrapped_reason = "<br>".join(textwrap.wrap(f"[{g['cancel_reason'].upper()}]", width=wrap_w))
-                        label_text += f"<br><span style='color:#dc2626;'><b>{wrapped_reason}</b></span>"
-                else:
-                    label_text = wrapped_base
-                    
-                data.append({
-                    'Y_Axis': row_id,
-                    'Έργο': g['Project'],
-                    'Έναρξη': g['Start'],
-                    'Λήξη': g['End'],
-                    'Προσωπικό': ", ".join(g['Employees']),
-                    'Προσέλευση': g['ArrivalTime'] if g['ArrivalTime'] else "-",
-                    'Παρατηρήσεις': g['Notes'],
-                    'Ετικέτα': label_text,
-                    'LegendGroup': g['LegendGroup'],
-                    'ColorHex': g['ColorHex'],
-                    'GroupKey': g['Key']
-                })
-                
-                # Προσθήκη δεδομένων για το αρχείο Excel
-                export_data.append({
-                    'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
-                    'Ημέρα': day_names_gr[i],
-                    'Έργο': g['Project'],
-                    'Προσωπικό': ", ".join(g['Employees']),
-                    'Ώρα Προσέλευσης': g['ArrivalTime'] if g['ArrivalTime'] else "-",
-                    'Ώρα Έναρξης': g['StartTime'],
-                    'Ώρα Λήξης': g['EndTime'],
-                    'Παρατηρήσεις': g['Notes'],
-                    'Ακυρωμένο': 'ΝΑΙ' if g['is_cancelled'] else 'ΟΧΙ',
-                    'Λόγος Ακύρωσης': g['cancel_reason']
-                })
-                
-                color_map[g['LegendGroup']] = g['ColorHex']
-                
-        # Προσθήκη των IDs στο γενικό σύνολο και αντιστοίχιση Labels στο κέντρο της μέρας
-        y_category_order.extend(day_row_ids)
-        mid_idx = len(day_row_ids) // 2
-        for idx, rid in enumerate(day_row_ids):
-            tickvals_map[rid] = base_y_label if idx == mid_idx else ""
-            
-    # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
-    # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το κλικ στο κενό να ακυρώνει την επιλογή
-    bg_data = []
-    for rid in y_category_order:
-        bg_data.append({
-            'Y_Axis': rid,
-            'Έργο': 'Κενό',
-            'Έναρξη': datetime(1970, 1, 1, 0, 0),
-            'Λήξη': datetime(1970, 1, 1, 23, 59),
-            'Προσωπικό': '',
-            'Προσέλευση': '',
-            'Παρατηρήσεις': '',
-            'Ετικέτα': '',
-            'LegendGroup': 'Κενό',
-            'ColorHex': 'rgba(0,0,0,0)',
-            'GroupKey': 'Empty'
-        })
-    color_map['Κενό'] = 'rgba(0,0,0,0)'
-    data = bg_data + data
-    
-    df = pd.DataFrame(data)
-    
-    # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
-    # Επειδή θέλουμε Δευτέρα (day_0) πάνω, η categoryarray πρέπει να είναι Sunday -> Monday.
-    ordered_categories = y_category_order[::-1]
-    
-    # Σχεδιασμός Γραφήματος
-    fig = px.timeline(
-        df, 
-        x_start="Έναρξη", 
-        x_end="Λήξη", 
-        y="Y_Axis", 
-        color="LegendGroup",
-        color_discrete_map=color_map,
-        custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
-        text="Ετικέτα"
-    )
-    
-    # --- ΠΡΟΣΘΗΚΗ ΕΝΑΛΛΑΣΣΟΜΕΝΟΥ ΦΟΝΤΟΥ (ZEBRA STRIPING) & HIGHLIGHTS ---
-    for di in range(7):
-        day_idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{di}_")]
-        if day_idxs:
-            mn, mx = min(day_idxs), max(day_idxs)
-            if di % 2 != 0:
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
-            if (start_of_week + timedelta(days=di)) == date.today():
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
-
-    # Μαύρες διαχωριστικές γραμμές μεταξύ ημερών
-    for idx in range(len(ordered_categories) - 1):
-        if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
-            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
-
-    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
-    row_h = 55 * zoom_factor
-    visible_count = 650 / row_h
-    
-    if presentation_mode or len(ordered_categories) <= visible_count:
-        dyn_h = max(500, int(len(ordered_categories) * row_h) + 100)
-        y_range = None
+    if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state:
+        # Ανασύρουμε ακαριαία το γράφημα από τη μνήμη!
+        fig = st.session_state.cached_fig
+        wk_groups = st.session_state.cached_wk_groups
+        export_data = st.session_state.cached_export_data
     else:
-        dyn_h = 750
-        offset = (date.today() - start_of_week).days
-        if 0 <= offset <= 6:
-            idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{offset}_")]
-            if idxs:
-                mid = sum(idxs) / len(idxs)
-                y_range = [max(-0.5, mid - visible_count/2), min(len(ordered_categories)-0.5, mid + visible_count/2)]
+        data = []
+        export_data = [] # Λίστα για τα δεδομένα που θα εξαχθούν στο Excel
+        color_map = {}
+        y_category_order = []
+        tickvals_map = {}
+        empty_shift_annotations = [] # Λίστα για τα κυκλάκια "Χωρίς Προσωπικό"
+        wk_groups = {} # Για την επεξεργασία
+
+        day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
+
+        # Διατρέχουμε και τις 7 μέρες της εβδομάδας
+        for i in range(7):
+            curr_date = start_of_week + timedelta(days=i)
+            day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
+            
+            # Υπολογισμός αδειών για την τρέχουσα μέρα με αναφορά στον Αντικαταστάτη
+            leaves_today = []
+            for l in st.session_state.leaves:
+                if l['startDate'] <= curr_date <= l['endDate']:
+                    emp_full = get_employee_name(l['employeeId'])
+                    # Συντόμευση Ονόματος: π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.
+                    emp_parts = emp_full.split()
+                    emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
+                    
+                    sub_id = l.get('substituteId')
+                    if sub_id:
+                        sub_full = get_employee_name(sub_id)
+                        sub_parts = sub_full.split()
+                        sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
+                        
+                        leaves_today.append(f"<b>{emp_n}</b><br><span style='font-size:10px; color:#991b1b;'>↳ Αντικατ: <b>{sub_n}</b></span>")
+                    else:
+                        leaves_today.append(f"<b>{emp_n}</b>")
+                        
+            # Διαχωρισμός πολλαπλών αδειών με αλλαγή γραμμής (<br>) αντί για κόμμα
+            leaves_str = "<br><br>".join(leaves_today) if leaves_today else "Καμία"
+            
+            # Η βασική ετικέτα του άξονα Y για αυτή τη μέρα
+            if leaves_today:
+                base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
+            else:
+                base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
+            
+            # Γρήγορο φιλτράρισμα βαρδιών ανά ημέρα χρησιμοποιώντας το Dictionary!
+            day_assignments = st.session_state.assignments_by_date.get(curr_date, [])
+            
+            day_row_ids = []
+            
+            # Αν η μέρα δεν έχει καθόλου εργασίες
+            if not day_assignments:
+                row_id = f"day_{i}_row_0"
+                day_row_ids.append(row_id)
+            else:
+                # Προ-ομαδοποίηση ανά υπάλληλο για γρήγορο έλεγχο επικαλύψεων της ίδιας μέρας
+                emp_day_assigns = {}
+                for da in day_assignments:
+                    eid = da.get('employeeId')
+                    if eid:
+                        if eid not in emp_day_assigns: emp_day_assigns[eid] = []
+                        emp_day_assigns[eid].append(da)
+                        
+                # Ομαδοποίηση εργασιών της τρέχουσας μέρας
+                groups = {}
+                for a in day_assignments:
+                    proj = get_project_info(a['projectId'])
+                    c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
+                    c_name = a.get('colorName', "Προεπιλογή")
+                    notes = a.get('notes', '')
+                    is_canc = a.get('is_cancelled', False)
+                    c_reason = a.get('cancel_reason', '')
+                    
+                    arrival_time = a.get('arrivalTime', '')
+                    if arrival_time: arrival_time = arrival_time[:5]
+                    
+                    # Δημιουργούμε ένα κλειδί που περιλαμβάνει και την ημερομηνία
+                    key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}_{arrival_time}"
+                    if key not in groups:
+                        legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
+                        groups[key] = {
+                            'Key': key,
+                            'ProjectId': a['projectId'],
+                            'Date': curr_date,
+                            'Project': proj['name'] if proj else "Άγνωστο",
+                            'ArrivalTime': arrival_time,
+                            'StartTime': str(a['startTime'])[:5],
+                            'EndTime': str(a['endTime'])[:5],
+                            'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['startTime'])[:5], "%H:%M").time()),
+                            'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
+                            'Employees': [],
+                            'EmployeeIds': [],
+                            'AssignmentIds': [],
+                            'ColorHex': c_hex,
+                            'ColorName': c_name,
+                            'Notes': notes,
+                            'is_cancelled': is_canc,
+                            'cancel_reason': c_reason,
+                            'LegendGroup': legend_val
+                        }
+                    
+                    # Μορφοποίηση ονόματος: Επώνυμο + Αρχικό Ονόματος (π.χ. ΠΑΠΑΔΟΠΟΥΛΟΣ Γ.)
+                    if not a.get('employeeId'):
+                        formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
+                    else:
+                        full_name = get_employee_name(a['employeeId'])
+                        name_parts = full_name.split()
+                        if len(name_parts) > 1:
+                            first_name_initial = name_parts[0][0] + "."
+                            last_name = name_parts[-1]
+                            formatted_name = f"{last_name} {first_name_initial}"
+                        else:
+                            formatted_name = full_name
+                            
+                        # Εντοπισμός προηγούμενου έργου την ίδια μέρα για τον συγκεκριμένο υπάλληλο ("μετά από το...")
+                        # ΤΑΧΥΤΑΤΟΣ ΕΛΕΓΧΟΣ: Χρήση του emp_day_assigns και string parsing
+                        prev_assigns = []
+                        my_eid = a.get('employeeId')
+                        if my_eid in emp_day_assigns:
+                            t_a_start_str = str(a['startTime'])[:5]
+                            t_a_end_str = str(a['endTime'])[:5]
+                            
+                            for pa in emp_day_assigns[my_eid]:
+                                if pa.get('id') != a['id']:
+                                    t_pa_start_str = str(pa['startTime'])[:5]
+                                    t_pa_end_str = str(pa['endTime'])[:5]
+                                    
+                                    # Ελέγχουμε αν υπάρχει επικάλυψη (overlap) - O αλφαριθμητικός έλεγχος λειτουργεί τέλεια στις 24h μορφές
+                                    is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
+                                    
+                                    # Το εμφανίζουμε ΜΟΝΟ ΑΝ: 
+                                    # Υπάρχει πραγματική επικάλυψη ΚΑΙ η νέα βάρδια (a) τελειώνει πιο μετά από την παλιά (pa)
+                                    if is_overlapping and (t_pa_end_str <= t_a_end_str):
+                                        prev_assigns.append(pa)
+                                    
+                        if prev_assigns:
+                            # Ταξινόμηση (string sort works perfectly for HH:MM)
+                            prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
+                            prev_proj = get_project_info(prev_assigns[0]['projectId'])
+                            if prev_proj:
+                                formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' {formatted_name}]"
+                        
+                    groups[key]['Employees'].append(formatted_name)
+                    groups[key]['EmployeeIds'].append(a['employeeId'])
+                    groups[key]['AssignmentIds'].append(a['id'])
+
+                # Ενημέρωση για το Edit View
+                wk_groups.update(groups)
+
+                # Διαχωρισμός σε "Μπλε" και "Μη-Μπλε" μπάρες
+                non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
+                blue_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
+                
+                # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΗ ΜΠΛΕ (Μπαίνουν πάνω)
+                non_blue_lanes = [] 
+                group_row_mapping = []
+                
+                for g in sorted(non_blue_groups, key=lambda x: x['Start']):
+                    placed = False
+                    for lane_idx, lane_end in enumerate(non_blue_lanes):
+                        if g['Start'] >= lane_end:
+                            row_idx = lane_idx
+                            non_blue_lanes[lane_idx] = g['End']
+                            placed = True
+                            break
+                    
+                    if not placed:
+                        non_blue_lanes.append(g['End'])
+                        row_idx = len(non_blue_lanes) - 1
+                    
+                    group_row_mapping.append((g, row_idx))
+
+                num_non_blue_lanes = len(non_blue_lanes)
+
+                # Αλγόριθμος πακεταρίσματος για αποφυγή επικαλύψεων (Lanes) - ΜΠΛΕ (Μπαίνουν κάτω)
+                blue_lanes = []
+                for g in sorted(blue_groups, key=lambda x: x['Start']):
+                    placed = False
+                    for lane_idx, lane_end in enumerate(blue_lanes):
+                        if g['Start'] >= lane_end:
+                            row_idx = lane_idx
+                            blue_lanes[lane_idx] = g['End']
+                            placed = True
+                            break
+                    
+                    if not placed:
+                        blue_lanes.append(g['End'])
+                        row_idx = len(blue_lanes) - 1
+                    
+                    # Προσθέτουμε το offset των non-blue lanes ώστε να μπουν από κάτω
+                    group_row_mapping.append((g, row_idx + num_non_blue_lanes))
+
+                # Δημιουργία τελικών δεδομένων προς σχεδίαση
+                for g, row_idx in group_row_mapping:
+                    row_id = f"day_{i}_row_{row_idx}"
+                    if row_id not in day_row_ids:
+                        day_row_ids.append(row_id)
+                    
+                    emps_str = ", ".join(g['Employees']).upper()
+                    proj_name = g['Project'].upper()
+                    
+                    arrival_str = f"[Προσ: {g['ArrivalTime']}] " if g['ArrivalTime'] else ""
+                    times_str = f"{arrival_str}{g['StartTime']}-{g['EndTime']}"
+                    
+                    # Δημιουργία του βασικού κειμένου
+                    base_text = f"{times_str} {proj_name} // {emps_str}"
+                    if g['Notes']:
+                        base_text += f" ({g['Notes'].upper()})"
+                        
+                    # Υπολογισμός διάρκειας βάρδιας για πιο έξυπνο wrap
+                    duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
+                    wrap_w = max(15, int(duration_hours * 16))
+
+                    # Αυτόματη αναδίπλωση κειμένου δυναμικά
+                    wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
+                    
+                    # Εάν η βάρδια είναι "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ", προσθέτουμε ένα Annotation (🔴) στην πάνω δεξιά γωνία
+                    if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
+                        empty_shift_annotations.append(dict(
+                            x=g['End'],
+                            y=row_id,
+                            text="🔴",
+                            showarrow=False,
+                            xanchor='right',
+                            yanchor='middle',
+                            xshift=-4,  
+                            yshift=int(28 * zoom_factor), 
+                            font=dict(size=max(10, int(14 * zoom_factor)))
+                        ))
+                    
+                    # Διαμόρφωση κειμένου (με ή χωρίς διαγράμμιση)
+                    if g['is_cancelled']:
+                        label_text = f"<s>{wrapped_base}</s>"
+                        if g['cancel_reason']:
+                            wrapped_reason = "<br>".join(textwrap.wrap(f"[{g['cancel_reason'].upper()}]", width=wrap_w))
+                            label_text += f"<br><span style='color:#dc2626;'><b>{wrapped_reason}</b></span>"
+                    else:
+                        label_text = wrapped_base
+                        
+                    data.append({
+                        'Y_Axis': row_id,
+                        'Έργο': g['Project'],
+                        'Έναρξη': g['Start'],
+                        'Λήξη': g['End'],
+                        'Προσωπικό': ", ".join(g['Employees']),
+                        'Προσέλευση': g['ArrivalTime'] if g['ArrivalTime'] else "-",
+                        'Παρατηρήσεις': g['Notes'],
+                        'Ετικέτα': label_text,
+                        'LegendGroup': g['LegendGroup'],
+                        'ColorHex': g['ColorHex'],
+                        'GroupKey': g['Key']
+                    })
+                    
+                    # Προσθήκη δεδομένων για το αρχείο Excel
+                    export_data.append({
+                        'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
+                        'Ημέρα': day_names_gr[i],
+                        'Έργο': g['Project'],
+                        'Προσωπικό': ", ".join(g['Employees']),
+                        'Ώρα Προσέλευσης': g['ArrivalTime'] if g['ArrivalTime'] else "-",
+                        'Ώρα Έναρξης': g['StartTime'],
+                        'Ώρα Λήξης': g['EndTime'],
+                        'Παρατηρήσεις': g['Notes'],
+                        'Ακυρωμένο': 'ΝΑΙ' if g['is_cancelled'] else 'ΟΧΙ',
+                        'Λόγος Ακύρωσης': g['cancel_reason']
+                    })
+                    
+                    color_map[g['LegendGroup']] = g['ColorHex']
+                    
+            # Προσθήκη των IDs στο γενικό σύνολο και αντιστοίχιση Labels στο κέντρο της μέρας
+            y_category_order.extend(day_row_ids)
+            mid_idx = len(day_row_ids) // 2
+            for idx, rid in enumerate(day_row_ids):
+                tickvals_map[rid] = base_y_label if idx == mid_idx else ""
+                
+        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
+        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το κλικ στο κενό να ακυρώνει την επιλογή
+        bg_data = []
+        for rid in y_category_order:
+            bg_data.append({
+                'Y_Axis': rid,
+                'Έργο': 'Κενό',
+                'Έναρξη': datetime(1970, 1, 1, 0, 0),
+                'Λήξη': datetime(1970, 1, 1, 23, 59),
+                'Προσωπικό': '',
+                'Προσέλευση': '',
+                'Παρατηρήσεις': '',
+                'Ετικέτα': '',
+                'LegendGroup': 'Κενό',
+                'ColorHex': 'rgba(0,0,0,0)',
+                'GroupKey': 'Empty'
+            })
+        color_map['Κενό'] = 'rgba(0,0,0,0)'
+        data = bg_data + data
+        
+        df = pd.DataFrame(data)
+        
+        # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
+        # Επειδή θέλουμε Δευτέρα (day_0) πάνω, η categoryarray πρέπει να είναι Sunday -> Monday.
+        ordered_categories = y_category_order[::-1]
+        
+        # Σχεδιασμός Γραφήματος
+        fig = px.timeline(
+            df, 
+            x_start="Έναρξη", 
+            x_end="Λήξη", 
+            y="Y_Axis", 
+            color="LegendGroup",
+            color_discrete_map=color_map,
+            custom_data=["GroupKey"], # Μεταφέρουμε το κλειδί στο γράφημα
+            text="Ετικέτα"
+        )
+        
+        # --- ΠΡΟΣΘΗΚΗ ΕΝΑΛΛΑΣΣΟΜΕΝΟΥ ΦΟΝΤΟΥ (ZEBRA STRIPING) & HIGHLIGHTS ---
+        for di in range(7):
+            day_idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{di}_")]
+            if day_idxs:
+                mn, mx = min(day_idxs), max(day_idxs)
+                if di % 2 != 0:
+                    fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0, 0, 0, 0.05)", opacity=1, layer="below", line_width=0)
+                if (start_of_week + timedelta(days=di)) == date.today():
+                    fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
+
+        # Μαύρες διαχωριστικές γραμμές μεταξύ ημερών
+        for idx in range(len(ordered_categories) - 1):
+            if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
+                fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
+
+        # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & ΣΤΑΘΕΡΟΥ ΑΞΟΝΑ Χ (STICKY X-AXIS) ---
+        row_h = 55 * zoom_factor
+        visible_count = 650 / row_h
+        
+        if presentation_mode or len(ordered_categories) <= visible_count:
+            dyn_h = max(500, int(len(ordered_categories) * row_h) + 100)
+            y_range = None
+        else:
+            dyn_h = 750
+            offset = (date.today() - start_of_week).days
+            if 0 <= offset <= 6:
+                idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{offset}_")]
+                if idxs:
+                    mid = sum(idxs) / len(idxs)
+                    y_range = [max(-0.5, mid - visible_count/2), min(len(ordered_categories)-0.5, mid + visible_count/2)]
+                else:
+                    y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
             else:
                 y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
-        else:
-            y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
 
-    fig.update_yaxes(
-        categoryorder='array', 
-        categoryarray=ordered_categories, 
-        tickmode='array', 
-        tickvals=ordered_categories, 
-        ticktext=[tickvals_map[v] for v in ordered_categories],
-        showgrid=True, 
-        gridcolor='rgba(0,0,0,0.1)', 
-        gridwidth=1 # Οριζόντιες διακριτικές γραμμές
-    )
-    
-    fig.update_traces(
-        textposition='inside', 
-        insidetextanchor='middle',
-        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
-        marker=dict(line=dict(color='black', width=1)),
-        textangle=0,
-        constraintext='none',
-        hoverinfo='none',
-        hovertemplate=None
-    )
-    
-    # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες φόντου (ώστε να μη φαίνεται γραμμή)
-    for trace in fig.data:
-        if trace.name == 'Κενό':
-            trace.marker.line.width = 0
-    
-    fig.update_layout(
-        bargap=0.12, 
-        showlegend=False, 
-        plot_bgcolor='#dbece8', 
-        paper_bgcolor='#ffffff',
-        height=dyn_h, 
-        margin=dict(l=10, r=10, t=50, b=10),
-        annotations=empty_shift_annotations, 
-        dragmode="pan",
-        uirevision="constant", # Διατηρεί το σημείο που έχεις κάνει pan/scroll μετά από κάθε κλικ
-        xaxis=dict(
-            side='top', 
-            tickmode='linear',
-            tick0=datetime(1970, 1, 1, 0, 0),
-            dtick=1800000, 
-            tickformat="%H:%M",
-            showgrid=True,
-            gridcolor='black',
-            gridwidth=1,
-            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
-            title="",
-            tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
-            fixedrange=False,
-            rangeslider=dict(visible=False) # <-- Απενεργοποιήθηκε η μπάρα κύλισης που προκαλούσε το lag
-        ),
-        yaxis=dict(
-            title="",
-            tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"),
-            fixedrange=False,
-            range=y_range
+        fig.update_yaxes(
+            categoryorder='array', 
+            categoryarray=ordered_categories, 
+            tickmode='array', 
+            tickvals=ordered_categories, 
+            ticktext=[tickvals_map[v] for v in ordered_categories],
+            showgrid=True, 
+            gridcolor='rgba(0,0,0,0.1)', 
+            gridwidth=1 # Οριζόντιες διακριτικές γραμμές
         )
-    )
+        
+        fig.update_traces(
+            textposition='inside', 
+            insidetextanchor='middle',
+            textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
+            marker=dict(line=dict(color='black', width=1)),
+            textangle=0,
+            constraintext='none',
+            hoverinfo='none',
+            hovertemplate=None
+        )
+        
+        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες φόντου (ώστε να μη φαίνεται γραμμή)
+        for trace in fig.data:
+            if trace.name == 'Κενό':
+                trace.marker.line.width = 0
+        
+        fig.update_layout(
+            bargap=0.12, 
+            showlegend=False, 
+            plot_bgcolor='#dbece8', 
+            paper_bgcolor='#ffffff',
+            height=dyn_h, 
+            margin=dict(l=10, r=10, t=50, b=10),
+            annotations=empty_shift_annotations, 
+            dragmode="pan",
+            uirevision="constant", # Διατηρεί το σημείο που έχεις κάνει pan/scroll μετά από κάθε κλικ
+            xaxis=dict(
+                side='top', 
+                tickmode='linear',
+                tick0=datetime(1970, 1, 1, 0, 0),
+                dtick=1800000, 
+                tickformat="%H:%M",
+                showgrid=True,
+                gridcolor='black',
+                gridwidth=1,
+                range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
+                title="",
+                tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
+                fixedrange=False,
+                rangeslider=dict(visible=False) # <-- Απενεργοποιήθηκε η μπάρα κύλισης που προκαλούσε το lag
+            ),
+            yaxis=dict(
+                title="",
+                tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"),
+                fixedrange=False,
+                range=y_range
+            )
+        )
+        
+        # Αποθήκευση του έτοιμου γραφήματος στη μνήμη!
+        st.session_state.cached_fig = fig
+        st.session_state.cached_wk_groups = wk_groups
+        st.session_state.cached_export_data = export_data
+        st.session_state.last_gantt_params = current_gantt_params
     
-    # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ
+    # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ (ΠΑΝΤΑ ΑΣΤΡΑΠΙΑΙΑ ΑΠΟ ΤΗ ΜΝΗΜΗ)
     clicked_key = None
     try:
-        # Ενεργοποίηση ομαλού scrollZoom με τη ροδέλα (Απενεργοποιήθηκε για να ελέγχεται μόνο από Slider)
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event and event["selection"].get("points"):
             clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
@@ -1632,7 +1678,7 @@ elif menu == "Ομάδα Προσωπικού":
                         for e in st.session_state.employees:
                             if e['id'] != emp_to_edit_id:
                                 if e['name'].strip().lower() == ed_name.strip().lower():
-                                    st.error("Υπάρχει ήδη άλλος υπάλληλος με αυτό το όνομα.")
+                                    st.error("Υπάρχει ήδη άλλος υπάλληλος με αυτόο το όνομα.")
                                     is_dup = True
                                     break
                                 elif ed_id_num.strip() and e.get('id_number', '').strip().lower() == ed_id_num.strip().lower():
@@ -2898,45 +2944,3 @@ elif menu == "Καταγραφή Κινήσεων":
                     clear_cache_for_table("activity_logs")
                     st.success("Το ιστορικό καθαρίστηκε!")
                     time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Σφάλμα καθαρισμού: {e}")
-
-    if not st.session_state.activity_logs:
-        st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
-    else:
-        # Ταξινόμηση ώστε οι πιο πρόσφατες να βγαίνουν πρώτες
-        sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
-        
-        TABLE_NAMES_GR = {
-            'employees': 'Προσωπικό',
-            'projects': 'Έργα',
-            'assignments': 'Βάρδιες',
-            'leaves': 'Άδειες',
-            'recurring_patterns': 'Επαν. Εργασίες',
-            'evaluations': 'Αξιολογήσεις'
-        }
-        
-        log_data = []
-        for log in sorted_logs:
-            # Μετατροπή Timestamp σε ευανάγνωστη μορφή
-            try:
-                dt_obj = datetime.fromisoformat(log.get('timestamp', ''))
-                dt_str = dt_obj.strftime("%d/%m/%Y %H:%M:%S")
-            except:
-                dt_str = log.get('timestamp', '')
-                
-            table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
-            
-            # Εφαρμογή του νέου "έξυπνου" μεταφραστή για παλιά δεδομένα
-            details_safe = parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
-                
-            log_data.append({
-                "Ημερομηνία/Ώρα": dt_str,
-                "Χρήστης": log.get('username', '-'),
-                "Ενέργεια": log.get('action_type', '-'),
-                "Πίνακας (Στοιχείο)": table_gr,
-                "Λεπτομέρειες": details_safe
-            })
-        
-        st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
