@@ -8,7 +8,6 @@ import calendar
 import io
 import time
 import textwrap
-import threading
 
 try:
     from supabase import create_client
@@ -119,7 +118,7 @@ def add_transaction(actions):
     if len(st.session_state.undo_stack) > 30:
         st.session_state.undo_stack.pop(0)
 
-# --- SUPABASE CONNECTION & BACKGROUND THREADS ---
+# --- SUPABASE CONNECTION ---
 @st.cache_resource
 def init_supabase():
     if not SUPABASE_INSTALLED or not HAS_SECRETS:
@@ -130,24 +129,6 @@ def init_supabase():
         return None
 
 supabase = init_supabase()
-
-def bg_db_action(action, table, payload=None, col=None, val=None, in_vals=None):
-    """Εκτελεί λειτουργίες στη βάση στο παρασκήνιο χωρίς να παγώνει το UI"""
-    if not supabase: return
-    try:
-        if action == 'insert':
-            supabase.table(table).insert(payload).execute()
-        elif action == 'update':
-            supabase.table(table).update(payload).eq(col, val).execute()
-        elif action == 'delete':
-            supabase.table(table).delete().eq(col, val).execute()
-        elif action == 'delete_in':
-            supabase.table(table).delete().in_(col, in_vals).execute()
-    except Exception as e:
-        print(f"Background DB error ({action} on {table}): {e}")
-
-# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ CACHING ---
-CACHE_TTL = 300 # 5 λεπτά
 
 def mark_data_changed():
     st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
@@ -166,12 +147,9 @@ def fetch_paginated(table):
             if not data or len(data) < limit:
                 break
             offset += limit
-        except Exception as e:
+        except Exception:
             break
     return all_rows
-
-def clear_all_caches():
-    st.session_state.db_last_fetch = 0
 
 def serialize_dates(data):
     if isinstance(data, list):
@@ -231,6 +209,16 @@ def format_log_details(table_name, records):
         return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
     return " | ".join(lines)
 
+def parse_old_log_details(table_name, details_str):
+    if not isinstance(details_str, str): return details_str
+    if not (details_str.startswith("[{") or details_str.startswith("{")): return details_str
+    try:
+        clean_str = re.sub(r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)", r"'\3/\2/\1'", details_str)
+        parsed_data = ast.literal_eval(clean_str)
+        return format_log_details(table_name, parsed_data)
+    except:
+        return details_str
+
 def log_activity(action_type, table_name, details_raw):
     if not supabase or table_name == 'activity_logs': return
     user = st.session_state.get("current_user", "Άγνωστος")
@@ -248,16 +236,25 @@ def log_activity(action_type, table_name, details_raw):
         "table_name": table_name,
         "details": str(details_raw)[:2000]
     }
-    threading.Thread(target=bg_db_action, args=('insert', 'activity_logs', log_entry), daemon=True).start()
+    try:
+        res = supabase.table("activity_logs").insert(log_entry).execute()
+        if res.data:
+            # Έξυπνη ειδοποίηση ότι η αλλαγή έγινε από εμάς, άρα να μην κατεβάσει πάλι τα πάντα!
+            st.session_state.global_db_ts = res.data[0]['timestamp']
+    except Exception as e:
+        print(f"Log Error: {e}")
 
 def db_insert(table, data, track=True):
     mark_data_changed()
     if track:
         records = data if isinstance(data, list) else [data]
         add_transaction([{'type': 'insert', 'table': table, 'records': records}])
-    log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
     if supabase:
-        threading.Thread(target=bg_db_action, args=('insert', table, serialize_dates(data)), daemon=True).start()
+        try:
+            supabase.table(table).insert(serialize_dates(data)).execute()
+            log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
+        except Exception as e:
+            st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
 
 def db_delete(table, column, value, deleted_records=None, track=True):
     mark_data_changed()
@@ -266,9 +263,12 @@ def db_delete(table, column, value, deleted_records=None, track=True):
         deleted_records = [r for r in table_data if r.get(column) == value]
     if track and deleted_records:
         add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-    log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
     if supabase:
-        threading.Thread(target=bg_db_action, args=('delete', table, None, column, value), daemon=True).start()
+        try:
+            supabase.table(table).delete().eq(column, value).execute()
+            log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
+        except Exception as e:
+            st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
     mark_data_changed()
@@ -278,9 +278,12 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             deleted_records = [r for r in table_data if r.get(column) in values]
         if track and deleted_records:
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
-        log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
         if supabase:
-            threading.Thread(target=bg_db_action, args=('delete_in', table, None, column, None, values), daemon=True).start()
+            try:
+                supabase.table(table).delete().in_(column, values).execute()
+                log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
+            except Exception as e:
+                st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
     mark_data_changed()
@@ -289,9 +292,12 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
         old_data = next((r for r in table_data if r.get('id') == id_val), None)
     if track and old_data:
         add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
-    log_activity("ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_data))
     if supabase:
-        threading.Thread(target=bg_db_action, args=('update', table, serialize_dates(new_data), 'id', id_val), daemon=True).start()
+        try:
+            supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
+            log_activity("ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_data))
+        except Exception as e:
+            st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
 def perform_undo():
     if not st.session_state.undo_stack: return
@@ -337,11 +343,22 @@ BASIC_COLORS = {
     "Γκρι": "#999999"
 }
 
-# --- Συνεχής Φόρτωση Δεδομένων ---
+# --- ΕΞΥΠΝΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ΒΑΣΗΣ (Smart Multi-User Polling) ---
 if supabase:
     st.session_state.is_cloud = True
-    if "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
-        with st.spinner("Συγχρονισμός με τη βάση..."):
+    
+    # 1. Παίρνουμε τον χρόνο της τελευταίας αλλαγής στη βάση (ταχύτατο, μόλις 1 γραμμή)
+    latest_ts = None
+    try:
+        res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
+        if res.data:
+            latest_ts = res.data[0]['timestamp']
+    except:
+        pass
+
+    # 2. Αν ο χρόνος άλλαξε (κάποιος άλλος έκανε ενημέρωση), κατεβάζουμε αστραπιαία τα νέα δεδομένα!
+    if "global_db_ts" not in st.session_state or st.session_state.global_db_ts != latest_ts:
+        with st.spinner("Λήψη νέων δεδομένων..."):
             st.session_state.employees = fetch_paginated("employees")
             st.session_state.projects = fetch_paginated("projects")
             
@@ -375,7 +392,7 @@ if supabase:
             except:
                 st.session_state.activity_logs = []
                 
-            st.session_state.db_last_fetch = time.time()
+            st.session_state.global_db_ts = latest_ts
             mark_data_changed()
 else:
     if 'local_data_loaded' not in st.session_state:
@@ -488,9 +505,9 @@ with col_r:
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
 if st.session_state.get('is_cloud'):
-    st.sidebar.success(f"✅ Cloud Sync (Ανανέωση {CACHE_TTL}s)")
+    st.sidebar.success(f"✅ Cloud Sync (Real-time)")
     if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-        clear_all_caches()
+        st.session_state.global_db_ts = "force_refresh"
         st.rerun()
 else:
     st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
@@ -610,20 +627,6 @@ if menu == "Ταμπλό Gantt":
             if not day_assignments:
                 row_id = f"day_{i}_row_0"
                 day_row_ids.append(row_id)
-                data.append({
-                    'Y_Axis': row_id,
-                    'Έργο': 'Κενό',
-                    'Έναρξη': datetime(1970, 1, 1, 8, 0),
-                    'Λήξη': datetime(1970, 1, 1, 8, 0),
-                    'Προσωπικό': '',
-                    'Παρατηρήσεις': '',
-                    'Ετικέτα': '',
-                    'LegendGroup': 'Κενό',
-                    'ColorHex': 'rgba(0,0,0,0)',
-                    'GroupKey': 'Empty',
-                    'Προσέλευση': ''
-                })
-                color_map['Κενό'] = 'rgba(0,0,0,0)'
             else:
                 emp_day_assigns = {}
                 for da in day_assignments:
@@ -873,12 +876,6 @@ if menu == "Ταμπλό Gantt":
             selected=dict(marker=dict(opacity=1)),
             unselected=dict(marker=dict(opacity=1))
         )
-        
-        # Εξαφάνιση των "Κενών" μπαρών που χρησιμοποιούνται για μορφοποίηση (ώστε να μη φαίνεται η μαύρη γραμμή)
-        for trace in fig.data:
-            if trace.name == 'Κενό':
-                trace.marker.line.width = 0
-                trace.hoverinfo = 'skip'
         
         fig.update_layout(
             bargap=0.12, 
