@@ -168,8 +168,8 @@ def bg_db_action(action, table, payload=None, col=None, val=None, in_vals=None):
     except Exception as e:
         print(f"Background DB error ({action} on {table}): {e}")
 
-# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING & OPTIMISTIC UI ---
-CACHE_TTL = 300 # 5 λεπτά προσωρινή μνήμη (Μειώνει δραματικά τα κολλήματα)
+# --- ΒΕΛΤΙΣΤΟΠΟΙΗΜΕΝΟ ΣΥΣΤΗΜΑ CACHING (ΧΩΡΙΣ STREAMLIT CACHE OVERHEAD) ---
+CACHE_TTL = 300 # 5 λεπτά προσωρινή μνήμη
 
 def mark_data_changed():
     """Σημειώνει ότι τα δεδομένα άλλαξαν τοπικά, ώστε να ανανεωθεί το γράφημα και οι χάρτες χωρίς να περιμένει τη βάση"""
@@ -195,66 +195,12 @@ def fetch_paginated(table):
             break
     return all_rows
 
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_employees():
-    return {"data": fetch_paginated("employees"), "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_projects():
-    return {"data": fetch_paginated("projects"), "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_assignments():
-    assigns = fetch_paginated("assignments")
-    for a in assigns:
-        if isinstance(a.get('date'), str):
-            a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-    return {"data": assigns, "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_leaves():
-    leaves = fetch_paginated("leaves")
-    for l in leaves:
-        if isinstance(l.get('startDate'), str):
-            l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-        if isinstance(l.get('endDate'), str):
-            l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-    return {"data": leaves, "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_patterns():
-    patterns = fetch_paginated("recurring_patterns")
-    for p in patterns:
-        if isinstance(p.get('startDate'), str):
-            p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-    return {"data": patterns, "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_evaluations():
-    try:
-        return {"data": fetch_paginated("evaluations"), "ts": time.time()}
-    except Exception:
-        return {"data": [], "ts": time.time()}
-
-@st.cache_data(ttl=CACHE_TTL)
-def fetch_table_activity_logs():
-    """Κατεβάζει ΜΟΝΟ τα τελευταία 500 logs για απίστευτη ταχύτητα!"""
-    if not supabase: return {"data": [], "ts": time.time()}
-    try:
-        data = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
-        return {"data": data, "ts": time.time()}
-    except Exception:
-        return {"data": [], "ts": time.time()}
-
 def clear_all_caches():
-    """Εξαναγκάζει καθαρισμό σε όλους τους πίνακες (για το κουμπί Ανανέωσης)"""
-    fetch_table_employees.clear()
-    fetch_table_projects.clear()
-    fetch_table_assignments.clear()
-    fetch_table_leaves.clear()
-    fetch_table_patterns.clear()
-    fetch_table_evaluations.clear()
-    fetch_table_activity_logs.clear()
+    """Εξαναγκάζει καθαρισμό και επαναφόρτωση από τη βάση στο επόμενο κλικ"""
+    st.session_state.db_last_fetch = 0
+
+def clear_cache_for_table(table):
+    pass # Δεν χρειάζεται πλέον εξειδικευμένο clear, διαχειριζόμαστε optimistic state!
 
 def serialize_dates(data):
     """Μετατρέπει τα ημερολογιακά objects σε string για να μπουν σωστά στη βάση (Supabase/JSON)."""
@@ -488,50 +434,47 @@ BASIC_COLORS = {
     "Γκρι": "#999999"
 }
 
-# --- Συνεχής Φόρτωση Δεδομένων (Optimistic Sync Logic) ---
-# Εδώ γίνεται η έξυπνη διαχείριση: Φορτώνει δεδομένα από τη βάση ΜΟΝΟ αν έληξε ο χρόνος, χωρίς να σβήνει τις τοπικές μας αλλαγές!
+# --- Συνεχής Φόρτωση Δεδομένων (ΤΑΧΥΤΑΤΗ ΧΕΙΡΟΚΙΝΗΤΗ CACHE) ---
 if supabase:
-    emp_cache = fetch_table_employees()
-    if "emp_ts" not in st.session_state or st.session_state.emp_ts != emp_cache["ts"]:
-        st.session_state.employees = copy.deepcopy(emp_cache["data"])
-        st.session_state.emp_ts = emp_cache["ts"]
-        mark_data_changed()
-        
-    proj_cache = fetch_table_projects()
-    if "proj_ts" not in st.session_state or st.session_state.proj_ts != proj_cache["ts"]:
-        st.session_state.projects = copy.deepcopy(proj_cache["data"])
-        st.session_state.proj_ts = proj_cache["ts"]
-        mark_data_changed()
-        
-    assign_cache = fetch_table_assignments()
-    if "assign_ts" not in st.session_state or st.session_state.assign_ts != assign_cache["ts"]:
-        st.session_state.assignments = copy.deepcopy(assign_cache["data"])
-        st.session_state.assign_ts = assign_cache["ts"]
-        mark_data_changed()
-        
-    leave_cache = fetch_table_leaves()
-    if "leave_ts" not in st.session_state or st.session_state.leave_ts != leave_cache["ts"]:
-        st.session_state.leaves = copy.deepcopy(leave_cache["data"])
-        st.session_state.leave_ts = leave_cache["ts"]
-        mark_data_changed()
-        
-    pat_cache = fetch_table_patterns()
-    if "pat_ts" not in st.session_state or st.session_state.pat_ts != pat_cache["ts"]:
-        st.session_state.recurring_patterns = copy.deepcopy(pat_cache["data"])
-        st.session_state.pat_ts = pat_cache["ts"]
-        mark_data_changed()
-        
-    eval_cache = fetch_table_evaluations()
-    if "eval_ts" not in st.session_state or st.session_state.eval_ts != eval_cache["ts"]:
-        st.session_state.evaluations = copy.deepcopy(eval_cache["data"])
-        st.session_state.eval_ts = eval_cache["ts"]
-        
-    log_cache = fetch_table_activity_logs()
-    if "log_ts" not in st.session_state or st.session_state.log_ts != log_cache["ts"]:
-        st.session_state.activity_logs = copy.deepcopy(log_cache["data"])
-        st.session_state.log_ts = log_cache["ts"]
-
     st.session_state.is_cloud = True
+    # Φορτώνει δεδομένα ΜΟΝΟ αν πέρασαν 5 λεπτά, καταργώντας το τρομερό lag του Streamlit deepcopy
+    if "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
+        with st.spinner("Συγχρονισμός με τη βάση..."):
+            st.session_state.employees = fetch_paginated("employees")
+            st.session_state.projects = fetch_paginated("projects")
+            
+            assigns = fetch_paginated("assignments")
+            for a in assigns:
+                if isinstance(a.get('date'), str):
+                    a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+            st.session_state.assignments = assigns
+            
+            leaves = fetch_paginated("leaves")
+            for l in leaves:
+                if isinstance(l.get('startDate'), str):
+                    l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
+                if isinstance(l.get('endDate'), str):
+                    l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+            st.session_state.leaves = leaves
+            
+            patterns = fetch_paginated("recurring_patterns")
+            for p in patterns:
+                if isinstance(p.get('startDate'), str):
+                    p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
+            st.session_state.recurring_patterns = patterns
+            
+            try:
+                st.session_state.evaluations = fetch_paginated("evaluations")
+            except:
+                st.session_state.evaluations = []
+                
+            try:
+                st.session_state.activity_logs = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
+            except:
+                st.session_state.activity_logs = []
+                
+            st.session_state.db_last_fetch = time.time()
+            mark_data_changed()
 else:
     # Αν ΔΕΝ βρέθηκε Supabase ή υπήρξε σφάλμα, φορτώνουμε τα MOCK δεδομένα (Local mode)
     if 'local_data_loaded' not in st.session_state:
@@ -1045,26 +988,6 @@ if menu == "Ταμπλό Gantt":
             for idx, rid in enumerate(day_row_ids):
                 tickvals_map[rid] = base_y_label if idx == mid_idx else ""
                 
-        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
-        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το 1 κλικ στο κενό να ακυρώνει την επιλογή
-        bg_data = []
-        for rid in y_category_order:
-            bg_data.append({
-                'Y_Axis': rid,
-                'Έργο': 'Κενό',
-                'Έναρξη': datetime(1970, 1, 1, 0, 0),
-                'Λήξη': datetime(1970, 1, 1, 23, 59),
-                'Προσωπικό': '',
-                'Προσέλευση': '',
-                'Παρατηρήσεις': '',
-                'Ετικέτα': '',
-                'LegendGroup': 'Κενό',
-                'ColorHex': 'rgba(255,255,255,0.01)',
-                'GroupKey': 'Empty'
-            })
-        color_map['Κενό'] = 'rgba(255,255,255,0.01)'
-        data = bg_data + data
-        
         df = pd.DataFrame(data)
         
         # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
@@ -1129,7 +1052,7 @@ if menu == "Ταμπλό Gantt":
             gridwidth=1 # Οριζόντιες διακριτικές γραμμές
         )
         
-        # --- ΑΠΟΤΡΕΠΟΥΜΕ ΠΛΗΡΩΣ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΕΠΙΛΟΓΕΣ ---
+        # --- ΑΠΟΤΡΕΠΟΥΜΕ ΠΛΗΡΩΣ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΕΠΙΛΟΓΕΣ ΚΑΙ ΔΙΑΤΗΡΟΥΜΕ ΤΑ ΧΡΩΜΑΤΑ ---
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle',
@@ -1139,15 +1062,9 @@ if menu == "Ταμπλό Gantt":
             constraintext='none',
             hoverinfo='none',
             hovertemplate=None,
-            selected=dict(marker=dict(opacity=1), textfont=dict(color='black')),
-            unselected=dict(marker=dict(opacity=1), textfont=dict(color='black'))
+            selected=dict(marker=dict(opacity=1)), # <--- ΔΕΝ ΑΛΛΑΖΕΙ ΤΙΠΟΤΑ ΣΤΗΝ ΕΠΙΛΕΓΜΕΝΗ
+            unselected=dict(marker=dict(opacity=1)) # <--- ΟΙ ΥΠΟΛΟΙΠΕΣ ΜΠΑΡΕΣ ΠΑΡΑΜΕΝΟΥΝ 100% ΦΩΤΕΙΝΕΣ!
         )
-        
-        # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες (κενές μέρες)
-        for trace in fig.data:
-            if trace.name == 'Κενό':
-                trace.marker.line.width = 0
-                trace.hoverinfo = 'skip'
         
         fig.update_layout(
             bargap=0.12, 
@@ -1158,6 +1075,7 @@ if menu == "Ταμπλό Gantt":
             margin=dict(l=10, r=10, t=50, b=10),
             annotations=empty_shift_annotations, 
             dragmode="pan",
+            clickmode="event", # <--- Το clickmode="event" αποτρέπει το να επιλέγεται το φόντο, πιάνει μόνο τα data points!
             uirevision="constant", # Διατηρεί το σημείο που έχεις κάνει pan/scroll μετά από κάθε κλικ
             xaxis=dict(
                 side='top', 
@@ -1191,16 +1109,18 @@ if menu == "Ταμπλό Gantt":
     # ΑΝΑΓΝΩΡΙΣΗ ΚΛΙΚ ΣΤΟ ΓΡΑΦΗΜΑ (ΠΑΝΤΑ ΑΣΤΡΑΠΙΑΙΑ ΑΠΟ ΤΗ ΜΝΗΜΗ)
     clicked_key = None
     try:
+        # Το on_select "πιάνει" 1 κλικ στη μπάρα. Αν κάνεις κλικ στο κενό, το points γυρνάει άδειο!
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
-        if event and "selection" in event and event["selection"].get("points"):
-            cd = event["selection"]["points"][0].get("customdata", [None])[0]
-            if cd != "Empty":
-                clicked_key = cd
+        if event and "selection" in event:
+            if event["selection"].get("points"):
+                clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
+            else:
+                clicked_key = None # <--- 1 ΚΛΙΚ ΣΤΟ ΚΕΝΟ ΑΠΟΕΠΙΛΕΓΕΙ ΑΜΕΣΩΣ ΤΗ ΜΠΑΡΑ!
     except Exception:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
     # --- ΕΞΑΓΩΓΗ ΣΕ EXCEL ΚΑΙ ΣΥΜΒΟΥΛΕΣ ---
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό φόντο για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
     
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
@@ -1255,7 +1175,7 @@ if menu == "Ταμπλό Gantt":
                     c_arr, c_start, c_end = st.columns(3)
                     with c_arr:
                         use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
@@ -2260,7 +2180,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
                 with r_start:
                     r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end:
@@ -2551,7 +2471,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             with e_arr:
                                 use_arr_rec_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr_rec), key=f"edit_chk_arr_{pat['id']}")
                                 def_arr = datetime.strptime(existing_arr_rec, "%H:%M").time() if existing_arr_rec else datetime.strptime(pat['startTime'][:5], "%H:%M").time()
-                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}", disabled=not use_arr_rec_edit)
+                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}")
                             with e_start:
                                 e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
                             with e_end:
