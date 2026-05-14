@@ -817,21 +817,6 @@ if menu == "Ταμπλό Gantt":
             if not day_assignments:
                 row_id = f"day_{i}_row_0"
                 day_row_ids.append(row_id)
-                
-                data.append({
-                    'Y_Axis': row_id,
-                    'Έργο': 'Κενό',
-                    'Έναρξη': datetime(1970, 1, 1, 8, 0),
-                    'Λήξη': datetime(1970, 1, 1, 8, 0),
-                    'Προσωπικό': '',
-                    'Παρατηρήσεις': '',
-                    'Ετικέτα': '',
-                    'LegendGroup': 'Κενό',
-                    'ColorHex': 'rgba(0,0,0,0)',
-                    'GroupKey': 'Empty',
-                    'Προσέλευση': ''
-                })
-                color_map['Κενό'] = 'rgba(0,0,0,0)'
             else:
                 # Προ-ομαδοποίηση ανά υπάλληλο για γρήγορο έλεγχο επικαλύψεων της ίδιας μέρας
                 emp_day_assigns = {}
@@ -1053,6 +1038,26 @@ if menu == "Ταμπλό Gantt":
             for idx, rid in enumerate(day_row_ids):
                 tickvals_map[rid] = base_y_label if idx == mid_idx else ""
                 
+        # --- ΔΗΜΙΟΥΡΓΙΑ ΦΟΝΤΟΥ ΓΙΑ ΕΥΚΟΛΗ ΑΠΟΕΠΙΛΟΓΗ ---
+        # Βάζουμε μια αόρατη μπάρα σε κάθε γραμμή ώστε το κλικ στο κενό να ακυρώνει την επιλογή
+        bg_data = []
+        for rid in y_category_order:
+            bg_data.append({
+                'Y_Axis': rid,
+                'Έργο': 'Κενό',
+                'Έναρξη': datetime(1970, 1, 1, 0, 0),
+                'Λήξη': datetime(1970, 1, 1, 23, 59),
+                'Προσωπικό': '',
+                'Προσέλευση': '',
+                'Παρατηρήσεις': '',
+                'Ετικέτα': '',
+                'LegendGroup': 'Κενό',
+                'ColorHex': 'rgba(0,0,0,0)',
+                'GroupKey': 'Empty'
+            })
+        color_map['Κενό'] = 'rgba(0,0,0,0)'
+        data = bg_data + data
+        
         df = pd.DataFrame(data)
         
         # Η σειρά στην categoryarray πηγαίνει από κάτω προς τα πάνω. 
@@ -1125,7 +1130,9 @@ if menu == "Ταμπλό Gantt":
             textangle=0,
             constraintext='none',
             hoverinfo='none',
-            hovertemplate=None
+            hovertemplate=None,
+            selected=dict(marker=dict(opacity=1)), # <--- ΑΠΟΤΡΕΠΕΙ ΤΟ ΘΟΛΩΜΑ ΣΤΗΝ ΕΠΙΛΕΓΜΕΝΗ
+            unselected=dict(marker=dict(opacity=1)) # <--- ΑΠΟΤΡΕΠΕΙ ΤΟ ΘΟΛΩΜΑ ΣΤΙΣ ΥΠΟΛΟΙΠΕΣ ΜΠΑΡΕΣ
         )
         
         # Κρύβουμε εντελώς το περίγραμμα από τις αόρατες μπάρες (κενές μέρες)
@@ -1177,7 +1184,9 @@ if menu == "Ταμπλό Gantt":
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event and event["selection"].get("points"):
-            clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
+            cd = event["selection"]["points"][0].get("customdata", [None])[0]
+            if cd != "Empty":
+                clicked_key = cd
     except Exception:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     
@@ -2466,7 +2475,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             default_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
                             e_proj = st.selectbox("Αλλαγή Έργου", options=proj_ids, 
                                                     index=default_proj_idx,
-                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστο Έργο"),
+                                                    format_func=lambda x: next((p['name'] for p in st.session_state.projects if p['id'] == x), "Άγνωστος Έργο"),
                                                     key=f"edit_r_proj_{pat['id']}")
                                                     
                             e_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key=f"edit_r_custom_proj_{pat['id']}")
