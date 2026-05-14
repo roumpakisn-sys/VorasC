@@ -1177,7 +1177,7 @@ if menu == "Ταμπλό Gantt":
                     c_arr, c_start, c_end = st.columns(3)
                     with c_arr:
                         use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
+                        t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
                     with c_start:
                         t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                     with c_end:
@@ -1210,7 +1210,7 @@ if menu == "Ταμπλό Gantt":
                                             st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                                         else:
                                             valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
-                                else:
+                                        else:
                                     valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': "", 'emp_name': ""})
                             
                             if errors:
@@ -1385,7 +1385,7 @@ if menu == "Ταμπλό Gantt":
                             with e_arr:
                                 use_arr_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr), key="edit_use_arr")
                                 def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(target_group['StartTime'][:5], "%H:%M").time()
-                                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time", disabled=not use_arr_edit)
+                                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
                             with e_start:
                                 new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(target_group['StartTime'][:5], "%H:%M").time())
                             with e_end:
@@ -2189,7 +2189,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
                 with r_start:
                     r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end:
