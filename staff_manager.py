@@ -7,7 +7,11 @@ import uuid
 import calendar
 import io
 import time
+import copy
+import ast
+import re
 import textwrap
+import threading
 
 try:
     from supabase import create_client
@@ -239,7 +243,6 @@ def log_activity(action_type, table_name, details_raw):
     try:
         res = supabase.table("activity_logs").insert(log_entry).execute()
         if res.data:
-            # Έξυπνη ειδοποίηση ότι η αλλαγή έγινε από εμάς, άρα να μην κατεβάσει πάλι τα πάντα!
             st.session_state.global_db_ts = res.data[0]['timestamp']
     except Exception as e:
         print(f"Log Error: {e}")
@@ -347,7 +350,6 @@ BASIC_COLORS = {
 if supabase:
     st.session_state.is_cloud = True
     
-    # 1. Παίρνουμε τον χρόνο της τελευταίας αλλαγής στη βάση (ταχύτατο, μόλις 1 γραμμή)
     latest_ts = None
     try:
         res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
@@ -356,7 +358,6 @@ if supabase:
     except:
         pass
 
-    # 2. Αν ο χρόνος άλλαξε (κάποιος άλλος έκανε ενημέρωση), κατεβάζουμε αστραπιαία τα νέα δεδομένα!
     if "global_db_ts" not in st.session_state or st.session_state.global_db_ts != latest_ts:
         with st.spinner("Λήψη νέων δεδομένων..."):
             st.session_state.employees = fetch_paginated("employees")
@@ -473,6 +474,128 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
             else:
                 return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
     return t_start, t_end, False, "AllowedOverlap" if allowed_overlap else ""
+
+# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ (ΑΝΑ 1 ΕΤΟΣ) ΣΤΟ ΠΑΡΑΣΚΗΝΙΟ ---
+def auto_extend_recurring_patterns():
+    if not st.session_state.get('recurring_patterns'): return
+    
+    # Εύρεση της πιο πρόσφατης βάρδιας για κάθε επαναλαμβανόμενη εργασία
+    max_dates = {}
+    for a in st.session_state.assignments:
+        rid = a.get('recurring_id')
+        if rid:
+            if rid not in max_dates or a['date'] > max_dates[rid]:
+                max_dates[rid] = a['date']
+                
+    new_assignments_batch = []
+    today = date.today()
+    
+    for pat in st.session_state.recurring_patterns:
+        rid = pat['id']
+        latest_date = max_dates.get(rid)
+        
+        # Εάν η σειρά λήγει σε λιγότερο από 30 ημέρες, την επεκτείνουμε αυτόματα για άλλο 1 χρόνο
+        if latest_date and (latest_date - today).days <= 30:
+            start_ext_date = latest_date + timedelta(days=1)
+            end_ext_date = start_ext_date + timedelta(days=365)
+            
+            r_type = pat.get('type')
+            r_emps = pat.get('employeeIds', [])
+            r_proj = pat.get('projectId')
+            r_color = pat.get('colorName')
+            c_hex = BASIC_COLORS.get(r_color, "#999999")
+            r_notes = pat.get('notes', '')
+            str_arrival = pat.get('arrivalTime', '')
+            str_start = str(pat.get('startTime'))[:5]
+            str_end = str(pat.get('endTime'))[:5]
+            selected_weekdays = pat.get('weekdays', [])
+            
+            dates_to_assign = []
+            curr_date = start_ext_date
+            day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
+            day_map = {v: k for k, v in day_map_inv.items()}
+            selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
+            
+            while curr_date <= end_ext_date:
+                if r_type == "Εβδομαδιαία":
+                    dates_to_assign.append(curr_date)
+                    curr_date += timedelta(days=7)
+                elif r_type == "Μηνιαία":
+                    dates_to_assign.append(curr_date)
+                    month = curr_date.month
+                    year = curr_date.year
+                    if month == 12:
+                        month = 1; year += 1
+                    else:
+                        month += 1
+                    try:
+                        curr_date = curr_date.replace(year=year, month=month)
+                    except ValueError:
+                        last_day = calendar.monthrange(year, month)[1]
+                        curr_date = curr_date.replace(year=year, month=month, day=last_day)
+                elif r_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                    if curr_date.weekday() in selected_weekday_ints:
+                        dates_to_assign.append(curr_date)
+                    curr_date += timedelta(days=1)
+                    
+            for d in dates_to_assign:
+                if r_type == "Επιλεγμένες Μέρες Εβδομάδας":
+                    d_name = day_map_inv[d.weekday()]
+                    emps_to_process = r_emps.get(d_name, []) if isinstance(r_emps, dict) else r_emps
+                else:
+                    emps_to_process = r_emps
+                    
+                emps_to_process = emps_to_process if emps_to_process else [""]
+                
+                for eid in emps_to_process:
+                    if eid:
+                        if is_on_leave(eid, d): continue
+                        adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                        if is_conflict: continue
+                    else:
+                        adj_start, adj_end = str_start, str_end
+                        
+                    new_assign = {
+                        'id': str(uuid.uuid4()),
+                        'recurring_id': rid,
+                        'employeeId': eid,
+                        'projectId': r_proj,
+                        'date': d,
+                        'arrivalTime': str_arrival,
+                        'startTime': adj_start,
+                        'endTime': adj_end,
+                        'colorName': r_color,
+                        'colorHex': c_hex,
+                        'notes': r_notes,
+                        'is_cancelled': False,
+                        'cancel_reason': ""
+                    }
+                    new_assignments_batch.append(new_assign)
+                    
+                    if d not in st.session_state.assignments_by_date:
+                        st.session_state.assignments_by_date[d] = []
+                    st.session_state.assignments_by_date[d].append(new_assign)
+                    
+    if new_assignments_batch:
+        st.session_state.assignments.extend(new_assignments_batch)
+        st.session_state.data_dirty = True
+        st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
+        
+        if supabase:
+            def insert_batch(batch):
+                chunk_size = 500
+                for i in range(0, len(batch), chunk_size):
+                    try:
+                        supabase.table('assignments').insert(serialize_dates(batch[i:i+chunk_size])).execute()
+                    except Exception as e:
+                        print(f"Auto-extend insert error: {e}")
+            threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
+
+# Έλεγχος επέκτασης 1 φορά την ώρα για να μην βαραίνει το σύστημα
+if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+    auto_extend_recurring_patterns()
+    st.session_state.last_auto_extend_check = time.time()
+
 
 def go_prev_week():
     st.session_state.view_week_date -= timedelta(days=7)
@@ -863,7 +986,6 @@ if menu == "Ταμπλό Gantt":
         )
         
         # --- ΑΠΟΛΥΤΗ ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ ΤΟΥ ΘΟΛΩΜΑΤΟΣ (FADE) ΑΠΟ ΤΟ PLOTLY ---
-        # Με αυτόν τον κώδικα, όταν πατάς σε μια μπάρα, ΚΑΜΙΑ άλλη μπάρα δεν θολώνει. Μένουν όλες 100% φωτεινές.
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='middle',
@@ -1060,7 +1182,7 @@ if menu == "Ταμπλό Gantt":
                                 db_insert("assignments", new_assigns, track=False)
                                 
                                 st.success("Η ανάθεση ολοκληρώθηκε!")
-                                time.sleep(0.5)
+                                time.sleep(0.5) # Μικρότερη αναμονή χάρη στο background save
                                 st.session_state.qa_rc += 1
                                 st.rerun()
 
@@ -1937,7 +2059,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
     if not is_full_admin:
         st.info("⚠️ Έχετε δικαιώματα μόνο για ανάγνωση. Δεν μπορείτε να διαχειριστείτε τις επαναλαμβανόμενες εργασίες.")
     else:
-        st.write("Προσθέστε ή επεξεργαστείτε εργασίες που επαναλαμβάνονται «για πάντα» (προγραμματίζονται αυτόματα για τα επόμενα 3 χρόνια).")
+        st.write("Προσθέστε ή επεξεργαστείτε εργασίες που επαναλαμβάνονται «για πάντα» (επεκτείνονται αυτόματα κάθε χρόνο).")
         tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "✏️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
         
         if "rec_reset_counter" not in st.session_state:
@@ -1996,7 +2118,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 with r_end:
                     r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
-                st.info("💡 Η εργασία θα επαναλαμβάνεται συνεχώς.")
+                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 1 χρόνο. Στη συνέχεια θα επεκτείνεται αυτόματα.")
             
             st.write("") 
             col_btn1, col_btn2 = st.columns([1, 1])
@@ -2023,7 +2145,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 else:
                     actions = []
                     
-                    # Διαχείριση νέου έργου
                     if r_custom_proj_name.strip():
                         final_r_proj_id = str(uuid.uuid4())
                         new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': BASIC_COLORS[r_color]}
@@ -2034,7 +2155,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         final_r_proj_id = r_proj
                         
                     pattern_id = str(uuid.uuid4())
-                    r_end_date = r_start_date + timedelta(days=365 * 3)
+                    r_end_date = r_start_date + timedelta(days=365) # 1 Χρόνος αντί για 3
                     
                     dates_to_assign = []
                     curr_date = r_start_date
@@ -2115,7 +2236,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             new_assignments_batch.append(new_assign)
                                             success_count += 1
                                 else:
-                                    # Καταχώρηση βάρδιας χωρίς προσωπικό (χωρίς έλεγχο επικάλυψης)
                                     new_assign = {
                                         'id': str(uuid.uuid4()),
                                         'recurring_id': pattern_id,
@@ -2149,22 +2269,23 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             'endTime': str_end
                         }
                         
-                        # Update Memory & DB
                         st.session_state.recurring_patterns.append(new_pattern)
                         db_insert('recurring_patterns', new_pattern, track=False)
                         actions.append({'type': 'insert', 'table': 'recurring_patterns', 'records': [new_pattern]})
                         
                         if new_assignments_batch:
                             st.session_state.assignments.extend(new_assignments_batch)
-                            # Χρησιμοποιούμε batch insert σε κομμάτια (chunks) για ασφάλεια
-                            chunk_size = 500
-                            for i in range(0, len(new_assignments_batch), chunk_size):
-                                db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                            if supabase:
+                                def insert_b(b):
+                                    chunk_size = 500
+                                    for i in range(0, len(b), chunk_size):
+                                        try:
+                                            supabase.table('assignments').insert(serialize_dates(b[i:i+chunk_size])).execute()
+                                        except: pass
+                                threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
                             actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                             
                         add_transaction(actions)
-                        
-                        # Εκκαθάριση των πεδίων μετά από επιτυχημένη καταχώρηση
                         st.session_state.rec_reset_counter += 1
                         
                     if success_count > 0:
@@ -2214,7 +2335,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             
                             e_employee_ids_saved = pat.get('employeeIds', [])
                             
-                            # Flatten active + saved ids for valid options
                             saved_ids_flat = []
                             if isinstance(e_employee_ids_saved, dict):
                                 for d_list in e_employee_ids_saved.values():
@@ -2299,7 +2419,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                             st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
                             
-                            db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
+                            db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], track=False)
                             db_delete('recurring_patterns', 'id', selected_pattern_id, track=False)
                             
                             add_transaction([
@@ -2321,7 +2441,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                             else:
                                 actions = []
-                                # Διαχείριση νέου έργου κατά την επεξεργασία
                                 if e_custom_proj_name.strip():
                                     final_e_proj_id = str(uuid.uuid4())
                                     new_p = {'id': final_e_proj_id, 'name': e_custom_proj_name.strip(), 'color': BASIC_COLORS[e_color]}
@@ -2331,14 +2450,12 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 else:
                                     final_e_proj_id = e_proj
                                     
-                                # 1. Αφαιρούμε τις παλιές εγγραφές της σειράς
                                 old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                                 st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                                db_delete('assignments', 'recurring_id', selected_pattern_id, track=False)
+                                db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], track=False)
                                 actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                                 
-                                # 2. Παράγουμε τις νέες
-                                r_end_date = e_start_date + timedelta(days=365 * 3)
+                                r_end_date = e_start_date + timedelta(days=365) # 1 Χρόνος αντί για 3
                                 dates_to_assign = []
                                 curr_date = e_start_date
                                 day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
@@ -2426,7 +2543,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 }
                                                 new_assignments_batch.append(new_assign)
                                 
-                                    # 3. Ενημερώνουμε τα δεδομένα του Pattern
                                     old_pat = dict(pat)
                                     final_e_employee_ids = e_selected_weekdays_data if e_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_emps_selection
                                     
@@ -2446,9 +2562,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     
                                     if new_assignments_batch:
                                         st.session_state.assignments.extend(new_assignments_batch)
-                                        chunk_size = 500
-                                        for i in range(0, len(new_assignments_batch), chunk_size):
-                                            db_insert('assignments', new_assignments_batch[i:i+chunk_size], track=False)
+                                        if supabase:
+                                            def insert_b(b):
+                                                chunk_size = 500
+                                                for i in range(0, len(b), chunk_size):
+                                                    try:
+                                                        supabase.table('assignments').insert(serialize_dates(b[i:i+chunk_size])).execute()
+                                                    except: pass
+                                            threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
                                         actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                                 
                                     add_transaction(actions)
