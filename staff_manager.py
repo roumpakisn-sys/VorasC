@@ -2341,7 +2341,9 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
                                 selected_weekday_ints = [day_map[d] for d in selected_weekdays] if e_selected_weekdays else []
                                 
+                                old_assign_ids = [a['id'] for a in old_assigns]
                                 new_assignments_batch = []
+                                
                                 with st.spinner('Ενημέρωση και καταχώρηση βαρδιών...'):
                                     while curr_date <= r_end_date:
                                         if e_type == "Εβδομαδιαία":
@@ -2376,7 +2378,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     st.toast(f"🛑 Παραλείφθηκε: {emp_name} έχει άδεια", icon="🛑")
                                                     continue
                                                 
-                                                adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                                                adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end, exclude_ids=old_assign_ids)
                                                 if is_conflict: 
                                                     st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση {emp_name}", icon="🚨")
                                                     continue
