@@ -1249,9 +1249,23 @@ if menu == "Ταμπλό Gantt":
         presentation_mode = st.checkbox("🖥️ Λειτουργία Πλήρους Προβολής")
         
     zoom_factor = zoom_level / 100.0
-        st.session_state.cached_wk_groups = wk_groups
-        st.session_state.cached_export_data = export_data
-        st.session_state.last_gantt_params = current_gantt_params
+    
+    current_gantt_params = {
+        "week": start_of_week,
+        "zoom": zoom_factor,
+        "presentation": presentation_mode,
+        "local_version": st.session_state.get('local_gantt_version', 0)
+    }
+    
+    fig, wk_groups, export_data = generate_gantt_chart(
+        start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
+        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
+    )
+    
+    st.session_state.cached_fig = fig
+    st.session_state.cached_wk_groups = wk_groups
+    st.session_state.cached_export_data = export_data
+    st.session_state.last_gantt_params = current_gantt_params
     
     clicked_key = None
     try:
