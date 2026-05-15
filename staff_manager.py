@@ -806,13 +806,21 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         'Notes': notes,
                         'is_cancelled': is_canc,
                         'cancel_reason': c_reason,
-                        'LegendGroup': legend_val
+                        'LegendGroup': legend_val,
+                        '_seen_eids': set()
                     }
                 
-                if not a.get('employeeId'):
+                groups[key]['AssignmentIds'].append(a['id'])
+                
+                eid = a.get('employeeId')
+                if eid in groups[key]['_seen_eids'] and eid != "":
+                    continue
+                groups[key]['_seen_eids'].add(eid)
+                
+                if not eid:
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
                 else:
-                    full_name = local_get_emp(a['employeeId'])
+                    full_name = local_get_emp(eid)
                     name_parts = full_name.split()
                     if len(name_parts) > 1:
                         formatted_name = f"{name_parts[-1]} {name_parts[0][0]}."
@@ -820,16 +828,15 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         formatted_name = full_name
                         
                     prev_assigns = []
-                    my_eid = a.get('employeeId')
-                    if my_eid in emp_day_assigns:
+                    if eid in emp_day_assigns:
                         t_a_start_str = str(a['startTime'])[:5]
                         t_a_end_str = str(a['endTime'])[:5]
-                        for pa in emp_day_assigns[my_eid]:
-                            if pa.get('id') != a['id']:
+                        for pa in emp_day_assigns[eid]:
+                            if pa.get('id') != a['id'] and pa.get('projectId') != a['projectId']:
                                 t_pa_start_str = str(pa['startTime'])[:5]
                                 t_pa_end_str = str(pa['endTime'])[:5]
                                 is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
-                                if is_overlapping and (t_pa_end_str <= t_a_end_str):
+                                if (is_overlapping and (t_pa_end_str <= t_a_end_str) and (t_pa_start_str <= t_a_start_str)) or (t_pa_end_str == t_a_start_str):
                                     prev_assigns.append(pa)
                                 
                     if prev_assigns:
@@ -839,8 +846,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                             formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj.get('name', 'Άγνωστο')}' {formatted_name}]"
                     
                 groups[key]['Employees'].append(formatted_name)
-                groups[key]['EmployeeIds'].append(a['employeeId'])
-                groups[key]['AssignmentIds'].append(a['id'])
+                groups[key]['EmployeeIds'].append(eid)
 
             wk_groups.update(groups)
             non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
