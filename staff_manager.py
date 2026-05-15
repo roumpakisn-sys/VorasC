@@ -835,20 +835,20 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         formatted_name = full_name
                         
                     prev_assigns = []
-                    if eid in emp_day_assigns:
+                    my_eid = a.get('employeeId')
+                    if my_eid in emp_day_assigns:
                         t_a_start_str = str(a['startTime'])[:5]
                         t_a_end_str = str(a['endTime'])[:5]
-                        for pa in emp_day_assigns[eid]:
+                        for pa in emp_day_assigns[my_eid]:
                             if pa.get('id') != a['id'] and pa.get('projectId') != a['projectId']:
                                 t_pa_start_str = str(pa['startTime'])[:5]
                                 t_pa_end_str = str(pa['endTime'])[:5]
                                 
                                 is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
                                 
-                                if is_overlapping:
-                                    if t_a_end_str > t_pa_end_str:
-                                        prev_assigns.append(pa)
-                                elif t_pa_end_str <= t_a_start_str:
+                                # Εμφάνιση "ΜΕΤΑ ΑΠΟ" ΑΥΣΤΗΡΑ και ΜΟΝΟ όταν υπάρχει υπερκάλυψη (overlap)
+                                # ΚΑΙ η τρέχουσα βάρδια τελειώνει αργότερα από την προηγούμενη
+                                if is_overlapping and (t_a_end_str > t_pa_end_str):
                                     prev_assigns.append(pa)
                                 
                     if prev_assigns:
