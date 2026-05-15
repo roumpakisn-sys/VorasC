@@ -121,6 +121,89 @@ def init_supabase():
 
 supabase = init_supabase()
 
+# --- ΣΥΣΤΗΜΑ UNDO / REDO ---
+if "undo_stack" not in st.session_state: st.session_state.undo_stack = []
+if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
+
+def add_transaction(actions):
+    actions_copy = copy.deepcopy(actions)
+    st.session_state.undo_stack.append(actions_copy)
+    st.session_state.redo_stack.clear()
+    if len(st.session_state.undo_stack) > 5:
+        st.session_state.undo_stack.pop(0)
+
+def perform_undo():
+    if not st.session_state.undo_stack: return
+    transaction = st.session_state.undo_stack.pop()
+    st.session_state.redo_stack.append(copy.deepcopy(transaction))
+    
+    for act in reversed(transaction):
+        table = act['table']
+        if act['type'] == 'insert':
+            ids_to_del = [r['id'] for r in act['records']]
+            if supabase:
+                for i in range(0, len(ids_to_del), 50):
+                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
+                log_activity("UNDO - ΔΙΑΓΡΑΦΗ", table, f"Αναίρεση προσθήκης ({len(ids_to_del)} εγγραφές)")
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
+            
+        elif act['type'] == 'delete':
+            recs_to_add = copy.deepcopy(act['records'])
+            if supabase:
+                for i in range(0, len(recs_to_add), 50):
+                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
+                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ", table, format_log_details(table, recs_to_add))
+            st.session_state[table].extend(recs_to_add)
+            
+        elif act['type'] == 'update':
+            old_recs = copy.deepcopy(act['old_records'])
+            if supabase:
+                for old_r in old_recs:
+                    supabase.table(table).update(serialize_dates(old_r)).eq('id', old_r['id']).execute()
+                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ ΕΝΗΜΕΡΩΣΗΣ", table, format_log_details(table, old_recs))
+            
+            upd_map = {r['id']: r for r in old_recs}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
+
+    mark_data_changed()
+    st.session_state.global_db_ts = "force_refresh"
+
+def perform_redo():
+    if not st.session_state.redo_stack: return
+    transaction = st.session_state.redo_stack.pop()
+    st.session_state.undo_stack.append(copy.deepcopy(transaction))
+    
+    for act in transaction:
+        table = act['table']
+        if act['type'] == 'insert':
+            recs_to_add = copy.deepcopy(act['records'])
+            if supabase:
+                for i in range(0, len(recs_to_add), 50):
+                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
+                log_activity("REDO - ΠΡΟΣΘΗΚΗ", table, format_log_details(table, recs_to_add))
+            st.session_state[table].extend(recs_to_add)
+            
+        elif act['type'] == 'delete':
+            ids_to_del = [r['id'] for r in act['records']]
+            if supabase:
+                for i in range(0, len(ids_to_del), 50):
+                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
+                log_activity("REDO - ΔΙΑΓΡΑΦΗ", table, f"Διαγραφή {len(ids_to_del)} εγγραφών")
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
+            
+        elif act['type'] == 'update':
+            new_recs = copy.deepcopy(act['new_records'])
+            if supabase:
+                for new_r in new_recs:
+                    supabase.table(table).update(serialize_dates(new_r)).eq('id', new_r['id']).execute()
+                log_activity("REDO - ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_recs))
+                
+            upd_map = {r['id']: r for r in new_recs}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
+
+    mark_data_changed()
+    st.session_state.global_db_ts = "force_refresh"
+
 # --- SELECTIVE FETCHING & CACHING (30-60s TTL) ---
 CACHE_TTL = 45 
 
@@ -244,90 +327,7 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
-# --- ΣΥΣΤΗΜΑ UNDO / REDO ΜΕ ΑΠΕΥΘΕΙΑΣ SUPABASE QUERIES ---
-if "undo_stack" not in st.session_state: st.session_state.undo_stack = []
-if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
-
-def add_transaction(actions):
-    actions_copy = copy.deepcopy(actions)
-    st.session_state.undo_stack.append(actions_copy)
-    st.session_state.redo_stack.clear()
-    if len(st.session_state.undo_stack) > 5:
-        st.session_state.undo_stack.pop(0)
-
-def perform_undo():
-    if not st.session_state.undo_stack: return
-    transaction = st.session_state.undo_stack.pop()
-    st.session_state.redo_stack.append(copy.deepcopy(transaction))
-    
-    for act in reversed(transaction):
-        table = act['table']
-        if act['type'] == 'insert':
-            ids_to_del = [r['id'] for r in act['records']]
-            if supabase:
-                for i in range(0, len(ids_to_del), 50):
-                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
-                log_activity("UNDO - ΔΙΑΓΡΑΦΗ", table, f"Αναίρεση προσθήκης ({len(ids_to_del)} εγγραφές)")
-            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
-            
-        elif act['type'] == 'delete':
-            recs_to_add = copy.deepcopy(act['records'])
-            if supabase:
-                for i in range(0, len(recs_to_add), 50):
-                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
-                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ", table, format_log_details(table, recs_to_add))
-            st.session_state[table].extend(recs_to_add)
-            
-        elif act['type'] == 'update':
-            old_recs = copy.deepcopy(act['old_records'])
-            if supabase:
-                for old_r in old_recs:
-                    supabase.table(table).update(serialize_dates(old_r)).eq('id', old_r['id']).execute()
-                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ ΕΝΗΜΕΡΩΣΗΣ", table, format_log_details(table, old_recs))
-            
-            upd_map = {r['id']: r for r in old_recs}
-            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
-
-    mark_data_changed()
-    st.session_state.global_db_ts = "force_refresh"
-
-def perform_redo():
-    if not st.session_state.redo_stack: return
-    transaction = st.session_state.redo_stack.pop()
-    st.session_state.undo_stack.append(copy.deepcopy(transaction))
-    
-    for act in transaction:
-        table = act['table']
-        if act['type'] == 'insert':
-            recs_to_add = copy.deepcopy(act['records'])
-            if supabase:
-                for i in range(0, len(recs_to_add), 50):
-                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
-                log_activity("REDO - ΠΡΟΣΘΗΚΗ", table, format_log_details(table, recs_to_add))
-            st.session_state[table].extend(recs_to_add)
-            
-        elif act['type'] == 'delete':
-            ids_to_del = [r['id'] for r in act['records']]
-            if supabase:
-                for i in range(0, len(ids_to_del), 50):
-                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
-                log_activity("REDO - ΔΙΑΓΡΑΦΗ", table, f"Διαγραφή {len(ids_to_del)} εγγραφών")
-            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
-            
-        elif act['type'] == 'update':
-            new_recs = copy.deepcopy(act['new_records'])
-            if supabase:
-                for new_r in new_recs:
-                    supabase.table(table).update(serialize_dates(new_r)).eq('id', new_r['id']).execute()
-                log_activity("REDO - ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_recs))
-                
-            upd_map = {r['id']: r for r in new_recs}
-            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
-
-    mark_data_changed()
-    st.session_state.global_db_ts = "force_refresh"
-
-# Κανονικές συναρτήσεις DB (Δημιουργούν Transactions για Undo)
+# Κανονικές DB συναρτήσεις (Δημιουργούν Transactions για Undo)
 def db_insert(table, data, track=True):
     mark_data_changed()
     records = data if isinstance(data, list) else [data]
@@ -437,7 +437,6 @@ if supabase:
                 st.session_state.activity_logs = f_log.result() or []
                 
             st.session_state.db_last_fetch = time.time()
-            st.session_state.emp_last_fetch = time.time() # Timer για το Selective Fetch
             st.session_state.global_db_ts = None
             mark_data_changed()
             gc.collect() 
@@ -668,6 +667,13 @@ menu_options = ["Ταμπλό Gantt", "Διαχείριση Έργων", "Ομά
 if st.session_state.get('current_user') == "Admin": menu_options.append("Καταγραφή Κινήσεων")
 menu = st.sidebar.radio("Μενού", menu_options)
 
+# Καθαρισμός μνήμης γραφήματος όταν αλλάζουμε σελίδα (Memory Optimization)
+if menu != "Ταμπλό Gantt":
+    st.session_state.pop('cached_fig', None)
+    st.session_state.pop('cached_wk_groups', None)
+    st.session_state.pop('cached_export_data', None)
+    st.session_state.pop('last_gantt_params', None)
+
 st.sidebar.write("---")
 st.sidebar.subheader("Ενέργειες")
 col_u, col_r = st.sidebar.columns(2)
@@ -683,65 +689,23 @@ with col_r:
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
 
-# ΠΑΝΕΞΥΠΝΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ΠΡΑΓΜΑΤΙΚΟΥ ΧΡΟΝΟΥ (REAL-TIME FRAGMENT)
-@st.fragment(run_every=timedelta(seconds=15))
 def render_system_status():
+    """Στατική εμφάνιση κατάστασης. Το Real-Time Polling πλέον γίνεται αποκλειστικά μέσα στο Gantt Fragment!"""
     if st.session_state.get('is_cloud'):
         st.success(f"✅ Cloud Sync (Real-time)")
-        
         if st.button("🔄 Άμεση Ανανέωση", use_container_width=True):
             st.session_state.global_db_ts = "force_refresh"
             st.rerun()
-        
-        # Αθόρυβος έλεγχος (Polling) για αλλαγές από άλλους χρήστες
-        if supabase:
-            try:
-                res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
-                if res.data:
-                    current_latest_ts = res.data[0]['timestamp']
-                    my_local_ts = st.session_state.get("global_db_ts")
-                    
-                    if my_local_ts and my_local_ts not in ["force_refresh", current_latest_ts]:
-                        # SELECTIVE FETCHING: Κατεβάζουμε ΜΟΝΟ τα δυναμικά δεδομένα αθόρυβα
-                        fetch_paginated.clear() 
-                        fetch_logs.clear()
-                        st.toast("Συγχρονισμός αλλαγών...", icon="🔄")
-                        
-                        # Fetch Assignments αστραπιαία
-                        assigns = fetch_paginated("assignments")
-                        for a in assigns:
-                            if isinstance(a.get('date'), str):
-                                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-                        st.session_state.assignments = assigns
-                        
-                        # Προαιρετικά φέρνουμε και τις άδειες αν άλλαξαν
-                        leaves = fetch_paginated("leaves")
-                        for l in leaves:
-                            if isinstance(l.get('startDate'), str): l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-                            if isinstance(l.get('endDate'), str): l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-                        st.session_state.leaves = leaves
-
-                        # Ενημέρωση Employees & Projects (Στατικά) ΜΟΝΟ αν πέρασαν 10 λεπτά (600s)
-                        now = time.time()
-                        if "emp_last_fetch" not in st.session_state or now - st.session_state.emp_last_fetch > 600:
-                            st.session_state.employees = fetch_paginated("employees")
-                            st.session_state.projects = fetch_paginated("projects")
-                            st.session_state.recurring_patterns = fetch_paginated("recurring_patterns")
-                            st.session_state.emp_last_fetch = now
-
-                        st.session_state.global_db_ts = current_latest_ts
-                        mark_data_changed()
-                        gc.collect() # Καθαρίζουμε τη μνήμη για να μην κρασάρει ο server
-                        st.rerun() 
-            except Exception:
-                pass
     else:
         st.error("❌ Εκτός Σύνδεσης (Τοπικά)")
         if not SUPABASE_INSTALLED:
             st.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
+        elif not HAS_SECRETS:
+            st.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
+        else:
+            st.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
 
 render_system_status()
-
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
@@ -902,6 +866,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                                 t_pa_end_str = str(pa['endTime'])[:5]
                                 
                                 is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
+                                
                                 if is_overlapping and (t_a_end_str > t_pa_end_str):
                                     prev_assigns.append(pa)
                                 
@@ -1111,18 +1076,63 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     return fig, wk_groups, export_data
 
 
-# --- FRAGMENTS ΓΙΑ ΚΑΤΑΧΩΡΗΣΕΙΣ ΚΑΙ GANTT ---
-@st.fragment
-def render_gantt_visualization(start_of_week, zoom_factor, presentation_mode, local_version):
+# --- GANTT FRAGMENT (TRUE REAL-TIME) ---
+@st.fragment(run_every=15)
+def render_gantt_visualization(start_of_week, zoom_factor, presentation_mode):
+    # 1. SMART POLLING (Σιωπηλός Συγχρονισμός Παρασκηνίου)
+    if st.session_state.get('is_cloud') and supabase:
+        try:
+            res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
+            if res.data:
+                current_latest_ts = res.data[0]['timestamp']
+                my_local_ts = st.session_state.get("global_db_ts")
+                
+                if my_local_ts and my_local_ts not in ["force_refresh", current_latest_ts]:
+                    # Βρέθηκε αλλαγή! Ξεκινάει το Partial Reloading
+                    fetch_paginated.clear() 
+                    
+                    # Κατεβάζουμε ΜΟΝΟ τα Assignments για ταχύτητα
+                    assigns = fetch_paginated("assignments")
+                    for a in assigns:
+                        if isinstance(a.get('date'), str):
+                            a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                    st.session_state.assignments = assigns
+                    
+                    # Οι Employees & Projects ανανεώνονται ΜΟΝΟ αν υπήρξε τοπική αλλαγή (data_dirty) 
+                    if st.session_state.get('data_dirty', False):
+                        st.session_state.employees = fetch_paginated("employees")
+                        st.session_state.projects = fetch_paginated("projects")
+                        st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
+                        st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
+                        st.session_state.data_dirty = False
+                        
+                    # Re-indexing
+                    assign_date_map = {}
+                    for a in st.session_state.assignments:
+                        d = a['date']
+                        if d not in assign_date_map:
+                            assign_date_map[d] = []
+                        assign_date_map[d].append(a)
+                    st.session_state.assignments_by_date = assign_date_map
+                    
+                    # Ενημέρωση μνήμης για να σχεδιαστεί ξανά το Gantt
+                    st.session_state.global_db_ts = current_latest_ts
+                    st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
+                    
+                    # 4. Απελευθέρωση Πόρων RAM
+                    gc.collect() 
+        except Exception:
+            pass
+            
+    # Ανάκτηση της σωστής έκδοσης γραφήματος
+    local_version = st.session_state.get('local_gantt_version', 0)
+    
     fig, wk_groups, export_data = generate_gantt_chart(
         start_of_week, zoom_factor, presentation_mode, local_version,
         st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
     )
     
-    st.session_state.cached_fig = fig
     st.session_state.cached_wk_groups = wk_groups
-    st.session_state.cached_export_data = export_data
-    
     chart_key = f"gantt_chart_{local_version}"
     
     try:
@@ -1134,16 +1144,29 @@ def render_gantt_visualization(start_of_week, zoom_factor, presentation_mode, lo
                 if cd != "Empty":
                     new_clicked_key = cd
         
-        # Αν αλλάξει η επιλογή της μπάρας, κάνουμε rerun για να ενημερωθεί η φόρμα Επεξεργασίας κάτω από το γράφημα!
+        # Αν αλλάξει η επιλογή της μπάρας, κάνουμε rerun ΜΟΝΟ αν χρειάζεται να ανοίξει η φόρμα επεξεργασίας
         if st.session_state.get('clicked_key') != new_clicked_key:
             st.session_state.clicked_key = new_clicked_key
             st.rerun()
             
     except Exception:
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-        
-    return export_data
 
+    # Ενσωμάτωση του Export μέσα στο Fragment για απόλυτη σταθερότητα UI
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+    if export_data:
+        col_hint, col_btn = st.columns([3, 1])
+        with col_hint: st.caption(hint_text)
+        with col_btn:
+            df_export = pd.DataFrame(export_data)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='Πρόγραμμα')
+            st.download_button(label="📥 Εξαγωγή (Excel)", data=buffer.getvalue(), file_name=f"Gantt_{start_of_week.strftime('%d_%m_%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    else:
+        st.caption(hint_text)
+
+# --- FRAGMENTS ΓΙΑ ΚΑΤΑΧΩΡΗΣΕΙΣ ---
 @st.fragment
 def render_quick_add(selected_date, qa_rc):
     with st.form("quick_add", clear_on_submit=True):
@@ -1450,22 +1473,8 @@ if menu == "Ταμπλό Gantt":
         
     zoom_factor = zoom_level / 100.0
     
-    # Μονώνει το γράφημα σε Fragment για αστραπιαία λειτουργία
-    export_data = render_gantt_visualization(start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0))
-    
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
-    
-    if export_data:
-        col_hint, col_btn = st.columns([3, 1])
-        with col_hint: st.caption(hint_text)
-        with col_btn:
-            df_export = pd.DataFrame(export_data)
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Πρόγραμμα')
-            st.download_button(label="📥 Εξαγωγή (Excel)", data=buffer.getvalue(), file_name=f"Gantt_{start_of_week.strftime('%d_%m_%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-    else:
-        st.caption(hint_text)
+    # Μονώνει το γράφημα σε Fragment για αστραπιαία λειτουργία & Smart Polling
+    render_gantt_visualization(start_of_week, zoom_factor, presentation_mode)
 
     if not presentation_mode:
         st.divider()
