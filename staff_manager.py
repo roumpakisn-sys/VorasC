@@ -303,14 +303,19 @@ def perform_undo():
     transaction = st.session_state.undo_stack.pop()
     st.session_state.redo_stack.append(transaction)
     for act in reversed(transaction):
+        table = act['table']
         if act['type'] == 'insert':
             ids = [r['id'] for r in act['records']]
-            db_delete_in(act['table'], 'id', ids, track=False)
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids]
+            db_delete_in(table, 'id', ids, track=False)
         elif act['type'] == 'delete':
-            db_insert(act['table'], act['records'], track=False)
+            st.session_state[table].extend(act['records'])
+            db_insert(table, act['records'], track=False)
         elif act['type'] == 'update':
+            upd_map = {r['id']: r for r in act['old_records']}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
             for old_r in act['old_records']:
-                db_update(act['table'], old_r['id'], old_r, track=False)
+                db_update(table, old_r['id'], old_r, track=False)
     mark_data_changed()
 
 def perform_redo():
@@ -318,14 +323,19 @@ def perform_redo():
     transaction = st.session_state.redo_stack.pop()
     st.session_state.undo_stack.append(transaction)
     for act in transaction:
+        table = act['table']
         if act['type'] == 'insert':
-            db_insert(act['table'], act['records'], track=False)
+            st.session_state[table].extend(act['records'])
+            db_insert(table, act['records'], track=False)
         elif act['type'] == 'delete':
             ids = [r['id'] for r in act['records']]
-            db_delete_in(act['table'], 'id', ids, track=False)
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids]
+            db_delete_in(table, 'id', ids, track=False)
         elif act['type'] == 'update':
+            upd_map = {r['id']: r for r in act['new_records']}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
             for new_r in act['new_records']:
-                db_update(act['table'], new_r['id'], new_r, track=False)
+                db_update(table, new_r['id'], new_r, track=False)
     mark_data_changed()
 
 BASIC_COLORS = {
@@ -1239,15 +1249,15 @@ if menu == "Ταμπλό Gantt":
         presentation_mode = st.checkbox("🖥️ Λειτουργία Πλήρους Προβολής")
         
     zoom_factor = zoom_level / 100.0
-    
-    fig, wk_groups, export_data = generate_gantt_chart(
-        start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
-        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
-    )
+        st.session_state.cached_wk_groups = wk_groups
+        st.session_state.cached_export_data = export_data
+        st.session_state.last_gantt_params = current_gantt_params
     
     clicked_key = None
     try:
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
+        # Δυναμικό κλειδί (key) που αναγκάζει το γράφημα να "ανανεώνεται" τέλεια όταν σβήνεις/προσθέτεις κάτι.
+        chart_key = f"gantt_chart_{st.session_state.get('local_gantt_version', 0)}"
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False}, key=chart_key)
         if event and "selection" in event:
             if event["selection"].get("points"):
                 cd = event["selection"]["points"][0].get("customdata", [None])[0]
