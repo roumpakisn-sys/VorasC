@@ -921,19 +921,19 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
     
-    fig.update_layout(
-        bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
-        margin=dict(l=10, r=10, t=50, b=10), annotations=empty_shift_annotations, 
-        dragmode="pan", clickmode="event+select", uirevision="constant", 
-        xaxis=dict(
-            side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0),
-            dtick=1800000, tickformat="%H:%M", showgrid=True, gridcolor='black',
-            gridwidth=1, range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
-            title="", tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, rangeslider=dict(visible=False) 
-        ),
-        yaxis=dict(title="", tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"), fixedrange=False, range=y_range)
-    )
+        fig.update_layout(
+            bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
+            margin=dict(l=10, r=10, t=50, b=10), annotations=empty_shift_annotations, 
+            dragmode="pan", clickmode="event+select", uirevision="constant", 
+            xaxis=dict(
+                side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0),
+                dtick=1800000, tickformat="%H:%M", showgrid=True, gridcolor='black',
+                gridwidth=1, range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)],
+                title="", tickfont=dict(size=max(8, int(11 * zoom_factor)), color="black", family="Arial"),
+                fixedrange=False, rangeslider=dict(visible=False) 
+            ),
+            yaxis=dict(title="", tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"), fixedrange=False, range=y_range)
+        )
     return fig, wk_groups, export_data
 
 
@@ -1677,7 +1677,6 @@ elif menu == "Άδειες":
                         old_a = dict(target_a)
                         target_a['employeeId'] = ""  # Αφαίρεση υπαλλήλου (Ορφανή Βάρδια)
                         db_update('assignments', target_a['id'], target_a, old_data=old_a)
-                        
                         st.session_state.leave_conflicts = [c for c in st.session_state.leave_conflicts if c['id'] != a['id']]
                         resolved_any = True
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -1861,41 +1860,42 @@ elif menu == "Σύνολο Αδειών":
                 leave_days[l['employeeId']] += days
                 
     table_data = []
-    for emp in st.session_state.employees:
-        table_data.append({
-            "Ονοματεπώνυμο": emp['name'],
-            "Θέση": emp['position'],
-            "Κατάσταση": emp.get('status', 'Ενεργός'),
-            "Ημέρες Άδειας": leave_days[emp['id']]
-        })
-    df_leaves_summary = pd.DataFrame(table_data)
-    st.write(f"### Συνολικές Ημέρες Άδειας για το έτος: {selected_year}")
-    st.dataframe(df_leaves_summary, use_container_width=True, hide_index=True)
+                                        db_insert('assignments', new_assigns, track=False)
+                                        st.rerun()
 
-# --- VIEW: Ώρες Εργασιών ---
-elif menu == "Ώρες Εργασιών":
-    st.title("⏱️ Ώρες Εργασιών ανά Μήνα")
-    months = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", 
-              "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"]
-    current_month_index = date.today().month - 1
-    current_year = date.today().year
+# --- ΚΛΗΣΗ ΓΡΑΦΗΜΑΤΟΣ (ΜΟΝΟ ΟΤΑΝ ΕΙΝΑΙ ΣΤΗ ΣΕΛΙΔΑ) ---
+if menu == "Ταμπλό Gantt":
+    st.title("📅 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
     
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        selected_month_name = st.selectbox("Επιλογή Μήνα", months, index=current_month_index)
-        selected_month = months.index(selected_month_name) + 1
-    with col2:
-        years = list(range(2020, 2036))
-        selected_year = st.selectbox("Επιλογή Έτους", years, index=years.index(current_year))
-    st.divider()
+    col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
+    with col_nav1:
+        st.write("")
+        st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
+    with col_date:
+        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
+        start_of_week = selected_date - timedelta(days=selected_date.weekday())
+    with col_nav2:
+        st.write("")
+        st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
+    with col_today:
+        st.write("")
+        st.button("🏠 Σήμερα", on_click=go_to_today, use_container_width=True)
+    with col_zoom:
+        zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
+    with col_pres:
+        st.write("")
+        st.write("")
+        presentation_mode = st.checkbox("🖥️ Λειτουργία Πλήρους Προβολής")
+        
+    zoom_factor = zoom_level / 100.0
     
-    employee_hours = {emp['id']: 0.0 for emp in st.session_state.employees}
-    for a in st.session_state.assignments:
-        d = a['date']
-        if d.month == selected_month and d.year == selected_year:
-            start_str = str(a['startTime'])[:5]
-            end_str = str(a['endTime'])[:5]
-            try:
+    fig, wk_groups, export_data = generate_gantt_chart(
+        start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
+        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
+    )
+    
+    clicked_key = None
+    try:
                 start_h, start_m = map(int, start_str.split(':'))
                 end_h, end_m = map(int, end_str.split(':'))
                 delta_hours = (end_h - start_h) + (end_m - start_m) / 60.0
