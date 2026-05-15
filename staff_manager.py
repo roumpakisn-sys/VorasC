@@ -279,7 +279,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         if supabase:
             # Chunking για να μην "σκάει" η βάση λόγω ορίου μεγέθους στο URL (PostgREST limit)
-            chunk_size = 100
+            chunk_size = 50  # Μείωση στο 50 για απόλυτη ασφάλεια
             for i in range(0, len(values), chunk_size):
                 try:
                     supabase.table(table).delete().in_(column, values[i:i+chunk_size]).execute()
@@ -593,14 +593,19 @@ def auto_extend_recurring_patterns():
         mark_data_changed()
         if supabase:
             with st.status("Αυτόματη Επέκταση Βαρδιών...", expanded=True) as status:
-                chunk_size = 500
+                chunk_size = 50 # Μείωση για απόλυτη ασφάλεια στη μνήμη του server
+                has_error = False
                 for i in range(0, len(new_assignments_batch), chunk_size):
                     st.write(f"Αποθήκευση βαρδιών {i+1} έως {min(i+chunk_size, len(new_assignments_batch))}...")
                     try:
                         supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
                     except Exception as e:
                         st.error(f"Σφάλμα επέκτασης: {e}")
-                status.update(label="Η επέκταση ολοκληρώθηκε επιτυχώς!", state="complete", expanded=False)
+                        has_error = True
+                if has_error:
+                    status.update(label="Ολοκληρώθηκε με σφάλματα!", state="error", expanded=True)
+                else:
+                    status.update(label="Η επέκταση ολοκληρώθηκε επιτυχώς!", state="complete", expanded=False)
 
 if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
     auto_extend_recurring_patterns()
@@ -2082,7 +2087,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 with r_end:
                     r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
-                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 3 μήνες (90 ημέρες) για εξοικονόμηση μνήμης. Στη συνέχεια θα επεκτείνεται αυτόματα.")
+                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 1 χρόνο. Στη συνέχεια θα επεκτείνεται αυτόματα.")
             
             st.write("") 
             col_btn1, col_btn2 = st.columns([1, 1])
@@ -2200,7 +2205,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     created_for_day += 1
                                     success_count += 1
                             
-                            # Διάσωση της βάρδιας (ως ορφανή) αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια ή διπλοκράτηση
                             if created_for_day == 0 and emps_to_process != [""]:
                                 new_assign = {
                                     'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "",
@@ -2226,12 +2230,19 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.session_state.assignments.extend(new_assignments_batch)
                             if supabase:
                                 with st.status("Καταχώρηση στη βάση...", expanded=True) as status:
-                                    chunk_size = 500
+                                    chunk_size = 50
+                                    has_err = False
                                     for i in range(0, len(new_assignments_batch), chunk_size):
                                         st.write(f"Συγχρονισμός... ({i+1} έως {min(i+chunk_size, len(new_assignments_batch))})")
-                                        try: supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
-                                        except: pass
-                                    status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
+                                        try: 
+                                            supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
+                                        except Exception as e: 
+                                            st.error(f"Σφάλμα DB: {e}")
+                                            has_err = True
+                                    if has_err:
+                                        status.update(label="Ολοκληρώθηκε με σφάλματα!", state="error", expanded=True)
+                                    else:
+                                        status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
                             actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                         add_transaction(actions)
                         st.session_state.rec_reset_counter += 1
@@ -2435,7 +2446,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 new_assignments_batch.append(new_assign)
                                                 created_for_day += 1
                                                 
-                                        # Διάσωση της βάρδιας (ως ορφανή) αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια ή διπλοκράτηση
                                         if created_for_day == 0 and emps_to_process != [""]:
                                             new_assign = {
                                                 'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': "",
@@ -2465,12 +2475,19 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         st.session_state.assignments.extend(new_assignments_batch)
                                         if supabase:
                                             with st.status("Καταχώρηση στη βάση...", expanded=True) as status:
-                                                chunk_size = 500
+                                                chunk_size = 50
+                                                has_err = False
                                                 for i in range(0, len(new_assignments_batch), chunk_size):
                                                     st.write(f"Συγχρονισμός... ({i+1} έως {min(i+chunk_size, len(new_assignments_batch))})")
-                                                    try: supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
-                                                    except: pass
-                                                status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
+                                                    try: 
+                                                        supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
+                                                    except Exception as e: 
+                                                        st.error(f"Σφάλμα DB: {e}")
+                                                        has_err = True
+                                                if has_err:
+                                                    status.update(label="Ολοκληρώθηκε με σφάλματα!", state="error", expanded=True)
+                                                else:
+                                                    status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
                                         actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                                     add_transaction(actions)
                                 st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
