@@ -797,7 +797,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         break
                 if not placed:
                     blue_lanes.append(g['End'])
-                        row_idx = len(blue_lanes) - 1
+                    row_idx = len(blue_lanes) - 1
                 group_row_mapping.append((g, row_idx + num_non_blue_lanes))
 
             for g, row_idx in group_row_mapping:
