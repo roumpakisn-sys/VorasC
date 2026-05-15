@@ -913,14 +913,14 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1 
     )
     
-    fig.update_traces(
-        textposition='inside', insidetextanchor='middle',
-        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
-        marker=dict(line=dict(color='black', width=1)), textangle=0, constraintext='none',
-        hoverinfo='none', hovertemplate=None,
-        selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
-    )
-    
+        fig.update_traces(
+            textposition='inside', insidetextanchor='middle',
+            textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
+            marker=dict(line=dict(color='black', width=1)), textangle=0, constraintext='none',
+            hoverinfo='none', hovertemplate=None,
+            selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
+        )
+        
         fig.update_layout(
             bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
             margin=dict(l=10, r=10, t=50, b=10), annotations=empty_shift_annotations, 
@@ -934,7 +934,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
             ),
             yaxis=dict(title="", tickfont=dict(size=max(8, int(12 * zoom_factor)), color="black"), fixedrange=False, range=y_range)
         )
-    return fig, wk_groups, export_data
+        return fig, wk_groups, export_data
 
 
 # --- FRAGMENTS ΓΙΑ ΚΑΤΑΧΩΡΗΣΕΙΣ ---
