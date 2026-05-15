@@ -9,6 +9,8 @@ import io
 import time
 import textwrap
 import gc  # Γρήγορη απελευθέρωση μνήμης (Garbage Collection)
+import ast
+import re
 
 try:
     from supabase import create_client
@@ -205,6 +207,16 @@ def format_log_details(table_name, records):
     if len(lines) > 5:
         return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
     return " | ".join(lines)
+
+def parse_old_log_details(table_name, details_str):
+    if not isinstance(details_str, str): return details_str
+    if not (details_str.startswith("[{") or details_str.startswith("{")): return details_str
+    try:
+        clean_str = re.sub(r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)", r"'\3/\2/\1'", details_str)
+        parsed_data = ast.literal_eval(clean_str)
+        return format_log_details(table_name, parsed_data)
+    except:
+        return details_str
 
 def log_activity(action_type, table_name, details_raw):
     if not supabase or table_name == 'activity_logs': return
