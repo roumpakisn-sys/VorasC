@@ -143,7 +143,8 @@ def fetch_paginated(table):
     limit = 1000
     while True:
         try:
-            data = supabase.table(table).select("*").range(offset, offset + limit - 1).execute().data
+            # ΠΡΟΣΘΗΚΗ .order("id") ΕΔΩ: Εξασφαλίζει ότι το PostgREST δεν θα χάσει ή διπλοκατεβάσει γραμμές κατά το Pagination!
+            data = supabase.table(table).select("*").order("id").range(offset, offset + limit - 1).execute().data
             if data:
                 all_rows.extend(data)
             if not data or len(data) < limit:
