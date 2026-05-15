@@ -347,13 +347,24 @@ BASIC_COLORS = {
     "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"
 }
 
-# --- SELECTIVE FETCHING & POLLING ---
+# --- SELECTIVE FETCHING & REAL-TIME POLLING ---
 if supabase:
     st.session_state.is_cloud = True
     
+    latest_ts = None
+    try:
+        # Ταχύτατος έλεγχος για το πότε έγινε η τελευταία κίνηση στη βάση
+        res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
+        if res.data:
+            latest_ts = res.data[0]['timestamp']
+    except:
+        pass
+
     force_refresh = st.session_state.get("global_db_ts") == "force_refresh"
+    # Εάν ο τελευταίος χρόνος άλλαξε από τη βάση (κάποιος άλλος χρήστης έκανε κίνηση), ενεργοποιούμε το reload!
+    ts_changed = latest_ts and st.session_state.get("global_db_ts") not in [None, "force_refresh", latest_ts]
     
-    if force_refresh or "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
+    if force_refresh or ts_changed or "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
         with st.spinner("Λήψη δεδομένων από τη βάση..."):
             st.session_state.employees = fetch_paginated("employees")
             st.session_state.projects = fetch_paginated("projects")
@@ -389,7 +400,7 @@ if supabase:
                 st.session_state.activity_logs = []
                 
             st.session_state.db_last_fetch = time.time()
-            if force_refresh: st.session_state.global_db_ts = None
+            st.session_state.global_db_ts = latest_ts
             mark_data_changed()
 else:
     if 'local_data_loaded' not in st.session_state:
@@ -634,19 +645,40 @@ with col_r:
 
 st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
-if st.session_state.get('is_cloud'):
-    st.sidebar.success(f"✅ Cloud Sync (Real-time)")
-    if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-        st.session_state.global_db_ts = "force_refresh"
-        st.rerun()
-else:
-    st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
-    if not SUPABASE_INSTALLED:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
-    elif not HAS_SECRETS:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
+
+# ΠΑΝΕΞΥΠΝΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ΠΡΑΓΜΑΤΙΚΟΥ ΧΡΟΝΟΥ (REAL-TIME FRAGMENT)
+@st.fragment(run_every=timedelta(seconds=10))
+def render_system_status():
+    if st.session_state.get('is_cloud'):
+        st.success(f"✅ Cloud Sync (Real-time)")
+        if st.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+            st.session_state.global_db_ts = "force_refresh"
+            st.rerun()
+            
+        # Εδώ το σύστημα ελέγχει αθόρυβα αν κάποιος άλλος έκανε αλλαγή!
+        if supabase:
+            try:
+                res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
+                if res.data:
+                    current_latest_ts = res.data[0]['timestamp']
+                    my_local_ts = st.session_state.get("global_db_ts")
+                    if my_local_ts and my_local_ts not in ["force_refresh", current_latest_ts]:
+                        st.session_state.global_db_ts = "force_refresh"
+                        st.rerun() # Μόνο τότε ανανεώνει τα πάντα, φέρνοντας τις νέες αλλαγές σε όλους!
+            except Exception:
+                pass
     else:
-        st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
+        st.error("❌ Εκτός Σύνδεσης (Τοπικά)")
+        if not SUPABASE_INSTALLED:
+            st.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
+        elif not HAS_SECRETS:
+            st.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
+        else:
+            st.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
+
+# Κλήση της ασύγχρονης συνάρτησης στην Sidebar
+render_system_status()
+
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
@@ -1119,7 +1151,7 @@ def render_edit_assignment(target_group, edit_date, default_proj_idx, proj_ids):
                     break
                 adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(new_a['employeeId'], new_a['date'], new_a['startTime'], new_a['endTime'], exclude_ids=target_group['AssignmentIds'])
                 if is_conflict:
-                    st.toast(f"🚨 Αδύνατη μετακίνηση: Διπλοκράτηση {emp_name}!", icon="🚨")
+                    st.toast(f"🚨 Αδύνα μετακίνηση: Διπλοκράτηση {emp_name}!", icon="🚨")
                     has_error = True
                     break
                 new_a['startTime'], new_a['endTime'] = adj_start, adj_end
@@ -2050,7 +2082,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 with r_end:
                     r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
-                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 1 χρόνο. Στη συνέχεια θα επεκτείνεται αυτόματα.")
+                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 3 μήνες (90 ημέρες) για εξοικονόμηση μνήμης. Στη συνέχεια θα επεκτείνεται αυτόματα.")
             
             st.write("") 
             col_btn1, col_btn2 = st.columns([1, 1])
