@@ -278,11 +278,14 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
         if track and deleted_records:
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         if supabase:
-            try:
-                supabase.table(table).delete().in_(column, values).execute()
-                log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
-            except Exception as e:
-                st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
+            # Chunking για να μην "σκάει" η βάση λόγω ορίου μεγέθους στο URL (PostgREST limit)
+            chunk_size = 100
+            for i in range(0, len(values), chunk_size):
+                try:
+                    supabase.table(table).delete().in_(column, values[i:i+chunk_size]).execute()
+                except Exception as e:
+                    st.error(f"Σφάλμα μαζικής διαγραφής (chunk {i}): {e}")
+            log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
 
 def db_update(table, id_val, new_data, old_data=None, track=True):
     mark_data_changed()
@@ -466,7 +469,7 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
                 return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
     return t_start, t_end, False, "AllowedOverlap" if allowed_overlap else ""
 
-# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΜΕ ST.STATUS (ΣΕΙΡΙΑΚΑ) ---
+# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ (ΑΝΑ 365 ΗΜΕΡΕΣ / 1 ΕΤΟΣ) ---
 def auto_extend_recurring_patterns():
     if not st.session_state.get('recurring_patterns'): return
     
@@ -484,9 +487,14 @@ def auto_extend_recurring_patterns():
         rid = pat['id']
         latest_date = max_dates.get(rid)
         
-        if latest_date and (latest_date - today).days <= 30:
+        # Αν δεν βρεθεί παλιά βάρδια (π.χ. σβήστηκαν χειροκίνητα όλες), παίρνουμε την αρχική ημερομηνία έναρξης
+        if not latest_date:
+            latest_date = pat.get('startDate', today)
+            
+        # Επέκταση αν λήγει σε λιγότερο από 30 ημέρες (Προσθέτει +365 μέρες)
+        if (latest_date - today).days <= 30:
             start_ext_date = latest_date + timedelta(days=1)
-            end_ext_date = start_ext_date + timedelta(days=90)
+            end_ext_date = start_ext_date + timedelta(days=365)
             
             r_type = pat.get('type')
             r_emps = pat.get('employeeIds', [])
@@ -531,36 +539,43 @@ def auto_extend_recurring_patterns():
                     emps_to_process = r_emps.get(d_name, []) if isinstance(r_emps, dict) else r_emps
                 else:
                     emps_to_process = r_emps
+                
                 emps_to_process = emps_to_process if emps_to_process else [""]
+                created_for_day = 0
                 
                 for eid in emps_to_process:
                     if eid:
                         if is_on_leave(eid, d): continue
                         adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
                         if is_conflict: continue
-                    else:
-                        adj_start, adj_end = str_start, str_end
                         
+                        new_assign = {
+                            'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': eid,
+                            'projectId': r_proj, 'date': d, 'arrivalTime': str_arrival,
+                            'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color,
+                            'colorHex': c_hex, 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
+                        }
+                        new_assignments_batch.append(new_assign)
+                        created_for_day += 1
+                    else:
+                        new_assign = {
+                            'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': "",
+                            'projectId': r_proj, 'date': d, 'arrivalTime': str_arrival,
+                            'startTime': str_start, 'endTime': str_end, 'colorName': r_color,
+                            'colorHex': c_hex, 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
+                        }
+                        new_assignments_batch.append(new_assign)
+                        created_for_day += 1
+                
+                # Αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια/διπλοκράτηση, δημιουργούμε μια ΚΕΝΗ βάρδια για να μην χαθεί το έργο!
+                if created_for_day == 0 and emps_to_process != [""]:
                     new_assign = {
-                        'id': str(uuid.uuid4()),
-                        'recurring_id': rid,
-                        'employeeId': eid,
-                        'projectId': r_proj,
-                        'date': d,
-                        'arrivalTime': str_arrival,
-                        'startTime': adj_start,
-                        'endTime': adj_end,
-                        'colorName': r_color,
-                        'colorHex': c_hex,
-                        'notes': r_notes,
-                        'is_cancelled': False,
-                        'cancel_reason': ""
+                        'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': "",
+                        'projectId': r_proj, 'date': d, 'arrivalTime': str_arrival,
+                        'startTime': str_start, 'endTime': str_end, 'colorName': r_color,
+                        'colorHex': c_hex, 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
                     }
                     new_assignments_batch.append(new_assign)
-                    
-                    if d not in st.session_state.assignments_by_date:
-                        st.session_state.assignments_by_date[d] = []
-                    st.session_state.assignments_by_date[d].append(new_assign)
                     
     if new_assignments_batch:
         st.session_state.assignments.extend(new_assignments_batch)
@@ -2035,7 +2050,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 with r_end:
                     r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
-                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 3 μήνες (90 ημέρες) για εξοικονόμηση μνήμης. Στη συνέχεια θα επεκτείνεται αυτόματα.")
+                st.info("💡 Η εργασία θα δημιουργήσει βάρδιες για 1 χρόνο. Στη συνέχεια θα επεκτείνεται αυτόματα.")
             
             st.write("") 
             col_btn1, col_btn2 = st.columns([1, 1])
@@ -2071,7 +2086,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         final_r_proj_id = r_proj
                         
                     pattern_id = str(uuid.uuid4())
-                    r_end_date = r_start_date + timedelta(days=90) 
+                    r_end_date = max(r_start_date + timedelta(days=365), date.today() + timedelta(days=365))
                     
                     dates_to_assign = []
                     curr_date = r_start_date
@@ -2113,6 +2128,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 emps_to_process = r_emps
                             emps_to_process = emps_to_process if emps_to_process else [""]
                             
+                            created_for_day = 0
                             for eid in emps_to_process:
                                 if eid:
                                     emp_name = get_employee_name(eid)
@@ -2120,24 +2136,27 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         conflict_count += 1
                                         conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                         st.toast(f"🛑 Επαναλαμβανόμενη: Άδεια {emp_name} ({d.strftime('%d/%m')})", icon="🛑")
-                                    else:
-                                        adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
-                                        if is_conflict:
-                                            conflict_count += 1
-                                            conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
-                                            st.toast(f"🚨 Επαναλαμβανόμενη: Διπλοκράτηση {emp_name} ({d.strftime('%d/%m')})", icon="🚨")
-                                        else:
-                                            if msg == "AllowedOverlap":
-                                                st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {emp_name} ({adj_start})", icon="ℹ️")
-                                            new_assign = {
-                                                'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': eid,
-                                                'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival,
-                                                'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color,
-                                                'colorHex': BASIC_COLORS[r_color], 'notes': r_notes,
-                                                'is_cancelled': False, 'cancel_reason': ""
-                                            }
-                                            new_assignments_batch.append(new_assign)
-                                            success_count += 1
+                                        continue
+                                    
+                                    adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                                    if is_conflict:
+                                        conflict_count += 1
+                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
+                                        st.toast(f"🚨 Επαναλαμβανόμενη: Διπλοκράτηση {emp_name} ({d.strftime('%d/%m')})", icon="🚨")
+                                        continue
+                                    
+                                    if msg == "AllowedOverlap":
+                                        st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {emp_name} ({adj_start})", icon="ℹ️")
+                                    new_assign = {
+                                        'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': eid,
+                                        'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival,
+                                        'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color,
+                                        'colorHex': BASIC_COLORS[r_color], 'notes': r_notes,
+                                        'is_cancelled': False, 'cancel_reason': ""
+                                    }
+                                    new_assignments_batch.append(new_assign)
+                                    created_for_day += 1
+                                    success_count += 1
                                 else:
                                     new_assign = {
                                         'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "",
@@ -2146,7 +2165,19 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         'colorHex': BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
                                     }
                                     new_assignments_batch.append(new_assign)
+                                    created_for_day += 1
                                     success_count += 1
+                            
+                            # Διάσωση της βάρδιας (ως ορφανή) αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια ή διπλοκράτηση
+                            if created_for_day == 0 and emps_to_process != [""]:
+                                new_assign = {
+                                    'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "",
+                                    'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival,
+                                    'startTime': str_start, 'endTime': str_end, 'colorName': r_color,
+                                    'colorHex': BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
+                                }
+                                new_assignments_batch.append(new_assign)
+                                success_count += 1
                         
                         final_employee_ids = selected_weekdays_data if r_type == "Επιλεγμένες Μέρες Εβδομάδας" else r_emps
                         new_pattern = {
@@ -2178,7 +2209,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         time.sleep(1.5)
                         st.rerun()
                     if conflict_count > 0:
-                        st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
+                        st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις (έγιναν Χωρίς Προσωπικό) λόγω συγκρούσεων.")
                         with st.expander("Δείτε τις συγκρούσεις"):
                             for c in conflict_details: st.write(f"⚠️ {c}")
 
@@ -2303,7 +2334,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], track=False)
                                 actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                                 
-                                r_end_date = e_start_date + timedelta(days=90) 
+                                r_end_date = max(e_start_date + timedelta(days=365), date.today() + timedelta(days=365)) 
                                 dates_to_assign = []
                                 curr_date = e_start_date
                                 day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
@@ -2337,21 +2368,29 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         else: emps_to_process = e_emps_selection
                                         emps_to_process = emps_to_process if emps_to_process else [""]
                                         
+                                        created_for_day = 0
                                         for eid in emps_to_process:
                                             if eid:
                                                 emp_name = get_employee_name(eid)
-                                                if is_on_leave(eid, d): st.toast(f"🛑 Παραλείφθηκε: {emp_name} έχει άδεια", icon="🛑")
-                                                else:
-                                                    adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
-                                                    if is_conflict: st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση {emp_name}", icon="🚨")
-                                                    else:
-                                                        new_assign = {
-                                                            'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': eid,
-                                                            'projectId': final_e_proj_id, 'date': d, 'arrivalTime': str_arrival,
-                                                            'startTime': adj_start, 'endTime': adj_end, 'colorName': e_color,
-                                                            'colorHex': BASIC_COLORS[e_color], 'notes': e_notes, 'is_cancelled': False, 'cancel_reason': ""
-                                                        }
-                                                        new_assignments_batch.append(new_assign)
+                                                if is_on_leave(eid, d): 
+                                                    st.toast(f"🛑 Παραλείφθηκε: {emp_name} έχει άδεια", icon="🛑")
+                                                    continue
+                                                
+                                                adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                                                if is_conflict: 
+                                                    st.toast(f"🚨 Παραλείφθηκε: Διπλοκράτηση {emp_name}", icon="🚨")
+                                                    continue
+                                                
+                                                if msg == "AllowedOverlap":
+                                                    st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {emp_name} ({adj_start})", icon="ℹ️")
+                                                new_assign = {
+                                                    'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': eid,
+                                                    'projectId': final_e_proj_id, 'date': d, 'arrivalTime': str_arrival,
+                                                    'startTime': adj_start, 'endTime': adj_end, 'colorName': e_color,
+                                                    'colorHex': BASIC_COLORS[e_color], 'notes': e_notes, 'is_cancelled': False, 'cancel_reason': ""
+                                                }
+                                                new_assignments_batch.append(new_assign)
+                                                created_for_day += 1
                                             else:
                                                 new_assign = {
                                                     'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': "",
@@ -2360,6 +2399,17 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                     'colorHex': BASIC_COLORS[e_color], 'notes': e_notes, 'is_cancelled': False, 'cancel_reason': ""
                                                 }
                                                 new_assignments_batch.append(new_assign)
+                                                created_for_day += 1
+                                                
+                                        # Διάσωση της βάρδιας (ως ορφανή) αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια ή διπλοκράτηση
+                                        if created_for_day == 0 and emps_to_process != [""]:
+                                            new_assign = {
+                                                'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': "",
+                                                'projectId': final_e_proj_id, 'date': d, 'arrivalTime': str_arrival,
+                                                'startTime': str_start, 'endTime': str_end, 'colorName': e_color,
+                                                'colorHex': BASIC_COLORS[e_color], 'notes': e_notes, 'is_cancelled': False, 'cancel_reason': ""
+                                            }
+                                            new_assignments_batch.append(new_assign)
                                 
                                     old_pat = dict(pat)
                                     final_e_employee_ids = e_selected_weekdays_data if e_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_emps_selection
