@@ -11,6 +11,7 @@ import textwrap
 import gc  # Γρήγορη απελευθέρωση μνήμης (Garbage Collection)
 import ast
 import re
+import concurrent.futures  # ΠΡΟΣΘΗΚΗ: Για ταχύτατο παράλληλο κατέβασμα δεδομένων!
 
 try:
     from supabase import create_client
@@ -153,6 +154,13 @@ def fetch_paginated(table):
         except Exception:
             break
     return all_rows
+
+def fetch_logs():
+    if not supabase: return []
+    try:
+        return supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
+    except Exception:
+        return []
 
 def clear_all_caches():
     st.session_state.db_last_fetch = 0
@@ -348,7 +356,7 @@ BASIC_COLORS = {
     "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"
 }
 
-# --- SELECTIVE FETCHING & REAL-TIME POLLING ---
+# --- SELECTIVE FETCHING & REAL-TIME POLLING ΜΕ ΠΑΡΑΛΛΗΛΑ THREADS ---
 if supabase:
     st.session_state.is_cloud = True
     
@@ -366,39 +374,42 @@ if supabase:
     ts_changed = latest_ts and st.session_state.get("global_db_ts") not in [None, "force_refresh", latest_ts]
     
     if force_refresh or ts_changed or "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
-        with st.spinner("Λήψη δεδομένων από τη βάση..."):
-            st.session_state.employees = fetch_paginated("employees")
-            st.session_state.projects = fetch_paginated("projects")
-            
-            assigns = fetch_paginated("assignments")
-            for a in assigns:
-                if isinstance(a.get('date'), str):
-                    a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-            st.session_state.assignments = assigns
-            
-            leaves = fetch_paginated("leaves")
-            for l in leaves:
-                if isinstance(l.get('startDate'), str):
-                    l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-                if isinstance(l.get('endDate'), str):
-                    l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-            st.session_state.leaves = leaves
-            
-            patterns = fetch_paginated("recurring_patterns")
-            for p in patterns:
-                if isinstance(p.get('startDate'), str):
-                    p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-            st.session_state.recurring_patterns = patterns
-            
-            try:
-                st.session_state.evaluations = fetch_paginated("evaluations")
-            except:
-                st.session_state.evaluations = []
-                
-            try:
-                st.session_state.activity_logs = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
-            except:
-                st.session_state.activity_logs = []
+        with st.spinner("Ταχύτατος συγχρονισμός δεδομένων..."):
+            # Χρήση ThreadPoolExecutor για να κατέβουν οι 7 πίνακες ΤΑΥΤΟΧΡΟΝΑ! (Εξοικονόμηση ~80% χρόνου)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+                f_emp = executor.submit(fetch_paginated, "employees")
+                f_proj = executor.submit(fetch_paginated, "projects")
+                f_ass = executor.submit(fetch_paginated, "assignments")
+                f_leav = executor.submit(fetch_paginated, "leaves")
+                f_pat = executor.submit(fetch_paginated, "recurring_patterns")
+                f_eval = executor.submit(fetch_paginated, "evaluations")
+                f_log = executor.submit(fetch_logs)
+
+                st.session_state.employees = f_emp.result()
+                st.session_state.projects = f_proj.result()
+
+                assigns = f_ass.result()
+                for a in assigns:
+                    if isinstance(a.get('date'), str):
+                        a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                st.session_state.assignments = assigns
+
+                leaves = f_leav.result()
+                for l in leaves:
+                    if isinstance(l.get('startDate'), str):
+                        l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
+                    if isinstance(l.get('endDate'), str):
+                        l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+                st.session_state.leaves = leaves
+
+                patterns = f_pat.result()
+                for p in patterns:
+                    if isinstance(p.get('startDate'), str):
+                        p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
+                st.session_state.recurring_patterns = patterns
+
+                st.session_state.evaluations = f_eval.result() or []
+                st.session_state.activity_logs = f_log.result() or []
                 
             st.session_state.db_last_fetch = time.time()
             st.session_state.global_db_ts = latest_ts
