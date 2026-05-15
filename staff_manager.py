@@ -767,6 +767,13 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
             row_id = f"day_{i}_row_0"
             day_row_ids.append(row_id)
         else:
+            # 1. ΑΦΑΙΡΕΣΗ ΔΙΠΛΟΤΥΠΩΝ (GHOST SHIFTS) ΑΠΟ ΤΗΝ ΟΘΟΝΗ
+            unique_da = {}
+            for da in day_assignments:
+                k = f"{da.get('employeeId')}_{da.get('projectId')}_{str(da.get('startTime'))[:5]}_{str(da.get('endTime'))[:5]}"
+                unique_da[k] = da
+            day_assignments = list(unique_da.values())
+
             emp_day_assigns = {}
             for da in day_assignments:
                 eid = da.get('employeeId')
@@ -806,21 +813,15 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         'Notes': notes,
                         'is_cancelled': is_canc,
                         'cancel_reason': c_reason,
-                        'LegendGroup': legend_val,
-                        '_seen_eids': set()
+                        'LegendGroup': legend_val
                     }
                 
                 groups[key]['AssignmentIds'].append(a['id'])
                 
-                eid = a.get('employeeId')
-                if eid in groups[key]['_seen_eids'] and eid != "":
-                    continue
-                groups[key]['_seen_eids'].add(eid)
-                
-                if not eid:
+                if not a.get('employeeId'):
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
                 else:
-                    full_name = local_get_emp(eid)
+                    full_name = local_get_emp(a['employeeId'])
                     name_parts = full_name.split()
                     if len(name_parts) > 1:
                         formatted_name = f"{name_parts[-1]} {name_parts[0][0]}."
@@ -828,25 +829,26 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         formatted_name = full_name
                         
                     prev_assigns = []
-                    if eid in emp_day_assigns:
+                    my_eid = a.get('employeeId')
+                    if my_eid in emp_day_assigns:
                         t_a_start_str = str(a['startTime'])[:5]
-                        t_a_end_str = str(a['endTime'])[:5]
-                        for pa in emp_day_assigns[eid]:
+                        for pa in emp_day_assigns[my_eid]:
+                            # 2. ΤΕΛΟΣ ΣΤΟ "ΜΕΤΑ ΑΠΟ ΙΔΙΟ ΕΡΓΟ". Ελέγχει ρητά αν είναι ΑΛΛΟ έργο
+                            # και αν τελείωσε νωρίτερα (ή ακριβώς την ίδια ώρα) από το επόμενο!
                             if pa.get('id') != a['id'] and pa.get('projectId') != a['projectId']:
-                                t_pa_start_str = str(pa['startTime'])[:5]
                                 t_pa_end_str = str(pa['endTime'])[:5]
-                                is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
-                                if (is_overlapping and (t_pa_end_str <= t_a_end_str) and (t_pa_start_str <= t_a_start_str)) or (t_pa_end_str == t_a_start_str):
+                                if t_pa_end_str <= t_a_start_str:
                                     prev_assigns.append(pa)
                                 
                     if prev_assigns:
+                        # Αν βρέθηκαν πολλά προηγούμενα έργα, πάρε το πιο πρόσφατο!
                         prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
                         prev_proj = local_get_proj(prev_assigns[0]['projectId'])
                         if prev_proj:
                             formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj.get('name', 'Άγνωστο')}' {formatted_name}]"
                     
                 groups[key]['Employees'].append(formatted_name)
-                groups[key]['EmployeeIds'].append(eid)
+                groups[key]['EmployeeIds'].append(a['employeeId'])
 
             wk_groups.update(groups)
             non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
@@ -2414,7 +2416,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 curr_date = e_start_date
                                 day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                                 day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
-                                selected_weekday_ints = [day_map[d] for d in selected_weekdays] if e_selected_weekdays else []
+                                selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
                                 
                                 old_assign_ids = [a['id'] for a in old_assigns]
                                 new_assignments_batch = []
