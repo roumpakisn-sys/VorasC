@@ -475,10 +475,10 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
         ea_s = str(ea['startTime'])[:5]
         ea_e = str(ea['endTime'])[:5]
         if new_s < ea_e and new_e > ea_s:
-            if new_e > ea_e:
-                allowed_overlap = True
+            if new_s == ea_s and new_e == ea_e:
+                return t_start, t_end, True, "Ακριβής σύμπτωση ωραρίου με άλλη βάρδια (ίδια έναρξη και λήξη)"
             else:
-                return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
+                allowed_overlap = True
     return t_start, t_end, False, "AllowedOverlap" if allowed_overlap else ""
 
 # --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ (ΑΝΑ 365 ΗΜΕΡΕΣ / 1 ΕΤΟΣ) ---
@@ -813,23 +813,52 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         'Notes': notes,
                         'is_cancelled': is_canc,
                         'cancel_reason': c_reason,
-                        'LegendGroup': legend_val
+                        'LegendGroup': legend_val,
+                        '_seen_eids': set()
                     }
                 
                 groups[key]['AssignmentIds'].append(a['id'])
                 
-                if not a.get('employeeId'):
+                eid = a.get('employeeId')
+                if eid in groups[key]['_seen_eids'] and eid != "":
+                    continue
+                groups[key]['_seen_eids'].add(eid)
+                
+                if not eid:
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
                 else:
-                    full_name = local_get_emp(a['employeeId'])
+                    full_name = local_get_emp(eid)
                     name_parts = full_name.split()
                     if len(name_parts) > 1:
                         formatted_name = f"{name_parts[-1]} {name_parts[0][0]}."
                     else:
                         formatted_name = full_name
+                        
+                    prev_assigns = []
+                    if eid in emp_day_assigns:
+                        t_a_start_str = str(a['startTime'])[:5]
+                        t_a_end_str = str(a['endTime'])[:5]
+                        for pa in emp_day_assigns[eid]:
+                            if pa.get('id') != a['id'] and pa.get('projectId') != a['projectId']:
+                                t_pa_start_str = str(pa['startTime'])[:5]
+                                t_pa_end_str = str(pa['endTime'])[:5]
+                                
+                                is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
+                                
+                                if is_overlapping:
+                                    if t_a_end_str > t_pa_end_str:
+                                        prev_assigns.append(pa)
+                                elif t_pa_end_str <= t_a_start_str:
+                                    prev_assigns.append(pa)
+                                
+                    if prev_assigns:
+                        prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
+                        prev_proj = local_get_proj(prev_assigns[0]['projectId'])
+                        if prev_proj:
+                            formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj.get('name', 'Άγνωστο')}' {formatted_name}]"
                     
                 groups[key]['Employees'].append(formatted_name)
-                groups[key]['EmployeeIds'].append(a['employeeId'])
+                groups[key]['EmployeeIds'].append(eid)
 
             wk_groups.update(groups)
             non_blue_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
@@ -1080,7 +1109,7 @@ def render_quick_add(selected_date, qa_rc):
                         else:
                             adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, add_date, str_start, str_end)
                             if is_conflict:
-                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει ({str_start} - {str_end}).")
+                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει απόλυτα ({str_start} - {str_end}).")
                                 st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                             else:
                                 valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
@@ -1255,7 +1284,7 @@ def render_edit_assignment(target_group, edit_date, default_proj_idx, proj_ids):
                         else:
                             adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, edit_date_val, str_start, str_end, exclude_ids=target_group['AssignmentIds'])
                             if is_conflict:
-                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει.")
+                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει απόλυτα.")
                                 st.toast(f"🚨 Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="🚨")
                             else:
                                 valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
@@ -2397,7 +2426,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 curr_date = e_start_date
                                 day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                                 day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
-                                selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
+                                selected_weekday_ints = [day_map[d] for d in selected_weekdays] if e_selected_weekdays else []
                                 
                                 old_assign_ids = [a['id'] for a in old_assigns]
                                 new_assignments_batch = []
