@@ -11,7 +11,8 @@ import textwrap
 import gc  # Γρήγορη απελευθέρωση μνήμης (Garbage Collection)
 import ast
 import re
-import concurrent.futures  # ΠΡΟΣΘΗΚΗ: Για ταχύτατο παράλληλο κατέβασμα δεδομένων!
+import concurrent.futures  # Για ταχύτατο παράλληλο κατέβασμα δεδομένων
+import copy  # Απαραίτητο για το σωστό Undo / Redo
 
 try:
     from supabase import create_client
@@ -125,26 +126,24 @@ if "undo_stack" not in st.session_state: st.session_state.undo_stack = []
 if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
 
 def add_transaction(actions):
-    st.session_state.undo_stack.append(actions)
+    # Deepcopy για να αποθηκεύεται ακριβώς το state εκείνης της στιγμής, λύνοντας το Undo bug!
+    actions_copy = copy.deepcopy(actions)
+    st.session_state.undo_stack.append(actions_copy)
     st.session_state.redo_stack.clear()
     if len(st.session_state.undo_stack) > 5:
         st.session_state.undo_stack.pop(0)
 
 # --- SELECTIVE FETCHING & CACHING ---
-CACHE_TTL = 300 # 5 λεπτά
+CACHE_TTL = 45 # Caching 45 δευτερολέπτων για να μην πέφτει ο server
 
-def mark_data_changed():
-    st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
-    st.session_state.data_dirty = True
-
-def fetch_paginated(table):
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def fetch_table_cached(table):
     if not supabase: return []
     all_rows = []
     offset = 0
     limit = 1000
     while True:
         try:
-            # ΠΡΟΣΘΗΚΗ .order("id") ΕΔΩ: Εξασφαλίζει ότι το PostgREST δεν θα χάσει ή διπλοκατεβάσει γραμμές κατά το Pagination!
             data = supabase.table(table).select("*").order("id").range(offset, offset + limit - 1).execute().data
             if data:
                 all_rows.extend(data)
@@ -155,15 +154,19 @@ def fetch_paginated(table):
             break
     return all_rows
 
-def fetch_logs():
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def fetch_logs_cached():
     if not supabase: return []
     try:
         return supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
     except Exception:
         return []
 
-def clear_all_caches():
-    st.session_state.db_last_fetch = 0
+def mark_data_changed():
+    st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
+    st.session_state.data_dirty = True
+    # Καθαρίζει την cache ρητά ώστε το επόμενο fetch να φέρει τα φρέσκα δεδομένα!
+    st.cache_data.clear() 
 
 def serialize_dates(data):
     if isinstance(data, list):
@@ -251,16 +254,16 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
-# Όλες οι DB συναρτήσεις είναι Σειριακές για ασφάλεια μνήμης
+# Όλες οι DB συναρτήσεις είναι Σειριακές
 def db_insert(table, data, track=True):
     mark_data_changed()
+    records = data if isinstance(data, list) else [data]
     if track:
-        records = data if isinstance(data, list) else [data]
         add_transaction([{'type': 'insert', 'table': table, 'records': records}])
     if supabase:
         try:
-            supabase.table(table).insert(serialize_dates(data)).execute()
-            log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
+            supabase.table(table).insert(serialize_dates(records)).execute()
+            log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, records))
         except Exception as e:
             st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
 
@@ -287,8 +290,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
         if track and deleted_records:
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         if supabase:
-            # Chunking για να μην "σκάει" η βάση λόγω ορίου μεγέθους στο URL (PostgREST limit)
-            chunk_size = 50  # Μείωση στο 50 για απόλυτη ασφάλεια
+            chunk_size = 50 
             for i in range(0, len(values), chunk_size):
                 try:
                     supabase.table(table).delete().in_(column, values[i:i+chunk_size]).execute()
@@ -313,7 +315,9 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
 def perform_undo():
     if not st.session_state.undo_stack: return
     transaction = st.session_state.undo_stack.pop()
-    st.session_state.redo_stack.append(transaction)
+    st.session_state.redo_stack.append(copy.deepcopy(transaction))
+    st.cache_data.clear()
+    
     for act in reversed(transaction):
         table = act['table']
         if act['type'] == 'insert':
@@ -333,7 +337,9 @@ def perform_undo():
 def perform_redo():
     if not st.session_state.redo_stack: return
     transaction = st.session_state.redo_stack.pop()
-    st.session_state.undo_stack.append(transaction)
+    st.session_state.undo_stack.append(copy.deepcopy(transaction))
+    st.cache_data.clear()
+    
     for act in transaction:
         table = act['table']
         if act['type'] == 'insert':
@@ -356,34 +362,22 @@ BASIC_COLORS = {
     "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"
 }
 
-# --- SELECTIVE FETCHING & REAL-TIME POLLING ΜΕ ΠΑΡΑΛΛΗΛΑ THREADS ---
+# --- ΑΣΦΑΛΗΣ ΑΡΧΙΚΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ---
 if supabase:
     st.session_state.is_cloud = True
-    
-    latest_ts = None
-    try:
-        # Ταχύτατος έλεγχος για το πότε έγινε η τελευταία κίνηση στη βάση
-        res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
-        if res.data:
-            latest_ts = res.data[0]['timestamp']
-    except:
-        pass
-
     force_refresh = st.session_state.get("global_db_ts") == "force_refresh"
-    # Εάν ο τελευταίος χρόνος άλλαξε από τη βάση (κάποιος άλλος χρήστης έκανε κίνηση), ενεργοποιούμε το reload!
-    ts_changed = latest_ts and st.session_state.get("global_db_ts") not in [None, "force_refresh", latest_ts]
     
-    if force_refresh or ts_changed or "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
-        with st.spinner("Ταχύτατος συγχρονισμός δεδομένων..."):
-            # Χρήση ThreadPoolExecutor για να κατέβουν οι 7 πίνακες ΤΑΥΤΟΧΡΟΝΑ! (Εξοικονόμηση ~80% χρόνου)
+    if force_refresh or "db_last_fetch" not in st.session_state:
+        st.cache_data.clear()
+        with st.spinner("Λήψη δεδομένων από τη βάση..."):
             with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-                f_emp = executor.submit(fetch_paginated, "employees")
-                f_proj = executor.submit(fetch_paginated, "projects")
-                f_ass = executor.submit(fetch_paginated, "assignments")
-                f_leav = executor.submit(fetch_paginated, "leaves")
-                f_pat = executor.submit(fetch_paginated, "recurring_patterns")
-                f_eval = executor.submit(fetch_paginated, "evaluations")
-                f_log = executor.submit(fetch_logs)
+                f_emp = executor.submit(fetch_table_cached, "employees")
+                f_proj = executor.submit(fetch_table_cached, "projects")
+                f_ass = executor.submit(fetch_table_cached, "assignments")
+                f_leav = executor.submit(fetch_table_cached, "leaves")
+                f_pat = executor.submit(fetch_table_cached, "recurring_patterns")
+                f_eval = executor.submit(fetch_table_cached, "evaluations")
+                f_log = executor.submit(fetch_logs_cached)
 
                 st.session_state.employees = f_emp.result()
                 st.session_state.projects = f_proj.result()
@@ -412,8 +406,9 @@ if supabase:
                 st.session_state.activity_logs = f_log.result() or []
                 
             st.session_state.db_last_fetch = time.time()
-            st.session_state.global_db_ts = latest_ts
+            st.session_state.global_db_ts = None
             mark_data_changed()
+            gc.collect() # Καθαρισμός μνήμης μετά το βαρύ load
 else:
     if 'local_data_loaded' not in st.session_state:
         st.session_state.local_data_loaded = True
@@ -510,11 +505,9 @@ def auto_extend_recurring_patterns():
         rid = pat['id']
         latest_date = max_dates.get(rid)
         
-        # Αν δεν βρεθεί παλιά βάρδια (π.χ. σβήστηκαν χειροκίνητα όλες), παίρνουμε την αρχική ημερομηνία έναρξης
         if not latest_date:
             latest_date = pat.get('startDate', today)
             
-        # Επέκταση αν λήγει σε λιγότερο από 30 ημέρες (Προσθέτει +365 μέρες)
         if (latest_date - today).days <= 30:
             start_ext_date = latest_date + timedelta(days=1)
             end_ext_date = start_ext_date + timedelta(days=365)
@@ -590,7 +583,6 @@ def auto_extend_recurring_patterns():
                         new_assignments_batch.append(new_assign)
                         created_for_day += 1
                 
-                # Αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια/διπλοκράτηση, δημιουργούμε μια ΚΕΝΗ βάρδια για να μην χαθεί το έργο!
                 if created_for_day == 0 and emps_to_process != [""]:
                     new_assign = {
                         'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': "",
@@ -605,7 +597,7 @@ def auto_extend_recurring_patterns():
         mark_data_changed()
         if supabase:
             with st.status("Αυτόματη Επέκταση Βαρδιών...", expanded=True) as status:
-                chunk_size = 50 # Μείωση για απόλυτη ασφάλεια στη μνήμη του server
+                chunk_size = 50 
                 has_error = False
                 for i in range(0, len(new_assignments_batch), chunk_size):
                     st.write(f"Αποθήκευση βαρδιών {i+1} έως {min(i+chunk_size, len(new_assignments_batch))}...")
@@ -641,13 +633,6 @@ menu_options = ["Ταμπλό Gantt", "Διαχείριση Έργων", "Ομά
 if st.session_state.get('current_user') == "Admin": menu_options.append("Καταγραφή Κινήσεων")
 menu = st.sidebar.radio("Μενού", menu_options)
 
-# Καθαρισμός μνήμης γραφήματος όταν αλλάζουμε σελίδα (Memory Optimization)
-if menu != "Ταμπλό Gantt":
-    st.session_state.pop('cached_fig', None)
-    st.session_state.pop('cached_wk_groups', None)
-    st.session_state.pop('cached_export_data', None)
-    st.session_state.pop('last_gantt_params', None)
-
 st.sidebar.write("---")
 st.sidebar.subheader("Ενέργειες")
 col_u, col_r = st.sidebar.columns(2)
@@ -668,34 +653,64 @@ st.sidebar.subheader("Κατάσταση Συστήματος")
 def render_system_status():
     if st.session_state.get('is_cloud'):
         st.success(f"✅ Cloud Sync (Real-time)")
-        if st.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            st.session_state.global_db_ts = "force_refresh"
-            st.rerun()
-            
-        # Εδώ το σύστημα ελέγχει αθόρυβα αν κάποιος άλλος έκανε αλλαγή!
+        
+        # Αθόρυβος έλεγχος για αλλαγές από άλλους χρήστες
         if supabase:
             try:
                 res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
                 if res.data:
                     current_latest_ts = res.data[0]['timestamp']
                     my_local_ts = st.session_state.get("global_db_ts")
+                    
                     if my_local_ts and my_local_ts not in ["force_refresh", current_latest_ts]:
-                        st.session_state.global_db_ts = "force_refresh"
-                        st.rerun() # Μόνο τότε ανανεώνει τα πάντα, φέρνοντας τις νέες αλλαγές σε όλους!
+                        # Εάν βρεθεί αλλαγή, καθαρίζει την cache, κατεβάζει παράλληλα, και κάνει ακαριαίο rerun
+                        st.cache_data.clear()
+                        st.toast("Συγχρονισμός αλλαγών...", icon="🔄")
+                        
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+                            f_emp = executor.submit(fetch_table_cached, "employees")
+                            f_proj = executor.submit(fetch_table_cached, "projects")
+                            f_ass = executor.submit(fetch_table_cached, "assignments")
+                            f_leav = executor.submit(fetch_table_cached, "leaves")
+                            f_pat = executor.submit(fetch_table_cached, "recurring_patterns")
+                            f_eval = executor.submit(fetch_table_cached, "evaluations")
+                            f_log = executor.submit(fetch_logs_cached)
+
+                            st.session_state.employees = f_emp.result()
+                            st.session_state.projects = f_proj.result()
+
+                            assigns = f_ass.result()
+                            for a in assigns:
+                                if isinstance(a.get('date'), str):
+                                    a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                            st.session_state.assignments = assigns
+
+                            leaves = f_leav.result()
+                            for l in leaves:
+                                if isinstance(l.get('startDate'), str): l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
+                                if isinstance(l.get('endDate'), str): l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+                            st.session_state.leaves = leaves
+
+                            patterns = f_pat.result()
+                            for p in patterns:
+                                if isinstance(p.get('startDate'), str): p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
+                            st.session_state.recurring_patterns = patterns
+
+                            st.session_state.evaluations = f_eval.result() or []
+                            st.session_state.activity_logs = f_log.result() or []
+
+                        st.session_state.global_db_ts = current_latest_ts
+                        mark_data_changed()
+                        gc.collect()
+                        st.rerun() 
             except Exception:
                 pass
     else:
         st.error("❌ Εκτός Σύνδεσης (Τοπικά)")
         if not SUPABASE_INSTALLED:
             st.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
-        elif not HAS_SECRETS:
-            st.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
-        else:
-            st.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
 
-# Κλήση της ασύγχρονης συνάρτησης στην Sidebar
 render_system_status()
-
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
@@ -778,7 +793,6 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
             row_id = f"day_{i}_row_0"
             day_row_ids.append(row_id)
         else:
-            # 1. ΑΦΑΙΡΕΣΗ ΔΙΠΛΟΤΥΠΩΝ (GHOST SHIFTS) ΑΠΟ ΤΗΝ ΟΘΟΝΗ
             unique_da = {}
             for da in day_assignments:
                 k = f"{da.get('employeeId')}_{da.get('projectId')}_{str(da.get('startTime'))[:5]}_{str(da.get('endTime'))[:5]}"
@@ -856,9 +870,6 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                                 t_pa_end_str = str(pa['endTime'])[:5]
                                 
                                 is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
-                                
-                                # Εμφάνιση "ΜΕΤΑ ΑΠΟ" ΑΥΣΤΗΡΑ και ΜΟΝΟ όταν υπάρχει υπερκάλυψη (overlap)
-                                # ΚΑΙ η τρέχουσα βάρδια τελειώνει αργότερα από την προηγούμενη
                                 if is_overlapping and (t_a_end_str > t_pa_end_str):
                                     prev_assigns.append(pa)
                                 
@@ -1068,7 +1079,39 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     return fig, wk_groups, export_data
 
 
-# --- FRAGMENTS ΓΙΑ ΚΑΤΑΧΩΡΗΣΕΙΣ ---
+# --- FRAGMENTS ΓΙΑ ΚΑΤΑΧΩΡΗΣΕΙΣ ΚΑΙ GANTT ---
+@st.fragment
+def render_gantt_visualization(start_of_week, zoom_factor, presentation_mode, local_version):
+    fig, wk_groups, export_data = generate_gantt_chart(
+        start_of_week, zoom_factor, presentation_mode, local_version,
+        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
+    )
+    
+    st.session_state.cached_fig = fig
+    st.session_state.cached_wk_groups = wk_groups
+    st.session_state.cached_export_data = export_data
+    
+    chart_key = f"gantt_chart_{local_version}"
+    
+    try:
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False}, key=chart_key)
+        new_clicked_key = None
+        if event and "selection" in event:
+            if event["selection"].get("points"):
+                cd = event["selection"]["points"][0].get("customdata", [None])[0]
+                if cd != "Empty":
+                    new_clicked_key = cd
+        
+        # Αν αλλάξει η επιλογή της μπάρας, κάνουμε rerun για να ενημερωθεί η φόρμα Επεξεργασίας κάτω από το γράφημα!
+        if st.session_state.get('clicked_key') != new_clicked_key:
+            st.session_state.clicked_key = new_clicked_key
+            st.rerun()
+            
+    except Exception:
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        
+    return export_data
+
 @st.fragment
 def render_quick_add(selected_date, qa_rc):
     with st.form("quick_add", clear_on_submit=True):
@@ -1357,37 +1400,8 @@ if menu == "Ταμπλό Gantt":
         
     zoom_factor = zoom_level / 100.0
     
-    current_gantt_params = {
-        "week": start_of_week,
-        "zoom": zoom_factor,
-        "presentation": presentation_mode,
-        "local_version": st.session_state.get('local_gantt_version', 0)
-    }
-    
-    fig, wk_groups, export_data = generate_gantt_chart(
-        start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
-        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.emp_map, st.session_state.proj_map
-    )
-    
-    st.session_state.cached_fig = fig
-    st.session_state.cached_wk_groups = wk_groups
-    st.session_state.cached_export_data = export_data
-    st.session_state.last_gantt_params = current_gantt_params
-    
-    clicked_key = None
-    try:
-        # Δυναμικό κλειδί (key) που αναγκάζει το γράφημα να "ανανεώνεται" τέλεια όταν σβήνεις/προσθέτεις κάτι.
-        chart_key = f"gantt_chart_{st.session_state.get('local_gantt_version', 0)}"
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False}, key=chart_key)
-        if event and "selection" in event:
-            if event["selection"].get("points"):
-                cd = event["selection"]["points"][0].get("customdata", [None])[0]
-                if cd != "Empty":
-                    clicked_key = cd
-            else:
-                clicked_key = None
-    except Exception:
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    # Μονώνει το γράφημα σε Fragment για αστραπιαία λειτουργία
+    export_data = render_gantt_visualization(start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0))
     
     hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
     
@@ -1414,6 +1428,9 @@ if menu == "Ταμπλό Gantt":
 
             with col_edit:
                 st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
+                wk_groups = st.session_state.get('cached_wk_groups', {})
+                clicked_key = st.session_state.get('clicked_key')
+                
                 if not wk_groups:
                     st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
                 else:
@@ -2714,5 +2731,5 @@ elif menu == "Καταγραφή Κινήσεων":
         
         st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
 
-# Στο τέλος του κώδικα, καθαρισμός μνήμης για να μην "κλατάρει" ο server
+# Στο τέλος του κώδικα, καθαρισμός μνήμης
 gc.collect()
