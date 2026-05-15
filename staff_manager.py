@@ -223,7 +223,6 @@ def log_activity(action_type, table_name, details_raw):
         "table_name": table_name,
         "details": str(details_raw)[:2000]
     }
-    # Κανονική σειριακή εκτέλεση
     try:
         supabase.table("activity_logs").insert(log_entry).execute()
     except Exception as e:
@@ -327,7 +326,6 @@ if supabase:
     
     force_refresh = st.session_state.get("global_db_ts") == "force_refresh"
     
-    # Λήψη δεδομένων μόνο αν πέρασαν 5 λεπτά Ή αν πατήθηκε Άμεση Ανανέωση
     if force_refresh or "db_last_fetch" not in st.session_state or time.time() - st.session_state.get("db_last_fetch", 0) > CACHE_TTL:
         with st.spinner("Λήψη δεδομένων από τη βάση..."):
             st.session_state.employees = fetch_paginated("employees")
@@ -359,7 +357,6 @@ if supabase:
                 st.session_state.evaluations = []
                 
             try:
-                # Περιορισμός Logs σε 500 εγγραφές
                 st.session_state.activity_logs = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
             except:
                 st.session_state.activity_logs = []
@@ -537,6 +534,10 @@ def auto_extend_recurring_patterns():
                     }
                     new_assignments_batch.append(new_assign)
                     
+                    if d not in st.session_state.assignments_by_date:
+                        st.session_state.assignments_by_date[d] = []
+                    st.session_state.assignments_by_date[d].append(new_assign)
+                    
     if new_assignments_batch:
         st.session_state.assignments.extend(new_assignments_batch)
         mark_data_changed()
@@ -566,6 +567,74 @@ def go_to_today():
 
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
+
+# --- Sidebar Navigation & Actions ---
+st.sidebar.title("STAFF.PRO")
+menu_options = ["Ταμπλό Gantt", "Διαχείριση Έργων", "Ομάδα Προσωπικού", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
+if st.session_state.get('current_user') == "Admin": menu_options.append("Καταγραφή Κινήσεων")
+menu = st.sidebar.radio("Μενού", menu_options)
+
+# Καθαρισμός μνήμης γραφήματος όταν αλλάζουμε σελίδα (Memory Optimization)
+if menu != "Ταμπλό Gantt":
+    st.session_state.pop('cached_fig', None)
+    st.session_state.pop('cached_wk_groups', None)
+    st.session_state.pop('cached_export_data', None)
+    st.session_state.pop('last_gantt_params', None)
+
+st.sidebar.write("---")
+st.sidebar.subheader("Ενέργειες")
+col_u, col_r = st.sidebar.columns(2)
+with col_u:
+    if st.button("↩️ Undo", disabled=len(st.session_state.undo_stack) == 0, use_container_width=True):
+        perform_undo()
+        st.rerun()
+with col_r:
+    if st.button("↪️ Redo", disabled=len(st.session_state.redo_stack) == 0, use_container_width=True):
+        perform_redo()
+        st.rerun()
+
+st.sidebar.write("---")
+st.sidebar.subheader("Κατάσταση Συστήματος")
+if st.session_state.get('is_cloud'):
+    st.sidebar.success(f"✅ Cloud Sync (Real-time)")
+    if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+        st.session_state.global_db_ts = "force_refresh"
+        st.rerun()
+else:
+    st.sidebar.error("❌ Εκτός Σύνδεσης (Τοπικά)")
+    if not SUPABASE_INSTALLED:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
+    elif not HAS_SECRETS:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY) στις ρυθμίσεις του Streamlit.")
+    else:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Υπήρξε σφάλμα κατά τη σύνδεση ή τη φόρτωση από τη βάση. Ελέγξτε αν έχετε απενεργοποιήσει το RLS σε όλους τους πίνακες.")
+
+st.sidebar.write("---")
+st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
+if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
+    st.session_state.authenticated = False
+    st.session_state.current_user = None
+    st.rerun()
+
+# --- ΣΥΣΤΗΜΑ ΕΙΔΟΠΟΙΗΣΕΩΝ (ALERTS) ---
+today_date = date.today()
+orphan_count = 0
+orphan_details = []
+for i in range(8):
+    check_d = today_date + timedelta(days=i)
+    day_assigns = st.session_state.assignments_by_date.get(check_d, [])
+    for a in day_assigns:
+        if not a.get('employeeId') and not a.get('is_cancelled', False):
+            orphan_count += 1
+            proj = get_project_info(a['projectId'])
+            proj_name = proj['name'] if proj else "Άγνωστο Έργο"
+            orphan_details.append(f"• **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {a['startTime'][:5]}-{a['endTime'][:5]} | Έργο: **{proj_name}**")
+
+if orphan_count > 0:
+    st.error(f"🚨 **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
+    with st.expander("👁️ Δείτε αναλυτικά τις ορφανές βάρδιες"):
+        for detail in orphan_details: st.markdown(detail)
+    st.write("---")
 
 # --- GANTT CACHING FUNCTION ---
 @st.cache_data(show_spinner=False)
@@ -728,7 +797,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
                         break
                 if not placed:
                     blue_lanes.append(g['End'])
-                    row_idx = len(blue_lanes) - 1
+                        row_idx = len(blue_lanes) - 1
                 group_row_mapping.append((g, row_idx + num_non_blue_lanes))
 
             for g, row_idx in group_row_mapping:
@@ -1296,7 +1365,7 @@ elif menu == "Ομάδα Προσωπικού":
         if not st.session_state.employees:
             st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
         else:
-            emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", 
+            emp_to_edit_id = st.selectbox("Επιλέ Υπάλληλο για Επεξεργασία", 
                                           options=[e['id'] for e in st.session_state.employees],
                                           format_func=get_employee_name)
             
@@ -1899,7 +1968,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
                 with r_start:
                     r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end:
@@ -2032,12 +2101,13 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         if new_assignments_batch:
                             st.session_state.assignments.extend(new_assignments_batch)
                             if supabase:
-                                def insert_b(b):
+                                with st.status("Καταχώρηση στη βάση...", expanded=True) as status:
                                     chunk_size = 500
-                                    for i in range(0, len(b), chunk_size):
-                                        try: supabase.table('assignments').insert(serialize_dates(b[i:i+chunk_size])).execute()
+                                    for i in range(0, len(new_assignments_batch), chunk_size):
+                                        st.write(f"Συγχρονισμός... ({i+1} έως {min(i+chunk_size, len(new_assignments_batch))})")
+                                        try: supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
                                         except: pass
-                                threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
+                                    status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
                             actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                         add_transaction(actions)
                         st.session_state.rec_reset_counter += 1
@@ -2127,7 +2197,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             with e_arr:
                                 use_arr_rec_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr_rec), key=f"edit_chk_arr_{pat['id']}")
                                 def_arr = datetime.strptime(existing_arr_rec, "%H:%M").time() if existing_arr_rec else datetime.strptime(pat['startTime'][:5], "%H:%M").time()
-                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}")
+                                e_arrival_time = st.time_input("Αλλαγή Προσέλευσης", value=def_arr, key=f"edit_r_arr_time_{pat['id']}", disabled=not use_arr_rec_edit)
                             with e_start:
                                 e_start_time = st.time_input("Αλλαγή Έναρξης", value=datetime.strptime(pat['startTime'][:5], "%H:%M").time(), key=f"edit_r_start_time_{pat['id']}")
                             with e_end:
@@ -2249,12 +2319,13 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     if new_assignments_batch:
                                         st.session_state.assignments.extend(new_assignments_batch)
                                         if supabase:
-                                            def insert_b(b):
+                                            with st.status("Καταχώρηση στη βάση...", expanded=True) as status:
                                                 chunk_size = 500
-                                                for i in range(0, len(b), chunk_size):
-                                                    try: supabase.table('assignments').insert(serialize_dates(b[i:i+chunk_size])).execute()
+                                                for i in range(0, len(new_assignments_batch), chunk_size):
+                                                    st.write(f"Συγχρονισμός... ({i+1} έως {min(i+chunk_size, len(new_assignments_batch))})")
+                                                    try: supabase.table('assignments').insert(serialize_dates(new_assignments_batch[i:i+chunk_size])).execute()
                                                     except: pass
-                                            threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
+                                                status.update(label="Ολοκληρώθηκε!", state="complete", expanded=False)
                                         actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                                     add_transaction(actions)
                                 st.success("Η σειρά εργασιών ενημερώθηκε επιτυχώς! Η σελίδα ανανεώνεται...")
