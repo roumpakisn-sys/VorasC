@@ -2640,4 +2640,49 @@ elif menu == "Αξιολόγηση Προσωπικού":
             if updates_made:
                 st.success("Οι αξιολογήσεις αποθηκεύτηκαν επιτυχώς!")
                 st.rerun()
-            else: st.info("Δεν υ
+            else: st.info("Δεν υπήρξαν αλλαγές για αποθήκευση.")
+
+# --- VIEW: ΚΑΤΑΓΡΑΦΗ ΚΙΝΗΣΕΩΝ (ΜΟΝΟ ADMIN) ---
+elif menu == "Καταγραφή Κινήσεων":
+    st.title("📜 Καταγραφή Κινήσεων (Audit Log)")
+    st.write("Παρακολουθήστε τις ενέργειες όλων των χρηστών στο σύστημα (Δημιουργία, Ενημέρωση, Διαγραφή).")
+    
+    col_b1, col_b2 = st.columns([1, 4])
+    with col_b1:
+        if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True):
+            st.session_state.global_db_ts = "force_refresh"
+            st.rerun()
+    with col_b2:
+        if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
+            if supabase and st.session_state.activity_logs:
+                try:
+                    log_ids = [l['id'] for l in st.session_state.activity_logs]
+                    chunk_size = 500
+                    for i in range(0, len(log_ids), chunk_size):
+                        supabase.table('activity_logs').delete().in_('id', log_ids[i:i+chunk_size]).execute()
+                    st.session_state.activity_logs = []
+                    st.session_state.global_db_ts = "force_refresh"
+                    st.success("Το ιστορικό καθαρίστηκε!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Σφάλμα καθαρισμού: {e}")
+
+    if not st.session_state.activity_logs:
+        st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
+    else:
+        sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
+        TABLE_NAMES_GR = {'employees': 'Προσωπικό', 'projects': 'Έργα', 'assignments': 'Βάρδιες', 'leaves': 'Άδειες', 'recurring_patterns': 'Επαν. Εργασίες', 'evaluations': 'Αξιολογήσεις'}
+        
+        log_data = []
+        for log in sorted_logs:
+            try: dt_str = datetime.fromisoformat(log.get('timestamp', '')).strftime("%d/%m/%Y %H:%M:%S")
+            except: dt_str = log.get('timestamp', '')
+            table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
+            details_safe = parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
+            log_data.append({"Ημερομηνία/Ώρα": dt_str, "Χρήστης": log.get('username', '-'), "Ενέργεια": log.get('action_type', '-'), "Πίνακας (Στοιχείο)": table_gr, "Λεπτομέρειες": details_safe})
+        
+        st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+
+# Στο τέλος του κώδικα, καθαρισμός μνήμης για να μην "κλατάρει" ο server
+gc.collect()
