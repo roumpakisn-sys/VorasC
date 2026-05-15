@@ -907,12 +907,12 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         else:
             y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
 
-    fig.update_yaxes(
-        categoryorder='array', categoryarray=ordered_categories, tickmode='array', 
-        tickvals=ordered_categories, ticktext=[tickvals_map[v] for v in ordered_categories],
-        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1 
-    )
-    
+        fig.update_yaxes(
+            categoryorder='array', categoryarray=ordered_categories, tickmode='array', 
+            tickvals=ordered_categories, ticktext=[tickvals_map[v] for v in ordered_categories],
+            showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1 
+        )
+        
         fig.update_traces(
             textposition='inside', insidetextanchor='middle',
             textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
