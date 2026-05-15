@@ -940,6 +940,25 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         for idx, rid in enumerate(day_row_ids):
             tickvals_map[rid] = base_y_label if idx == mid_idx else ""
             
+    # --- ΠΡΟΣΘΗΚΗ ΑΟΡΑΤΟΥ ΦΟΝΤΟΥ ΓΙΑ ΔΟΜΗ ΚΑΙ ΑΠΟΕΠΙΛΟΓΗ ---
+    bg_data = []
+    for rid in y_category_order:
+        bg_data.append({
+            'Y_Axis': rid,
+            'Έργο': 'Κενό',
+            'Έναρξη': datetime(1970, 1, 1, 0, 0),
+            'Λήξη': datetime(1970, 1, 1, 23, 59),
+            'Προσωπικό': '',
+            'Προσέλευση': '',
+            'Παρατηρήσεις': '',
+            'Ετικέτα': '',
+            'LegendGroup': 'Κενό',
+            'ColorHex': 'rgba(0,0,0,0)',
+            'GroupKey': 'Empty'
+        })
+    color_map['Κενό'] = 'rgba(0,0,0,0)'
+    data = bg_data + data
+
     df = pd.DataFrame(data)
     ordered_categories = y_category_order[::-1]
     
@@ -996,6 +1015,12 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         hoverinfo='none', hovertemplate=None,
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
+    
+    # Εξαφάνιση hoverinfo για το αόρατο κενό φόντο
+    for trace in fig.data:
+        if trace.name == 'Κενό':
+            trace.marker.line.width = 0
+            trace.hoverinfo = 'skip'
     
     fig.update_layout(
         bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
@@ -2615,49 +2640,4 @@ elif menu == "Αξιολόγηση Προσωπικού":
             if updates_made:
                 st.success("Οι αξιολογήσεις αποθηκεύτηκαν επιτυχώς!")
                 st.rerun()
-            else: st.info("Δεν υπήρξαν αλλαγές για αποθήκευση.")
-
-# --- VIEW: ΚΑΤΑΓΡΑΦΗ ΚΙΝΗΣΕΩΝ (ΜΟΝΟ ADMIN) ---
-elif menu == "Καταγραφή Κινήσεων":
-    st.title("📜 Καταγραφή Κινήσεων (Audit Log)")
-    st.write("Παρακολουθήστε τις ενέργειες όλων των χρηστών στο σύστημα (Δημιουργία, Ενημέρωση, Διαγραφή).")
-    
-    col_b1, col_b2 = st.columns([1, 4])
-    with col_b1:
-        if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True):
-            st.session_state.global_db_ts = "force_refresh"
-            st.rerun()
-    with col_b2:
-        if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
-            if supabase and st.session_state.activity_logs:
-                try:
-                    log_ids = [l['id'] for l in st.session_state.activity_logs]
-                    chunk_size = 500
-                    for i in range(0, len(log_ids), chunk_size):
-                        supabase.table('activity_logs').delete().in_('id', log_ids[i:i+chunk_size]).execute()
-                    st.session_state.activity_logs = []
-                    st.session_state.global_db_ts = "force_refresh"
-                    st.success("Το ιστορικό καθαρίστηκε!")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Σφάλμα καθαρισμού: {e}")
-
-    if not st.session_state.activity_logs:
-        st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
-    else:
-        sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
-        TABLE_NAMES_GR = {'employees': 'Προσωπικό', 'projects': 'Έργα', 'assignments': 'Βάρδιες', 'leaves': 'Άδειες', 'recurring_patterns': 'Επαν. Εργασίες', 'evaluations': 'Αξιολογήσεις'}
-        
-        log_data = []
-        for log in sorted_logs:
-            try: dt_str = datetime.fromisoformat(log.get('timestamp', '')).strftime("%d/%m/%Y %H:%M:%S")
-            except: dt_str = log.get('timestamp', '')
-            table_gr = TABLE_NAMES_GR.get(log.get('table_name', ''), log.get('table_name', '-'))
-            details_safe = parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
-            log_data.append({"Ημερομηνία/Ώρα": dt_str, "Χρήστης": log.get('username', '-'), "Ενέργεια": log.get('action_type', '-'), "Πίνακας (Στοιχείο)": table_gr, "Λεπτομέρειες": details_safe})
-        
-        st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
-
-# Στο τέλος του κώδικα, καθαρισμός μνήμης για να μην "κλατάρει" ο server
-gc.collect()
+            else: st.info("Δεν υ
