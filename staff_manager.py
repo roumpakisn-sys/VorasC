@@ -121,23 +121,12 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- ΣΥΣΤΗΜΑ UNDO / REDO ---
-if "undo_stack" not in st.session_state: st.session_state.undo_stack = []
-if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
-
-def add_transaction(actions):
-    # Deepcopy για να αποθηκεύεται ακριβώς το state εκείνης της στιγμής, λύνοντας το Undo bug!
-    actions_copy = copy.deepcopy(actions)
-    st.session_state.undo_stack.append(actions_copy)
-    st.session_state.redo_stack.clear()
-    if len(st.session_state.undo_stack) > 5:
-        st.session_state.undo_stack.pop(0)
-
-# --- SELECTIVE FETCHING & CACHING ---
-CACHE_TTL = 45 # Caching 45 δευτερολέπτων για να μην πέφτει ο server
+# --- SELECTIVE FETCHING & CACHING (30-60s TTL) ---
+CACHE_TTL = 45 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def fetch_table_cached(table):
+def fetch_paginated(table):
+    """Βελτιστοποιημένη λήψη με Pagination, Caching και απόλυτη σειρά (order by id)."""
     if not supabase: return []
     all_rows = []
     offset = 0
@@ -155,7 +144,7 @@ def fetch_table_cached(table):
     return all_rows
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def fetch_logs_cached():
+def fetch_logs():
     if not supabase: return []
     try:
         return supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
@@ -165,8 +154,9 @@ def fetch_logs_cached():
 def mark_data_changed():
     st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
     st.session_state.data_dirty = True
-    # Καθαρίζει την cache ρητά ώστε το επόμενο fetch να φέρει τα φρέσκα δεδομένα!
-    st.cache_data.clear() 
+    # Καθαρίζει ρητά την cache της βάσης για να περάσουν αμέσως οι νέες αλλαγές
+    fetch_paginated.clear() 
+    fetch_logs.clear()
 
 def serialize_dates(data):
     if isinstance(data, list):
@@ -254,12 +244,95 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
-# Όλες οι DB συναρτήσεις είναι Σειριακές
+# --- ΣΥΣΤΗΜΑ UNDO / REDO ΜΕ ΑΠΕΥΘΕΙΑΣ SUPABASE QUERIES ---
+if "undo_stack" not in st.session_state: st.session_state.undo_stack = []
+if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
+
+def add_transaction(actions):
+    actions_copy = copy.deepcopy(actions)
+    st.session_state.undo_stack.append(actions_copy)
+    st.session_state.redo_stack.clear()
+    if len(st.session_state.undo_stack) > 5:
+        st.session_state.undo_stack.pop(0)
+
+def perform_undo():
+    if not st.session_state.undo_stack: return
+    transaction = st.session_state.undo_stack.pop()
+    st.session_state.redo_stack.append(copy.deepcopy(transaction))
+    
+    for act in reversed(transaction):
+        table = act['table']
+        if act['type'] == 'insert':
+            ids_to_del = [r['id'] for r in act['records']]
+            if supabase:
+                for i in range(0, len(ids_to_del), 50):
+                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
+                log_activity("UNDO - ΔΙΑΓΡΑΦΗ", table, f"Αναίρεση προσθήκης ({len(ids_to_del)} εγγραφές)")
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
+            
+        elif act['type'] == 'delete':
+            recs_to_add = copy.deepcopy(act['records'])
+            if supabase:
+                for i in range(0, len(recs_to_add), 50):
+                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
+                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ", table, format_log_details(table, recs_to_add))
+            st.session_state[table].extend(recs_to_add)
+            
+        elif act['type'] == 'update':
+            old_recs = copy.deepcopy(act['old_records'])
+            if supabase:
+                for old_r in old_recs:
+                    supabase.table(table).update(serialize_dates(old_r)).eq('id', old_r['id']).execute()
+                log_activity("UNDO - ΕΠΑΝΑΦΟΡΑ ΕΝΗΜΕΡΩΣΗΣ", table, format_log_details(table, old_recs))
+            
+            upd_map = {r['id']: r for r in old_recs}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
+
+    mark_data_changed()
+    st.session_state.global_db_ts = "force_refresh"
+
+def perform_redo():
+    if not st.session_state.redo_stack: return
+    transaction = st.session_state.redo_stack.pop()
+    st.session_state.undo_stack.append(copy.deepcopy(transaction))
+    
+    for act in transaction:
+        table = act['table']
+        if act['type'] == 'insert':
+            recs_to_add = copy.deepcopy(act['records'])
+            if supabase:
+                for i in range(0, len(recs_to_add), 50):
+                    supabase.table(table).insert(serialize_dates(recs_to_add[i:i+50])).execute()
+                log_activity("REDO - ΠΡΟΣΘΗΚΗ", table, format_log_details(table, recs_to_add))
+            st.session_state[table].extend(recs_to_add)
+            
+        elif act['type'] == 'delete':
+            ids_to_del = [r['id'] for r in act['records']]
+            if supabase:
+                for i in range(0, len(ids_to_del), 50):
+                    supabase.table(table).delete().in_('id', ids_to_del[i:i+50]).execute()
+                log_activity("REDO - ΔΙΑΓΡΑΦΗ", table, f"Διαγραφή {len(ids_to_del)} εγγραφών")
+            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids_to_del]
+            
+        elif act['type'] == 'update':
+            new_recs = copy.deepcopy(act['new_records'])
+            if supabase:
+                for new_r in new_recs:
+                    supabase.table(table).update(serialize_dates(new_r)).eq('id', new_r['id']).execute()
+                log_activity("REDO - ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_recs))
+                
+            upd_map = {r['id']: r for r in new_recs}
+            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
+
+    mark_data_changed()
+    st.session_state.global_db_ts = "force_refresh"
+
+# Κανονικές συναρτήσεις DB (Δημιουργούν Transactions για Undo)
 def db_insert(table, data, track=True):
     mark_data_changed()
     records = data if isinstance(data, list) else [data]
     if track:
-        add_transaction([{'type': 'insert', 'table': table, 'records': records}])
+        add_transaction([{'type': 'insert', 'table': table, 'records': copy.deepcopy(records)}])
     if supabase:
         try:
             supabase.table(table).insert(serialize_dates(records)).execute()
@@ -273,7 +346,7 @@ def db_delete(table, column, value, deleted_records=None, track=True):
         table_data = st.session_state.get(table, [])
         deleted_records = [r for r in table_data if r.get(column) == value]
     if track and deleted_records:
-        add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+        add_transaction([{'type': 'delete', 'table': table, 'records': copy.deepcopy(deleted_records)}])
     if supabase:
         try:
             supabase.table(table).delete().eq(column, value).execute()
@@ -288,7 +361,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             table_data = st.session_state.get(table, [])
             deleted_records = [r for r in table_data if r.get(column) in values]
         if track and deleted_records:
-            add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
+            add_transaction([{'type': 'delete', 'table': table, 'records': copy.deepcopy(deleted_records)}])
         if supabase:
             chunk_size = 50 
             for i in range(0, len(values), chunk_size):
@@ -304,7 +377,7 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
         table_data = st.session_state.get(table, [])
         old_data = next((r for r in table_data if r.get('id') == id_val), None)
     if track and old_data:
-        add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
+        add_transaction([{'type': 'update', 'table': table, 'old_records': [copy.deepcopy(old_data)], 'new_records': [copy.deepcopy(new_data)]}])
     if supabase:
         try:
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
@@ -312,72 +385,30 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
-def perform_undo():
-    if not st.session_state.undo_stack: return
-    transaction = st.session_state.undo_stack.pop()
-    st.session_state.redo_stack.append(copy.deepcopy(transaction))
-    st.cache_data.clear()
-    
-    for act in reversed(transaction):
-        table = act['table']
-        if act['type'] == 'insert':
-            ids = [r['id'] for r in act['records']]
-            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids]
-            db_delete_in(table, 'id', ids, track=False)
-        elif act['type'] == 'delete':
-            st.session_state[table].extend(act['records'])
-            db_insert(table, act['records'], track=False)
-        elif act['type'] == 'update':
-            upd_map = {r['id']: r for r in act['old_records']}
-            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
-            for old_r in act['old_records']:
-                db_update(table, old_r['id'], old_r, track=False)
-    mark_data_changed()
-
-def perform_redo():
-    if not st.session_state.redo_stack: return
-    transaction = st.session_state.redo_stack.pop()
-    st.session_state.undo_stack.append(copy.deepcopy(transaction))
-    st.cache_data.clear()
-    
-    for act in transaction:
-        table = act['table']
-        if act['type'] == 'insert':
-            st.session_state[table].extend(act['records'])
-            db_insert(table, act['records'], track=False)
-        elif act['type'] == 'delete':
-            ids = [r['id'] for r in act['records']]
-            st.session_state[table] = [r for r in st.session_state.get(table, []) if r['id'] not in ids]
-            db_delete_in(table, 'id', ids, track=False)
-        elif act['type'] == 'update':
-            upd_map = {r['id']: r for r in act['new_records']}
-            st.session_state[table] = [upd_map.get(r['id'], r) for r in st.session_state.get(table, [])]
-            for new_r in act['new_records']:
-                db_update(table, new_r['id'], new_r, track=False)
-    mark_data_changed()
-
 BASIC_COLORS = {
     "Μπλε": "#4a86e8", "Κόκκινο": "#e00000", "Πράσινο": "#6aa84f", "Κίτρινο": "#f1c232",
     "Μωβ": "#8e7cc3", "Πορτοκαλί": "#e69138", "Γαλάζιο": "#00ffff", "Ροζ": "#c90076",
     "Σκούρο Πράσινο": "#38761d", "Γκρι": "#999999"
 }
 
-# --- ΑΣΦΑΛΗΣ ΑΡΧΙΚΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ---
+# --- ΑΣΦΑΛΗΣ ΑΡΧΙΚΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ΟΛΩΝ ΤΩΝ ΔΕΔΟΜΕΝΩΝ ---
 if supabase:
     st.session_state.is_cloud = True
     force_refresh = st.session_state.get("global_db_ts") == "force_refresh"
     
     if force_refresh or "db_last_fetch" not in st.session_state:
-        st.cache_data.clear()
-        with st.spinner("Λήψη δεδομένων από τη βάση..."):
+        fetch_paginated.clear()
+        fetch_logs.clear()
+        
+        with st.spinner("Πλήρης αρχικός συγχρονισμός δεδομένων από τη βάση..."):
             with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-                f_emp = executor.submit(fetch_table_cached, "employees")
-                f_proj = executor.submit(fetch_table_cached, "projects")
-                f_ass = executor.submit(fetch_table_cached, "assignments")
-                f_leav = executor.submit(fetch_table_cached, "leaves")
-                f_pat = executor.submit(fetch_table_cached, "recurring_patterns")
-                f_eval = executor.submit(fetch_table_cached, "evaluations")
-                f_log = executor.submit(fetch_logs_cached)
+                f_emp = executor.submit(fetch_paginated, "employees")
+                f_proj = executor.submit(fetch_paginated, "projects")
+                f_ass = executor.submit(fetch_paginated, "assignments")
+                f_leav = executor.submit(fetch_paginated, "leaves")
+                f_pat = executor.submit(fetch_paginated, "recurring_patterns")
+                f_eval = executor.submit(fetch_paginated, "evaluations")
+                f_log = executor.submit(fetch_logs)
 
                 st.session_state.employees = f_emp.result()
                 st.session_state.projects = f_proj.result()
@@ -406,9 +437,10 @@ if supabase:
                 st.session_state.activity_logs = f_log.result() or []
                 
             st.session_state.db_last_fetch = time.time()
+            st.session_state.emp_last_fetch = time.time() # Timer για το Selective Fetch
             st.session_state.global_db_ts = None
             mark_data_changed()
-            gc.collect() # Καθαρισμός μνήμης μετά το βαρύ load
+            gc.collect() 
 else:
     if 'local_data_loaded' not in st.session_state:
         st.session_state.local_data_loaded = True
@@ -505,9 +537,11 @@ def auto_extend_recurring_patterns():
         rid = pat['id']
         latest_date = max_dates.get(rid)
         
+        # Αν δεν βρεθεί παλιά βάρδια (π.χ. σβήστηκαν χειροκίνητα όλες), παίρνουμε την αρχική ημερομηνία έναρξης
         if not latest_date:
             latest_date = pat.get('startDate', today)
             
+        # Επέκταση αν λήγει σε λιγότερο από 30 ημέρες (Προσθέτει +365 μέρες)
         if (latest_date - today).days <= 30:
             start_ext_date = latest_date + timedelta(days=1)
             end_ext_date = start_ext_date + timedelta(days=365)
@@ -583,6 +617,7 @@ def auto_extend_recurring_patterns():
                         new_assignments_batch.append(new_assign)
                         created_for_day += 1
                 
+                # Αν όλοι οι επιλεγμένοι υπάλληλοι είχαν άδεια/διπλοκράτηση, δημιουργούμε μια ΚΕΝΗ βάρδια για να μην χαθεί το έργο!
                 if created_for_day == 0 and emps_to_process != [""]:
                     new_assign = {
                         'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': "",
@@ -649,12 +684,16 @@ st.sidebar.write("---")
 st.sidebar.subheader("Κατάσταση Συστήματος")
 
 # ΠΑΝΕΞΥΠΝΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ΠΡΑΓΜΑΤΙΚΟΥ ΧΡΟΝΟΥ (REAL-TIME FRAGMENT)
-@st.fragment(run_every=timedelta(seconds=10))
+@st.fragment(run_every=timedelta(seconds=15))
 def render_system_status():
     if st.session_state.get('is_cloud'):
         st.success(f"✅ Cloud Sync (Real-time)")
         
-        # Αθόρυβος έλεγχος για αλλαγές από άλλους χρήστες
+        if st.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+            st.session_state.global_db_ts = "force_refresh"
+            st.rerun()
+        
+        # Αθόρυβος έλεγχος (Polling) για αλλαγές από άλλους χρήστες
         if supabase:
             try:
                 res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
@@ -663,45 +702,36 @@ def render_system_status():
                     my_local_ts = st.session_state.get("global_db_ts")
                     
                     if my_local_ts and my_local_ts not in ["force_refresh", current_latest_ts]:
-                        # Εάν βρεθεί αλλαγή, καθαρίζει την cache, κατεβάζει παράλληλα, και κάνει ακαριαίο rerun
-                        st.cache_data.clear()
+                        # SELECTIVE FETCHING: Κατεβάζουμε ΜΟΝΟ τα δυναμικά δεδομένα αθόρυβα
+                        fetch_paginated.clear() 
+                        fetch_logs.clear()
                         st.toast("Συγχρονισμός αλλαγών...", icon="🔄")
                         
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-                            f_emp = executor.submit(fetch_table_cached, "employees")
-                            f_proj = executor.submit(fetch_table_cached, "projects")
-                            f_ass = executor.submit(fetch_table_cached, "assignments")
-                            f_leav = executor.submit(fetch_table_cached, "leaves")
-                            f_pat = executor.submit(fetch_table_cached, "recurring_patterns")
-                            f_eval = executor.submit(fetch_table_cached, "evaluations")
-                            f_log = executor.submit(fetch_logs_cached)
+                        # Fetch Assignments αστραπιαία
+                        assigns = fetch_paginated("assignments")
+                        for a in assigns:
+                            if isinstance(a.get('date'), str):
+                                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                        st.session_state.assignments = assigns
+                        
+                        # Προαιρετικά φέρνουμε και τις άδειες αν άλλαξαν
+                        leaves = fetch_paginated("leaves")
+                        for l in leaves:
+                            if isinstance(l.get('startDate'), str): l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
+                            if isinstance(l.get('endDate'), str): l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+                        st.session_state.leaves = leaves
 
-                            st.session_state.employees = f_emp.result()
-                            st.session_state.projects = f_proj.result()
-
-                            assigns = f_ass.result()
-                            for a in assigns:
-                                if isinstance(a.get('date'), str):
-                                    a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-                            st.session_state.assignments = assigns
-
-                            leaves = f_leav.result()
-                            for l in leaves:
-                                if isinstance(l.get('startDate'), str): l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-                                if isinstance(l.get('endDate'), str): l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-                            st.session_state.leaves = leaves
-
-                            patterns = f_pat.result()
-                            for p in patterns:
-                                if isinstance(p.get('startDate'), str): p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-                            st.session_state.recurring_patterns = patterns
-
-                            st.session_state.evaluations = f_eval.result() or []
-                            st.session_state.activity_logs = f_log.result() or []
+                        # Ενημέρωση Employees & Projects (Στατικά) ΜΟΝΟ αν πέρασαν 10 λεπτά (600s)
+                        now = time.time()
+                        if "emp_last_fetch" not in st.session_state or now - st.session_state.emp_last_fetch > 600:
+                            st.session_state.employees = fetch_paginated("employees")
+                            st.session_state.projects = fetch_paginated("projects")
+                            st.session_state.recurring_patterns = fetch_paginated("recurring_patterns")
+                            st.session_state.emp_last_fetch = now
 
                         st.session_state.global_db_ts = current_latest_ts
                         mark_data_changed()
-                        gc.collect()
+                        gc.collect() # Καθαρίζουμε τη μνήμη για να μην κρασάρει ο server
                         st.rerun() 
             except Exception:
                 pass
@@ -711,6 +741,7 @@ def render_system_status():
             st.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Το Streamlit δεν διάβασε το requirements.txt. Κάνε Reboot την εφαρμογή.")
 
 render_system_status()
+
 
 st.sidebar.write("---")
 st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
@@ -793,6 +824,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
             row_id = f"day_{i}_row_0"
             day_row_ids.append(row_id)
         else:
+            # 1. ΑΦΑΙΡΕΣΗ ΔΙΠΛΟΤΥΠΩΝ (GHOST SHIFTS) ΑΠΟ ΤΗΝ ΟΘΟΝΗ
             unique_da = {}
             for da in day_assignments:
                 k = f"{da.get('employeeId')}_{da.get('projectId')}_{str(da.get('startTime'))[:5]}_{str(da.get('endTime'))[:5]}"
