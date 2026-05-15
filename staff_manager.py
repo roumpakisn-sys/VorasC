@@ -1205,11 +1205,13 @@ def render_quick_add(selected_date, qa_rc):
                 if errors:
                     for err in errors: st.error(err)
                 else:
+                    actions = []
                     if custom_proj_name.strip():
                         final_proj_id = str(uuid.uuid4())
                         new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': BASIC_COLORS[color_choice]}
                         st.session_state.projects.append(new_p)
                         db_insert('projects', new_p, track=False)
+                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                     else:
                         final_proj_id = proj_choice
                         
@@ -1237,6 +1239,11 @@ def render_quick_add(selected_date, qa_rc):
                         st.session_state.assignments.append(new_assign)
                     
                     db_insert("assignments", new_assigns, track=False)
+                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                    
+                    if actions:
+                        add_transaction(actions)
+                        
                     st.success("Η ανάθεση ολοκληρώθηκε!")
                     st.session_state.qa_rc += 1
                     st.rerun()
@@ -1295,8 +1302,12 @@ def render_edit_assignment(target_group, edit_date, default_proj_idx, proj_ids):
             new_assigns.append(new_a)
             
         if not has_error:
+            actions = []
             for old_a, new_a in zip(old_assigns, new_assigns):
                 db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
+                actions.append({'type': 'update', 'table': 'assignments', 'old_records': [old_a], 'new_records': [new_a]})
+            if actions:
+                add_transaction(actions)
             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
             st.session_state.assignments.extend(new_assigns)
             st.rerun()
@@ -1380,17 +1391,20 @@ def render_edit_assignment(target_group, edit_date, default_proj_idx, proj_ids):
                 if errors:
                     for err in errors: st.error(err)
                 else:
+                    actions = []
                     if edit_custom_proj_name.strip():
                         final_edit_proj_id = str(uuid.uuid4())
                         new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': BASIC_COLORS[edit_color]}
                         st.session_state.projects.append(new_p)
                         db_insert('projects', new_p, track=False)
+                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                     else:
                         final_edit_proj_id = edit_proj
                         
                     old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                     db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
+                    actions.append({'type': 'delete', 'table': 'assignments', 'records': old_assigns})
                     
                     new_assigns = []
                     for va in valid_assignments:
@@ -1404,6 +1418,10 @@ def render_edit_assignment(target_group, edit_date, default_proj_idx, proj_ids):
                         new_assigns.append(new_a)
                         st.session_state.assignments.append(new_a)
                     db_insert('assignments', new_assigns, track=False)
+                    actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assigns})
+                    
+                    if actions:
+                        add_transaction(actions)
                     st.rerun()
 
 # --- ΚΛΗΣΗ ΓΡΑΦΗΜΑΤΟΣ (ΜΟΝΟ ΟΤΑΝ ΕΙΝΑΙ ΣΤΗ ΣΕΛΙΔΑ) ---
