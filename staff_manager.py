@@ -126,7 +126,7 @@ if "redo_stack" not in st.session_state: st.session_state.redo_stack = []
 def add_transaction(actions):
     st.session_state.undo_stack.append(actions)
     st.session_state.redo_stack.clear()
-    if len(st.session_state.undo_stack) > 3:
+    if len(st.session_state.undo_stack) > 5:
         st.session_state.undo_stack.pop(0)
 
 # --- SELECTIVE FETCHING & CACHING ---
