@@ -4,6 +4,10 @@ import plotly.express as px
 from datetime import datetime, date, timedelta
 import gc
 import textwrap
+import io
+import uuid
+import calendar
+import time
 
 # Κάνουμε import τον "κινητήρα" μας
 import database as db
@@ -15,9 +19,26 @@ if not st.session_state.get('current_user'):
     st.warning("⚠️ Παρακαλώ συνδεθείτε από την αρχική σελίδα για να δείτε το ταμπλό.")
     st.stop()
 
-st.title("📊 Ταμπλό Gantt & Βάρδιες")
-st.write("Σύνδεση με την υπάρχουσα βάση δεδομένων: Ενεργή (Legacy Mode)")
-st.write("---")
+st.title("🏢 Staff Manager Pro - Χρονοδιάγραμμα")
+
+# CSS για την αισθητική του παλιού project
+st.markdown("""
+<style>
+    .stPlotlyChart {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+    }
+    .leave-conflict-box {
+        padding: 12px;
+        border-radius: 8px;
+        background-color: #fee2e2;
+        border: 1px solid #ef4444;
+        margin-bottom: 8px;
+        color: #b91c1c;
+        font-weight: 500;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Βασικά χρώματα συστήματος
 BASIC_COLORS = {
@@ -48,143 +69,121 @@ def go_to_today():
 if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
 
-# ==========================================
-# 3. ΦΟΡΜΑ ΓΡΗΓΟΡΗΣ ΚΑΤΑΧΩΡΗΣΗΣ
-# ==========================================
-@st.fragment
-def quick_add_assignment():
-    with st.expander("➕ Γρήγορη Καταχώρηση Βάρδιας", expanded=False):
-        with st.form("quick_add_form"):
-            col1, col2, col3 = st.columns(3)
-            
-            emps = db.fetch_paginated('employees')
-            projs = db.fetch_paginated('projects')
-            
-            emp_names = [e['name'] for e in emps] if emps else []
-            proj_names = [p['name'] for p in projs] if projs else []
-            
-            with col1:
-                sel_emp = st.selectbox("Εργαζόμενος", [""] + emp_names)
-                start_d = st.date_input("Ημερομηνία", st.session_state.view_week_date)
-            with col2:
-                sel_proj = st.selectbox("Έργο", proj_names)
-                t_start = st.time_input("Έναρξη", datetime.strptime("09:00", "%H:%M").time())
-            with col3:
-                t_end = st.time_input("Λήξη", datetime.strptime("17:00", "%H:%M").time())
-                notes = st.text_input("Σημειώσεις")
-            
-            submit = st.form_submit_button("Καταχώρηση")
-            
-            if submit and sel_proj:
-                try:
-                    emp_id = next((e['id'] for e in emps if e['name'] == sel_emp), None)
-                    proj_id = next(p['id'] for p in projs if p['name'] == sel_proj)
-                    proj_info = next(p for p in projs if p['id'] == proj_id)
-                    
-                    new_data = {
-                        'employeeId': emp_id,
-                        'projectId': proj_id,
-                        'startTime': t_start.strftime("%H:%M"),
-                        'endTime': t_end.strftime("%H:%M"),
-                        'date': start_d.isoformat(),
-                        'notes': notes,
-                        'colorHex': proj_info.get('color', '#4a86e8'),
-                        'is_cancelled': False
-                    }
-                    
-                    supabase = db.init_supabase()
-                    res = supabase.table('assignments').insert(new_data).execute()
-                    
-                    if res.data:
-                        db.log_activity("ΠΡΟΣΘΗΚΗ", "assignments", f"Νέα βάρδια στο έργο {sel_proj}", st.session_state.current_user)
-                        st.success("Η βάρδια καταχωρήθηκε!")
-                        db.fetch_paginated.clear() 
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Σφάλμα: {e}")
+def get_employee_name(emp_id, employees_list):
+    if not emp_id: return "Χωρίς Προσωπικό"
+    emp = next((e for e in employees_list if e['id'] == emp_id), None)
+    return emp['name'] if emp else "Άγνωστος"
+
+def get_project_info(proj_id, projects_list):
+    return next((p for p in projects_list if p['id'] == proj_id), None)
 
 # ==========================================
-# 4. ΔΙΑΓΡΑΜΜΑ GANTT (EXCEL-STYLE / PDF REPLICA)
+# 3. ΚΥΡΙΑ ΠΡΟΒΟΛΗ GANTT
 # ==========================================
-@st.fragment
-def render_gantt_chart():
-    # Ρυθμίσεις Εβδομάδας
-    selected_date = st.session_state.view_week_date
-    start_of_week = selected_date - timedelta(days=selected_date.weekday())
+def render_dashboard():
+    # 3.1 Nav Bar
+    col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
     
-    col_nav1, col_date, col_nav2, col_today = st.columns([1, 2, 1, 1])
-    with col_nav1: st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
-    with col_date: st.date_input("Εβδομάδα από:", value=start_of_week, key="week_picker", disabled=True)
-    with col_nav2: st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
-    with col_today: st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
+    with col_nav1:
+        st.write("")
+        st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
+    
+    with col_date:
+        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
+        start_of_week = selected_date - timedelta(days=selected_date.weekday())
+    
+    with col_nav2:
+        st.write("")
+        st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
+        
+    with col_today:
+        st.write("")
+        st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 
-    # Φόρτωση Δεδομένων
+    with col_zoom:
+        zoom_level = st.slider("🔍 Ζουμ (%)", min_value=50, max_value=200, value=100, step=5)
+        zoom_factor = zoom_level / 100.0
+
+    with col_pres:
+        st.write("")
+        st.write("")
+        presentation_mode = st.checkbox("📽️ Λειτουργία Παρουσίασης")
+
+    # 3.2 Φόρτωση Δεδομένων
     assignments = db.fetch_paginated('assignments')
     employees = db.fetch_paginated('employees')
     projects = db.fetch_paginated('projects')
     leaves = db.fetch_paginated('leaves')
     
     if not assignments:
-        st.info("Δεν βρέθηκαν βάρδιες για προβολή.")
+        st.info("Δεν βρέθηκαν βάρδιες στη βάση δεδομένων.")
         return
 
-    # Προετοιμασία DataFrames
     df_assign = pd.DataFrame(assignments)
-    df_emp = pd.DataFrame(employees)
-    df_proj = pd.DataFrame(projects)
     
-    emp_map = {e['id']: e['name'] for e in employees}
-    proj_map = {p['id']: p for p in projects}
-
-    # Λογική Δημιουργίας Γραφήματος (Από PDF)
-    chart_data = []
+    # 3.3 Λογική Επεξεργασίας Δεδομένων (Πλήρης PDF Replica)
+    data = []
+    export_data = []
+    color_map = {}
     y_category_order = []
     tickvals_map = {}
-    color_map = {}
+    wk_groups = {}
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         curr_date_iso = curr_date.isoformat()
+        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         
-        # 1. Εύρεση Αδειών Ημέρας
+        # Εύρεση Αδειών
         leaves_today = [l for l in leaves if l['startDate'] <= curr_date_iso <= l['endDate']]
-        leaves_text = "<br>".join([emp_map.get(l['employeeId'], 'Άγνωστος') for l in leaves_today]) if leaves_today else "Καμία"
+        leaves_list = []
+        for l in leaves_today:
+            emp_name = get_employee_name(l['employeeId'], employees)
+            leaves_list.append(f"<b>{emp_name}</b>")
         
-        # Ετικέτα Άξονα Υ (Ημέρα + Άδειες)
-        base_y_label = f"<b>{day_str}</b><br><span style='font-size:10px; color:#d32f2f;'>Άδειες: {leaves_text}</span>"
+        leaves_str = "<br>".join(leaves_list) if leaves_list else "Καμία"
+        base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
         
-        # 2. Φιλτράρισμα Βαρδιών Ημέρας
-        day_assignments = df_assign[df_assign['date'] == curr_date_iso].to_dict('records')
+        # Φιλτράρισμα Βαρδιών
+        day_assigns = df_assign[df_assign['date'] == curr_date_iso].to_dict('records')
         
-        # Ομαδοποίηση βαρδιών που είναι ίδιες (ίδιο έργο, ίδια ώρα) για να μπουν στην ίδια μπάρα
+        # Ομαδοποίηση
         groups = {}
-        for a in day_assignments:
-            key = f"{a['projectId']}_{a['startTime']}_{a['endTime']}_{a.get('notes','')}_{a.get('is_cancelled', False)}"
+        for a in day_assigns:
+            # Χρήση camelCase όπως στην παλιά βάση
+            key = f"{curr_date_iso}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{a.get('colorHex','')}_{a.get('notes','')}_{a.get('is_cancelled', False)}"
             if key not in groups:
-                proj_info = proj_map.get(a['projectId'], {})
+                proj = get_project_info(a['projectId'], projects)
+                c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
                 groups[key] = {
-                    'Project': proj_info.get('name', 'Άγνωστο'),
+                    'Key': key,
+                    'ProjectId': a['projectId'],
+                    'Project': proj['name'] if proj else "Άγνωστο",
+                    'StartTime': a['startTime'][:5],
+                    'EndTime': a['endTime'][:5],
                     'Start': datetime.combine(date(1970,1,1), datetime.strptime(a['startTime'][:5], "%H:%M").time()),
                     'End': datetime.combine(date(1970,1,1), datetime.strptime(a['endTime'][:5], "%H:%M").time()),
-                    'Emps': [],
-                    'Color': a.get('colorHex', proj_info.get('color', '#4a86e8')),
+                    'Employees': [],
+                    'ColorHex': c_hex,
                     'Notes': a.get('notes', ''),
-                    'IsCancelled': a.get('is_cancelled', False)
+                    'is_cancelled': a.get('is_cancelled', False),
+                    'AssignmentIds': []
                 }
-            emp_name = emp_map.get(a['employeeId'], 'ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ')
-            groups[key]['Emps'].append(emp_name)
+            
+            emp_name = get_employee_name(a.get('employeeId'), employees)
+            groups[key]['Employees'].append(emp_name)
+            groups[key]['AssignmentIds'].append(a['id'])
 
-        # 3. Διαχείριση Lanes (Σειρών) ανά ημέρα για αποφυγή επικαλύψεων
+        # Collision & Lane Logic
         lanes = []
         day_row_ids = []
         for g in sorted(groups.values(), key=lambda x: x['Start']):
             placed = False
-            for idx, lane_end in enumerate(lanes):
+            for lane_idx, lane_end in enumerate(lanes):
                 if g['Start'] >= lane_end:
-                    row_idx = idx
-                    lanes[idx] = g['End']
+                    row_idx = lane_idx
+                    lanes[lane_idx] = g['End']
                     placed = True
                     break
             if not placed:
@@ -194,101 +193,188 @@ def render_gantt_chart():
             row_id = f"day_{i}_row_{row_idx}"
             day_row_ids.append(row_id)
             
-            # Δημιουργία Ετικέτας "Excel-style"
-            start_t = g['Start'].strftime('%H:%M')
-            end_t = g['End'].strftime('%H:%M')
-            emps_str = ", ".join(g['Emps'])
+            # Label Generation
+            emps_str = ", ".join(g['Employees']).upper()
+            proj_name = g['Project'].upper()
+            times_str = f"{g['StartTime']}-{g['EndTime']}"
+            base_text = f"{times_str} {proj_name} // {emps_str}"
+            if g['Notes']: base_text += f" ({g['Notes'].upper()})"
             
-            label_text = f"<b>{g['Project']}</b> ({start_t}-{end_t})<br>{emps_str}"
-            if g['Notes']: label_text += f"<br><i>{g['Notes']}</i>"
-            if g['IsCancelled']: label_text = f"<s>{label_text}</s> (ΑΚΥΡΟ)"
+            wrap_w = max(15, int(((g['End'] - g['Start']).total_seconds() / 3600.0) * 16))
+            wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
+            
+            if g['is_cancelled']:
+                label_text = f"<s>{wrapped_base}</s> (ΑΚΥΡΟ)"
+            else:
+                label_text = wrapped_base
 
-            chart_data.append({
+            data.append({
                 'Y_Axis': row_id,
-                'Start': g['Start'],
-                'End': g['End'],
-                'Label': label_text,
                 'Project': g['Project'],
-                'Color': g['Color']
+                'Έναρξη': g['Start'],
+                'Λήξη': g['End'],
+                'Ετικέτα': label_text,
+                'ColorHex': g['ColorHex'],
+                'GroupKey': g['Key']
             })
-            color_map[g['Project']] = g['Color']
+            export_data.append({
+                'Ημερομηνία': curr_date.strftime('%d/%m/%Y'),
+                'Έργο': g['Project'],
+                'Προσωπικό': emps_str,
+                'Ώρες': times_str,
+                'Σημειώσεις': g['Notes']
+            })
+            color_map[g['Project']] = g['ColorHex']
 
-        # Οργάνωση άξονα Υ
+        # Y-Axis Mapping
         y_category_order.extend(day_row_ids)
         mid_idx = len(day_row_ids) // 2
         for idx, rid in enumerate(day_row_ids):
             tickvals_map[rid] = base_y_label if idx == mid_idx else ""
-            
-        # Αν η μέρα είναι κενή, προσθέτουμε μια κενή γραμμή
+        
         if not day_row_ids:
             rid = f"day_{i}_empty"
             y_category_order.append(rid)
             tickvals_map[rid] = base_y_label
 
-    if not chart_data:
-        st.info("Δεν υπάρχουν βάρδιες για αυτή την εβδομάδα.")
-        return
+        wk_groups.update(groups)
 
-    df_chart = pd.DataFrame(chart_data)
+    # 3.4 Σχεδίαση με Plotly (Legacy Specs)
+    df = pd.DataFrame(data)
+    ordered_cats = y_category_order[::-1]
     
-    # Σχεδίαση με Plotly
     fig = px.timeline(
-        df_chart, 
-        x_start="Start", 
-        x_end="End", 
-        y="Y_Axis", 
-        color="Project",
-        color_discrete_map=color_map,
-        text="Label",
-        template="plotly_white"
+        df, x_start="Έναρξη", x_end="Λήξη", y="Y_Axis", 
+        color="Project", color_discrete_map=color_map, 
+        text="Ετικέτα", custom_data=["GroupKey"]
     )
 
-    # Styling (Replica PDF)
+    # Background και Διαχωριστικά
+    for di in range(7):
+        day_idxs = [idx for idx, val in enumerate(ordered_cats) if val.startswith(f"day_{di}_")]
+        if day_idxs:
+            mn, mx = min(day_idxs), max(day_idxs)
+            if di % 2 != 0:
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
+            if (start_of_week + timedelta(days=di)) == date.today():
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
+        
     fig.update_traces(
-        textposition='inside',
-        insidetextanchor='middle',
-        textfont=dict(size=10, color='black'),
-        marker=dict(line=dict(width=1, color='black'))
+        textposition='inside', insidetextanchor='middle',
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black"),
+        marker=dict(line=dict(color='black', width=1))
     )
 
-    fig.update_yaxes(
-        categoryorder='array',
-        categoryarray=y_category_order[::-1],
-        tickmode='array',
-        tickvals=y_category_order,
-        ticktext=[tickvals_map[v] for v in y_category_order],
-        gridcolor='rgba(0,0,0,0.1)',
-        title=""
-    )
-
-    fig.update_xaxes(
-        side="top",
-        dtick=3600000, # Κάθε 1 ώρα
-        tickformat="%H:%M",
-        range=[datetime(1970,1,1,6,0), datetime(1970,1,1,22,0)], # 06:00 - 22:00
-        gridcolor='black',
-        title=""
-    )
-
-    # Διαχωριστικές γραμμές ημερών
-    for i in range(1, 7):
-        fig.add_shape(
-            type="line", xref="paper", yref="y",
-            x0=0, x1=1, y0=f"day_{i}_row_0" if f"day_{i}_row_0" in y_category_order else f"day_{i}_empty",
-            y1=f"day_{i}_row_0" if f"day_{i}_row_0" in y_category_order else f"day_{i}_empty",
-            line=dict(color="black", width=3)
-        )
+    row_h = 55 * zoom_factor
+    dyn_h = max(500, int(len(ordered_cats) * row_h) + 100)
 
     fig.update_layout(
-        height=200 + (len(y_category_order) * 45),
-        showlegend=False,
-        margin=dict(l=10, r=10, t=50, b=10),
-        bargap=0.1
+        bargap=0.12, showlegend=False, 
+        plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
+        height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(
+            side='top', tickformat="%H:%M", dtick=1800000, # 30 min ticks
+            gridcolor='black', gridwidth=1,
+            range=[datetime(1970,1,1,7,0), datetime(1970,1,1,20,0)]
+        ),
+        yaxis=dict(
+            tickmode='array', tickvals=ordered_cats,
+            ticktext=[tickvals_map[v] for v in ordered_cats],
+            categoryorder='array', categoryarray=ordered_cats
+        )
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Rendering
+    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+    
+    # 3.5 Export και Hint
+    col_h, col_e = st.columns([3, 1])
+    with col_h:
+        st.caption("💡 **Συμβουλή:** Κάντε κλικ σε μια μπάρα για επεξεργασία. Σύρετε για πλοήγηση στον χρόνο.")
+    with col_e:
+        if export_data:
+            df_exp = pd.DataFrame(export_data)
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_exp.to_excel(writer, index=False)
+            st.download_button("📥 Εξαγωγή Excel", data=output.getvalue(), file_name="Gantt_Export.xlsx")
+
+    # 3.6 Φόρμες (Add / Edit)
+    st.divider()
+    
+    # Διαχείριση επιλογής από το γράφημα
+    clicked_key = None
+    if event and "selection" in event and event["selection"]["points"]:
+        clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
+
+    col_add, col_edit = st.columns(2)
+    
+    with col_add:
+        st.subheader("➕ Νέα Τοποθέτηση")
+        with st.form("add_assignment_form", clear_on_submit=True):
+            f_date = st.date_input("Ημερομηνία", value=selected_date)
+            f_proj = st.selectbox("Έργο", [p['id'] for p in projects], format_func=lambda x: next(p['name'] for p in projects if p['id']==x))
+            f_emps = st.multiselect("Προσωπικό", [e['id'] for e in employees], format_func=lambda x: next(e['name'] for e in employees if e['id']==x))
+            f_color = st.selectbox("Χρώμα Μπάρας", list(BASIC_COLORS.keys()))
+            f_notes = st.text_input("Παρατηρήσεις")
+            c_s, c_e = st.columns(2)
+            f_start = c_s.time_input("Έναρξη", datetime.strptime("09:00", "%H:%M").time())
+            f_end = c_e.time_input("Λήξη", datetime.strptime("17:00", "%H:%M").time())
+            
+            if st.form_submit_button("✅ Καταχώρηση"):
+                new_assigns = []
+                for eid in (f_emps if f_emps else [None]):
+                    new_assigns.append({
+                        'employeeId': eid,
+                        'projectId': f_proj,
+                        'date': f_date.isoformat(),
+                        'startTime': f_start.strftime("%H:%M"),
+                        'endTime': f_end.strftime("%H:%M"),
+                        'notes': f_notes,
+                        'colorHex': BASIC_COLORS[f_color],
+                        'is_cancelled': False
+                    })
+                supabase = db.init_supabase()
+                supabase.table('assignments').insert(new_assigns).execute()
+                db.log_activity("ΠΡΟΣΘΗΚΗ", "assignments", f"Νέα ανάθεση στο {f_date}", st.session_state.current_user)
+                db.fetch_paginated.clear()
+                st.rerun()
+
+    with col_edit:
+        st.subheader("📝 Επεξεργασία")
+        group_keys = list(wk_groups.keys())
+        default_idx = group_keys.index(clicked_key) + 1 if clicked_key in group_keys else 0
+        
+        sel_group_key = st.selectbox("Επιλέξτε Μπάρα", [""] + group_keys, index=default_idx, 
+                                     format_func=lambda x: "Επιλέξτε..." if x=="" else f"{wk_groups[x]['Project']} ({wk_groups[x]['StartTime']})")
+        
+        if sel_group_key:
+            g = wk_groups[sel_group_key]
+            with st.form("edit_assignment_form"):
+                e_date = st.date_input("Αλλαγή Ημερομηνίας", value=datetime.fromisoformat(g['Key'].split("_")[0]).date())
+                e_notes = st.text_input("Παρατηρήσεις", value=g['Notes'])
+                e_cancel = st.checkbox("Ακύρωση Βάρδιας", value=g['is_cancelled'])
+                
+                c1, c2 = st.columns(2)
+                if c1.form_submit_button("💾 Αποθήκευση"):
+                    supabase = db.init_supabase()
+                    for aid in g['AssignmentIds']:
+                        supabase.table('assignments').update({
+                            'date': e_date.isoformat(),
+                            'notes': e_notes,
+                            'is_cancelled': e_cancel
+                        }).eq('id', aid).execute()
+                    db.log_activity("ΕΝΗΜΕΡΩΣΗ", "assignments", f"Αλλαγή στη μπάρα {sel_group_key}", st.session_state.current_user)
+                    db.fetch_paginated.clear()
+                    st.rerun()
+                
+                if c2.form_submit_button("🗑️ Διαγραφή"):
+                    supabase = db.init_supabase()
+                    supabase.table('assignments').delete().in_('id', g['AssignmentIds']).execute()
+                    db.log_activity("ΔΙΑΓΡΑΦΗ", "assignments", f"Διαγραφή μπάρας {sel_group_key}", st.session_state.current_user)
+                    db.fetch_paginated.clear()
+                    st.rerun()
 
 # --- ΕΚΤΕΛΕΣΗ ---
-quick_add_assignment()
-render_gantt_chart()
+render_dashboard()
 gc.collect()
