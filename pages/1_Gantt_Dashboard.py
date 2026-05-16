@@ -104,14 +104,14 @@ def render_dashboard():
     
     if not assignments:
         st.info("Δεν βρέθηκαν βάρδιες στη βάση.")
-        return
+        # Συνεχίζουμε για να δείξουμε τουλάχιστον τις κενές μέρες
 
     # 3.3 Data Processing (Πιστή αντιγραφή από PDF)
     data = []
+    wk_groups = {}
     color_map = {}
     y_category_order = []
     tickvals_map = {}
-    wk_groups = {}
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_lookup = {e['id']: e for e in employees}
@@ -135,7 +135,7 @@ def render_dashboard():
                 sname = emp_lookup.get(sub_id, {}).get('name', 'Άγνωστος')
                 sparts = sname.split()
                 sshort = f"{sparts[-1]} {sparts[0][0]}." if len(sparts) > 1 else sname
-                leaves_formatted.append(f"<b>{short}</b><br><span style='font-size: 10px; color:#991b1b;'> , Αντικατ: <b>{sshort}</b></span>")
+                leaves_formatted.append(f"<b>{short}</b><br><span style='font-size: 10px; color:#991b1b;'> , Αντ: <b>{sshort}</b></span>")
             else:
                 leaves_formatted.append(f"<b>{short}</b>")
         
@@ -192,7 +192,7 @@ def render_dashboard():
 
         # --- LANE ALLOCATION ---
         nb_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
-        b_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
+        blue_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
         
         day_mapping = []
         lanes = [] 
@@ -207,7 +207,7 @@ def render_dashboard():
         
         nb_count = len(lanes)
         blanes = [] 
-        for g in sorted(b_groups, key=lambda x: x['Start']):
+        for g in sorted(blue_groups, key=lambda x: x['Start']):
             idx = next((i for i, end in enumerate(blanes) if g['Start'] >= end), None)
             if idx is None:
                 blanes.append(g['End'])
@@ -237,7 +237,7 @@ def render_dashboard():
             color_map[g['LegendGroup']] = g['ColorHex']
             wk_groups[g['Key']] = g
 
-        # Κεντράρισμα στον Άξονα Υ
+        # Κεντράρισμα Ημέρας
         day_rows_sorted = sorted(day_row_ids)
         y_category_order.extend(day_rows_sorted)
         
@@ -251,13 +251,16 @@ def render_dashboard():
             tickvals_map[rid] = base_y_label
 
     # --- 3.4 Σχεδίαση με Plotly ---
-    df_plot = pd.DataFrame(data) if data else pd.DataFrame([{'Y': f"day_{i}_empty", 'Start': datetime(1970,1,1,9,0), 'End': datetime(1970,1,1,9,0), 'Label': '', 'Proj': '', 'Color': '#ffffff', 'Key': 'Empty', 'Legend': ''} for i in range(7)])
+    if not data:
+        df_plot = pd.DataFrame([{'Y': f"day_{i}_empty", 'Start': datetime(1970,1,1,9,0), 'End': datetime(1970,1,1,9,0), 'Label': '', 'Proj': '', 'Color': '#ffffff', 'Key': 'Empty', 'Legend': ''} for i in range(7)])
+    else:
+        df_plot = pd.DataFrame(data)
     
     ordered = y_category_order[::-1]
     
-    # Αυξημένο ύψος γραμμής για αποφυγή του "κολλήματος"
+    # Αυξημένο ύψος γραμμής για αποφυγή του "κολλήματος" και προβολή όλων των ημερών
     row_h = 55 * zoom_factor
-    dyn_h = max(750, int(len(ordered) * row_h) + 150)
+    dyn_h = max(800, int(len(ordered) * row_h) + 100)
 
     fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", 
                      color_discrete_map=color_map, text="Label", custom_data=["Key"])
@@ -291,7 +294,7 @@ def render_dashboard():
         xaxis=dict(
             side='top', tickformat="%H:%M", dtick=1800000, gridcolor='rgba(0,0,0,0.2)', gridwidth=1, 
             range=[datetime(1970,1,1,6,0), datetime(1970,1,1,19,0)],
-            tickfont=dict(size=max(9, int(11*zoom_factor)), color="black", bold=True),
+            tickfont=dict(size=max(9, int(11*zoom_factor)), color="black"),
             fixedrange=False
         ),
         yaxis=dict(
