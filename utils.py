@@ -102,7 +102,7 @@ def format_log_details(table_name, records):
         elif table_name == 'projects':
             lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
         elif table_name == 'assignments':
-            emp_id = r.get('employeeld')
+            emp_id = r.get('employeeId')
             emp_name = "Χωρίς Προσωπικό"
             if emp_id and 'employees' in st.session_state:
                 e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
@@ -117,17 +117,17 @@ def format_log_details(table_name, records):
             elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
             lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
         elif table_name == 'leaves':
-            emp_id = r.get('employeeld')
+            emp_id = r.get('employeeId')
             emp_name = next((e['name'] for e in st.session_state.get('employees', []) if e['id'] == emp_id), "Άγνωστος")
             sd = r.get('startDate', "")
             ed = r.get('endDate', "")
             if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
             if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
-            sub_id = r.get('substituteld')
+            sub_id = r.get('substituteId')
             sub_str = f" [Αντικατ: {next((e['name'] for e in st.session_state.employees if e['id'] == sub_id), 'Άγνωστος')}]" if sub_id else ""
             lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
         elif table_name == 'evaluations':
-            emp_id = r.get('employeeld')
+            emp_id = r.get('employeeId')
             emp_name = next((e['name'] for e in st.session_state.get('employees', []) if e['id'] == emp_id), "Άγνωστος")
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
         elif table_name == 'recurring_patterns':
@@ -284,7 +284,7 @@ def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=N
     new_s = str(t_start)[:5]
     new_e = str(t_end)[:5]
     day_assigns = st.session_state.assignments_by_date.get(check_date, [])
-    emp_assigns = [a for a in day_assigns if a['employeeld'] == emp_id and a['id'] not in exclude_ids]
+    emp_assigns = [a for a in day_assigns if a['employeeId'] == emp_id and a['id'] not in exclude_ids]
     
     allowed_overlap = False
     for ea in emp_assigns:
@@ -316,7 +316,7 @@ def auto_extend_recurring_patterns():
             start_ext_date = latest_date + timedelta(days=1)
             end_ext_date = start_ext_date + timedelta(days=365)
             r_type = pat.get('type')
-            r_emps = pat.get('employeelds', [])
+            r_emps = pat.get('employeeIds', [])
             r_proj = pat.get('projectId')
             r_color = pat.get('colorName')
             c_hex = BASIC_COLORS.get(r_color, "#999999")
@@ -370,7 +370,7 @@ def auto_extend_recurring_patterns():
                         adj_start, adj_end = str_start, str_end
                     
                     new_assign = {
-                        'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeld': eid, 'projectId': r_proj,
+                        'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': eid, 'projectId': r_proj,
                         'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end,
                         'colorName': r_color, 'colorHex': c_hex, 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
                     }
@@ -479,7 +479,7 @@ def init_data_and_sync():
         
         leaves_by_emp = {}
         for l in st.session_state.leaves:
-            eid = l['employeeld']
+            eid = l['employeeId']
             if eid not in leaves_by_emp: leaves_by_emp[eid] = []
             leaves_by_emp[eid].append(l)
         st.session_state.leaves_by_emp = leaves_by_emp
@@ -572,7 +572,7 @@ def setup_shared_ui():
         check_d = today_date + timedelta(days=i)
         day_assigns = st.session_state.get('assignments_by_date', {}).get(check_d, [])
         for a in day_assigns:
-            if not a.get('employeeld') and not a.get('is_cancelled', False):
+            if not a.get('employeeId') and not a.get('is_cancelled', False):
                 orphan_count += 1
                 proj = get_project_info(a['projectId'])
                 proj_name = proj['name'] if proj else "Άγνωστο Έργο"
