@@ -19,8 +19,7 @@ if not st.session_state.get('current_user'):
     st.warning("⚠️ Παρακαλώ συνδεθείτε από την αρχική σελίδα για να δείτε το ταμπλό.")
     st.stop()
 
-st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
-
+#--- GLOBAL STYLING (Replica from PDF) ---
 st.markdown("""
 <style>
     .stPlotlyChart {
@@ -68,9 +67,11 @@ if 'view_week_date' not in st.session_state:
     st.session_state.view_week_date = date.today()
 
 # ==========================================
-# 3. ΚΥΡΙΑ ΛΟΓΙΚΗ ΠΡΟΒΟΛΗΣ
+# 3. ΚΥΡΙΑ ΛΟΓΙΚΗ ΠΡΟΒΟΛΗΣ (DASHBOARD)
 # ==========================================
 def render_dashboard():
+    st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
+
     # 3.1 Nav Controls
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
     
@@ -101,10 +102,10 @@ def render_dashboard():
     leaves = db.fetch_paginated('leaves')
     
     if not assignments:
-        st.info("Δεν βρέθηκαν βάρδιες.")
+        st.info("Δεν βρέθηκαν βάρδιες στη βάση.")
         return
 
-    # 3.3 Data Processing (PDF Exact Logic)
+    # 3.3 Data Processing (Πιστή αντιγραφή από PDF)
     data = []
     export_data = []
     color_map = {}
@@ -121,20 +122,34 @@ def render_dashboard():
         curr_iso = curr_date.isoformat()
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         
-        # Leaves processing
+        # --- ΑΔΕΙΕΣ ΗΜΕΡΑΣ (Μορφή PDF: Επίθετο Ο.) ---
         leaves_today = [l for l in leaves if l['startDate'] <= curr_iso <= l['endDate']]
         leaves_formatted = []
         for l in leaves_today:
             ename = emp_lookup.get(l['employeeId'], {}).get('name', 'Άγνωστος')
             parts = ename.split()
             short = f"{parts[-1]} {parts[0][0]}." if len(parts) > 1 else ename
-            leaves_formatted.append(f"<b>{short}</b>")
+            
+            sub_id = l.get('substituteld')
+            if sub_id:
+                sname = emp_lookup.get(sub_id, {}).get('name', 'Άγνωστος')
+                sparts = sname.split()
+                sshort = f"{sparts[-1]} {sparts[0][0]}." if len(sparts) > 1 else sname
+                leaves_formatted.append(f"<b>{short}</b><br><span style='font-size: 10px; color:#991b1b;'> , Αντικατ: <b>{sshort}</b></span>")
+            else:
+                leaves_formatted.append(f"<b>{short}</b>")
         
-        leaves_str = "<br>".join(leaves_formatted) if leaves_formatted else "Καμία"
-        base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
+        leaves_str = "<br><br>".join(leaves_formatted) if leaves_formatted else "Καμία"
         
-        # Shift processing
+        if leaves_formatted:
+            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
+        else:
+            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
+        
+        # --- ΒΑΡΔΙΕΣ ΗΜΕΡΑΣ ---
         day_assigns = [a for a in assignments if a['date'] == curr_iso]
+        
+        # Ευρετήριο για το "ΜΕΤΑ ΑΠΟ"
         emp_day_map = {}
         for da in day_assigns:
             eid = da.get('employeeId')
@@ -152,6 +167,7 @@ def render_dashboard():
             arr = a.get('arrivalTime', "")
             if arr: arr = arr[:5]
 
+            # Key ομαδοποίησης ακριβώς όπως στο PDF
             key = f"{curr_iso}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_c}_{arr}"
             
             if key not in groups:
@@ -161,10 +177,9 @@ def render_dashboard():
                     'Start': datetime.combine(date(1970,1,1), datetime.strptime(a['startTime'][:5], "%H:%M").time()),
                     'End': datetime.combine(date(1970,1,1), datetime.strptime(a['endTime'][:5], "%H:%M").time()),
                     'Employees': [], 'ColorHex': c_hex, 'Notes': notes, 'is_cancelled': is_c,
-                    'AssignmentIds': [], 'ArrivalTime': arr, 'Date': curr_date
+                    'AssignmentIds': [], 'ArrivalTime': arr, 'Date': curr_date, 'LegendGroup': f"{proj.get('name', 'Άγνωστο')} ({c_name})"
                 }
             
-            # Format name & "AFTER" logic
             eid = a.get('employeeId')
             if not eid:
                 fname = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
@@ -173,7 +188,7 @@ def render_dashboard():
                 np = raw_name.split()
                 fname = f"{np[-1]} {np[0][0]}." if len(np) > 1 else raw_name
                 
-                # After logic
+                # Λογική "ΜΕΤΑ ΑΠΟ"
                 prevs = [pa for pa in emp_day_map.get(eid, []) if pa['id'] != a['id'] and pa['endTime'][:5] <= a['startTime'][:5]]
                 if prevs:
                     prevs.sort(key=lambda x: x['endTime'][:5], reverse=True)
@@ -183,12 +198,12 @@ def render_dashboard():
             groups[key]['Employees'].append(fname)
             groups[key]['AssignmentIds'].append(a['id'])
 
-        # Lane Allocation (Non-blue vs Blue)
+        # --- LANE ALLOCATION (Προτεραιότητα Χρωμάτων) ---
         nb_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
         b_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
         
         mapping = []
-        lanes = []
+        lanes = [] # Για τα μη-μπλε
         for g in sorted(nb_groups, key=lambda x: x['Start']):
             idx = next((i for i, end in enumerate(lanes) if g['Start'] >= end), None)
             if idx is None:
@@ -199,7 +214,7 @@ def render_dashboard():
                 mapping.append((g, idx))
         
         nb_count = len(lanes)
-        blanes = []
+        blanes = [] # Για τα μπλε
         for g in sorted(b_groups, key=lambda x: x['Start']):
             idx = next((i for i, end in enumerate(blanes) if g['Start'] >= end), None)
             if idx is None:
@@ -214,9 +229,10 @@ def render_dashboard():
             rid = f"day_{i}_row_{row_idx}"
             day_row_ids.append(rid)
             
-            # Label
+            # Κατασκευή Label (Όπως στο PDF)
             emps_str = ", ".join(g['Employees']).upper()
-            txt = f"{g['ArrivalTime']+' ' if g['ArrivalTime'] else ''}{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {emps_str}"
+            arrival_str = f"[Προσ: {g['ArrivalTime']}] " if g['ArrivalTime'] else ""
+            txt = f"{arrival_str}{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {emps_str}"
             if g['Notes']: txt += f" ({g['Notes'].upper()})"
             
             dur = (g['End'] - g['Start']).total_seconds() / 3600.0
@@ -225,26 +241,28 @@ def render_dashboard():
 
             data.append({
                 'Y': rid, 'Start': g['Start'], 'End': g['End'], 'Label': wrapped,
-                'Proj': g['Project'], 'Color': g['ColorHex'], 'Key': g['Key']
+                'Proj': g['Project'], 'Color': g['ColorHex'], 'Key': g['Key'], 'Legend': g['LegendGroup']
             })
-            color_map[g['Project']] = g['ColorHex']
+            color_map[g['LegendGroup']] = g['ColorHex']
             wk_groups[g['Key']] = g
 
+        # Άξονας Υ
         y_category_order.extend(day_row_ids)
         for idx, rid in enumerate(day_row_ids):
             tickvals_map[rid] = base_y_label if idx == len(day_row_ids)//2 else ""
+            
         if not day_row_ids:
             rid = f"day_{i}_empty"; y_category_order.append(rid); tickvals_map[rid] = base_y_label
 
+    # --- 3.4 Σχεδίαση με Plotly ---
     if not data:
-        st.info("Κενό χρονοδιάγραμμα."); return
+        st.info("Κενό χρονοδιάγραμμα για την επιλεγμένη εβδομάδα."); return
 
-    # 3.4 Plotly
     df_plot = pd.DataFrame(data)
     ordered = y_category_order[::-1]
-    fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Proj", color_discrete_map=color_map, text="Label", custom_data=["Key"])
+    fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", color_discrete_map=color_map, text="Label", custom_data=["Key"])
 
-    # Day Shading
+    # Σκίαση Ημερών & Διαχωριστικά (Replica PDF)
     for di in range(7):
         d_idxs = [idx for idx, v in enumerate(ordered) if v.startswith(f"day_{di}_")]
         if d_idxs:
@@ -252,30 +270,43 @@ def render_dashboard():
             if di % 2 != 0: fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
             if (start_of_week + timedelta(days=di)) == date.today(): fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
 
-    # Black Day Separators
+    # Έντονες μαύρες διαχωριστικές γραμμές
     for idx in range(len(ordered) - 1):
         if ordered[idx].split('_')[1] != ordered[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="black", width=4))
 
-    fig.update_traces(textposition='inside', insidetextanchor='middle', textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black"), marker=dict(line=dict(color='black', width=1)))
+    fig.update_traces(
+        textposition='inside', insidetextanchor='middle', 
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"), 
+        marker=dict(line=dict(color='black', width=1)),
+        constraintext='none', hoverinfo='none'
+    )
     
     row_h = 55 * zoom_factor
     dyn_h = max(500, int(len(ordered) * row_h) + 100)
 
     fig.update_layout(
         bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(side='top', tickformat="%H:%M", dtick=1800000, gridcolor='black', gridwidth=1, range=[datetime(1970,1,1,6,0), datetime(1970,1,1,17,0)]),
-        yaxis=dict(tickmode='array', tickvals=ordered, ticktext=[tickvals_map.get(v, "") for v in ordered], categoryorder='array', categoryarray=ordered, title="")
+        xaxis=dict(
+            side='top', tickformat="%H:%M", dtick=1800000, gridcolor='black', gridwidth=1, 
+            range=[datetime(1970,1,1,6,0), datetime(1970,1,1,17,0)],
+            tickfont=dict(size=max(8, int(11*zoom_factor)), color="black")
+        ),
+        yaxis=dict(
+            tickmode='array', tickvals=ordered, ticktext=[tickvals_map.get(v, "") for v in ordered], 
+            categoryorder='array', categoryarray=ordered, title="",
+            tickfont=dict(size=max(8, int(12*zoom_factor)), color="black")
+        )
     )
 
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
     
-    # 3.5 Interaction
+    # Διαχείριση κλικ
     clicked_key = None
     if event and "selection" in event and event["selection"]["points"]:
         clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
 
-    # Forms
+    # --- 3.5 Interaction & Forms ---
     if not presentation_mode:
         st.divider()
         col_add, col_edit = st.columns(2)
@@ -286,10 +317,12 @@ def render_dashboard():
                 f_date = st.date_input("Ημερομηνία", value=selected_date)
                 f_proj = st.selectbox("Έργο", [p['id'] for p in projects], format_func=lambda x: proj_lookup[x]['name'])
                 f_emps = st.multiselect("Προσωπικό", [e['id'] for e in employees], format_func=lambda x: emp_lookup[x]['name'])
-                f_color = st.selectbox("Χρώμα", list(BASIC_COLORS.keys()))
+                f_color = st.selectbox("Χρώμα Μπάρας", list(BASIC_COLORS.keys()))
                 f_notes = st.text_input("Παρατηρήσεις")
-                f_start = st.time_input("Έναρξη", datetime.strptime("09:00", "%H:%M").time())
-                f_end = st.time_input("Λήξη", datetime.strptime("17:00", "%H:%M").time())
+                c1, c2 = st.columns(2)
+                f_start = c1.time_input("Έναρξη", datetime.strptime("09:00", "%H:%M").time())
+                f_end = c2.time_input("Λήξη", datetime.strptime("17:00", "%H:%M").time())
+                
                 if st.form_submit_button("✅ Καταχώρηση"):
                     new_list = []
                     for eid in (f_emps if f_emps else [None]):
