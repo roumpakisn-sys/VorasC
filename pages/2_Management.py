@@ -5,7 +5,6 @@ import database as db
 # ==========================================
 # 1. ΕΛΕΓΧΟΣ ΠΡΟΣΒΑΣΗΣ & ΡΥΘΜΙΣΗ ΣΕΛΙΔΑΣ
 # ==========================================
-# Ρύθμιση σελίδας για να έχουμε το σωστό τίτλο στο tab του browser
 st.set_page_config(page_title="Διαχείριση - Staff Manager", page_icon="🗂️", layout="wide")
 
 # Αν ο χρήστης δεν είναι συνδεδεμένος, σταματάμε την εκτέλεση
@@ -21,7 +20,7 @@ st.write("---")
 tab_employees, tab_projects = st.tabs(["👥 Προσωπικό", "🏗️ Έργα"])
 
 # ==========================================
-# 2. ΚΑΡΤΕΛΑ: ΠΡΟΣΩΠΙΚΟ (ΣΕ FRAGMENT ΓΙΑ ΤΑΧΥΤΗΤΑ)
+# 2. ΚΑΡΤΕΛΑ: ΠΡΟΣΩΠΙΚΟ (Χρήση στήλης 'position')
 # ==========================================
 @st.fragment
 def render_employees_tab():
@@ -37,7 +36,8 @@ def render_employees_tab():
             with col1:
                 name = st.text_input("Ονοματεπώνυμο *")
             with col2:
-                specialty = st.text_input("Ειδικότητα / Πόστο")
+                # Χρησιμοποιούμε τη μεταβλητή για τη στήλη 'position' της βάσης σου
+                pos_input = st.text_input("Ειδικότητα / Πόστο")
             
             submit_emp = st.form_submit_button("Αποθήκευση Εργαζομένου")
             
@@ -47,12 +47,14 @@ def render_employees_tab():
                 else:
                     try:
                         supabase = db.init_supabase()
-                        new_emp = {'name': name, 'specialty': specialty}
+                        # Αποθήκευση στη στήλη 'position' σύμφωνα με τη βάση σου
+                        new_emp = {'name': name, 'position': pos_input}
                         res = supabase.table('employees').insert(new_emp).execute()
                         
                         if res.data:
                             inserted_id = res.data[0]['id']
-                            db.log_activity("INSERT", "employees", f"Νέος εργαζόμενος: {name}", st.session_state.current_user)
+                            # Καταγραφή στο activity_logs (username, action_type)
+                            db.log_activity("ΠΡΟΣΘΗΚΗ", "employees", f"Νέος εργαζόμενος: {name}", st.session_state.current_user)
                             db.add_to_undo_stack("INSERT", "employees", inserted_id, new_emp)
                             
                             st.success(f"Ο/Η {name} προστέθηκε επιτυχώς!")
@@ -64,13 +66,12 @@ def render_employees_tab():
     # Προβολή του πίνακα
     if employees:
         df_emps = pd.DataFrame(employees)
-        cols_to_show = ['name', 'specialty']
-        if 'created_at' in df_emps.columns:
-            cols_to_show.append('created_at')
+        # Επιλογή στηλών που υπάρχουν στη βάση σου
+        cols_to_show = [c for c in ['name', 'position', 'created_at'] if c in df_emps.columns]
             
         display_df = df_emps[cols_to_show].rename(columns={
             'name': 'Ονοματεπώνυμο', 
-            'specialty': 'Ειδικότητα',
+            'position': 'Ειδικότητα',
             'created_at': 'Ημ. Προσθήκης'
         })
         st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -109,7 +110,7 @@ def render_projects_tab():
                         
                         if res.data:
                             inserted_id = res.data[0]['id']
-                            db.log_activity("INSERT", "projects", f"Νέο έργο: {p_name}", st.session_state.current_user)
+                            db.log_activity("ΠΡΟΣΘΗΚΗ", "projects", f"Νέο έργο: {p_name}", st.session_state.current_user)
                             db.add_to_undo_stack("INSERT", "projects", inserted_id, new_proj)
                             
                             st.success(f"Το έργο '{p_name}' προστέθηκε επιτυχώς!")
@@ -121,9 +122,7 @@ def render_projects_tab():
     # Προβολή του πίνακα
     if projects:
         df_projs = pd.DataFrame(projects)
-        cols_to_show = ['name', 'location']
-        if 'created_at' in df_projs.columns:
-            cols_to_show.append('created_at')
+        cols_to_show = [c for c in ['name', 'location', 'created_at'] if c in df_projs.columns]
 
         display_df = df_projs[cols_to_show].rename(columns={
             'name': 'Όνομα Έργου', 
