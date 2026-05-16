@@ -17,9 +17,10 @@ utils.setup_shared_ui()
 
 # Helpers local access
 is_full_admin = st.session_state.get('current_user') != "TAN"
+# Φιλτράρισμα: Μόνο οι "Ενεργοί" υπάλληλοι είναι διαθέσιμοι για τοποθετήσεις
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-menu_options = ["Διαχείριση Έργων", "Ομάδα Προσωπικού", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
+menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
 if st.session_state.get('current_user') == "Admin":
     menu_options.append("Καταγραφή Κινήσεων")
 
@@ -52,7 +53,7 @@ if menu == "Διαχείριση Έργων":
                 st.rerun()
 
 # --- VIEW: EMPLOYEES ---
-elif menu == "Ομάδα Προσωπικού":
+elif menu == "Προσωπικό":
     st.title("👥 Προσωπικό")
     tab_list, tab_add, tab_edit, tab_import = st.tabs(["📋 Λίστα Υπαλλήλων", "➕ Προσθήκη Υπαλλήλου", "✏️ Επεξεργασία", "📁 Εισαγωγή από Αρχείο"])
     
@@ -61,12 +62,13 @@ elif menu == "Ομάδα Προσωπικού":
         erc = st.session_state.emp_reset_counter
         c1, c2, c3 = st.columns(3)
         with c1:
-            e_name = st.text_input("Ονοματεπώνυμο", key=f"new_emp_name_{erc}")
-            e_pos = st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"], key=f"new_emp_pos_{erc}")
+            e_fname = st.text_input("Όνομα", key=f"new_emp_fname_{erc}")
+            e_lname = st.text_input("Επώνυμο", key=f"new_emp_lname_{erc}")
         with c2:
             e_id_num = st.text_input("Αριθμός Ταυτότητας", key=f"new_emp_id_{erc}")
             e_phone = st.text_input("Κινητό Τηλέφωνο", key=f"new_emp_phone_{erc}")
         with c3:
+            e_pos = st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"], key=f"new_emp_pos_{erc}")
             e_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"], key=f"new_emp_status_{erc}")
             
         st.write("")
@@ -79,12 +81,13 @@ elif menu == "Ομάδα Προσωπικού":
             st.rerun()
             
         if submit_emp:
-            if not e_name.strip():
-                st.error("Το πεδίο 'Ονοματεπώνυμο' είναι υποχρεωτικό.")
+            e_name = f"{e_fname.strip()} {e_lname.strip()}".strip()
+            if not e_fname.strip() or not e_lname.strip():
+                st.error("Τα πεδία 'Όνομα' και 'Επώνυμο' είναι υποχρεωτικά.")
             else:
                 is_duplicate = False
                 for emp in st.session_state.employees:
-                    if emp['name'].strip().lower() == e_name.strip().lower():
+                    if emp['name'].strip().lower() == e_name.lower():
                         st.error(f"Ο/Η υπάλληλος '{emp['name']}' υπάρχει ήδη στη λίστα.")
                         is_duplicate = True
                         break
@@ -93,10 +96,10 @@ elif menu == "Ομάδα Προσωπικού":
                         is_duplicate = True
                         break
                 if not is_duplicate:
-                    new_e = {'id': str(uuid.uuid4()), 'name': e_name.strip(), 'position': e_pos.strip(), 'id_number': e_id_num.strip(), 'phone': e_phone.strip(), 'status': e_status}
+                    new_e = {'id': str(uuid.uuid4()), 'name': e_name, 'position': e_pos.strip(), 'id_number': e_id_num.strip(), 'phone': e_phone.strip(), 'status': e_status}
                     st.session_state.employees.append(new_e)
                     utils.db_insert('employees', new_e)
-                    st.success(f"Ο/Η '{e_name.strip()}' προστέθηκε με επιτυχία! Η σελίδα ανανεώνεται...")
+                    st.success(f"Ο/Η '{e_name}' προστέθηκε με επιτυχία! Η σελίδα ανανεώνεται...")
                     time.sleep(1.5)
                     st.session_state.emp_reset_counter += 1
                     st.rerun()
@@ -110,26 +113,32 @@ elif menu == "Ομάδα Προσωπικού":
             with st.form("edit_emp", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    ed_name = st.text_input("Ονοματεπώνυμο", value=emp_to_edit['name'])
-                    pos_options = ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"]
-                    current_pos = emp_to_edit.get('position', 'ΕΡΓΑΤΗΣ')
-                    pos_index = pos_options.index(current_pos) if current_pos in pos_options else 0
-                    ed_pos = st.selectbox("Θέση", pos_options, index=pos_index)
+                    existing_name = emp_to_edit.get('name', '')
+                    name_parts = existing_name.split(" ", 1)
+                    def_fname = name_parts[0] if len(name_parts) > 0 else ""
+                    def_lname = name_parts[1] if len(name_parts) > 1 else ""
+                    ed_fname = st.text_input("Όνομα", value=def_fname)
+                    ed_lname = st.text_input("Επώνυμο", value=def_lname)
                 with c2:
                     ed_id_num = st.text_input("Αριθμός Ταυτότητας", value=emp_to_edit.get('id_number', ""))
                     ed_phone = st.text_input("Κινητό Τηλέφωνο", value=emp_to_edit.get('phone', ''))
                 with c3:
+                    pos_options = ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"]
+                    current_pos = emp_to_edit.get('position', 'ΕΡΓΑΤΗΣ')
+                    pos_index = pos_options.index(current_pos) if current_pos in pos_options else 0
+                    ed_pos = st.selectbox("Θέση", pos_options, index=pos_index)
                     current_status = emp_to_edit.get('status', 'Ενεργός')
                     ed_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"], index=0 if current_status == 'Ενεργός' else 1)
                 
                 if st.form_submit_button("💾 Αποθήκευση Αλλαγών", type="primary"):
-                    if not ed_name.strip():
-                        st.error("Το πεδίο 'Ονοματεπώνυμο' είναι υποχρεωτικό.")
+                    ed_name = f"{ed_fname.strip()} {ed_lname.strip()}".strip()
+                    if not ed_fname.strip() or not ed_lname.strip():
+                        st.error("Τα πεδία 'Όνομα' και 'Επώνυμο' είναι υποχρεωτικά.")
                     else:
                         is_dup = False
                         for e in st.session_state.employees:
                             if e['id'] != emp_to_edit_id:
-                                if e['name'].strip().lower() == ed_name.strip().lower():
+                                if e['name'].strip().lower() == ed_name.lower():
                                     st.error("Υπάρχει ήδη άλλος υπάλληλος με αυτό το όνομα.")
                                     is_dup = True; break
                                 elif ed_id_num.strip() and e.get('id_number', "").strip().lower() == ed_id_num.strip().lower():
@@ -137,7 +146,7 @@ elif menu == "Ομάδα Προσωπικού":
                                     is_dup = True; break
                         if not is_dup:
                             old_emp_data = dict(emp_to_edit)
-                            emp_to_edit.update({'name': ed_name.strip(), 'position': ed_pos.strip(), 'id_number': ed_id_num.strip(), 'phone': ed_phone.strip(), 'status': ed_status})
+                            emp_to_edit.update({'name': ed_name, 'position': ed_pos.strip(), 'id_number': ed_id_num.strip(), 'phone': ed_phone.strip(), 'status': ed_status})
                             utils.db_update('employees', emp_to_edit_id, emp_to_edit, old_data=old_emp_data)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
                             st.rerun()
