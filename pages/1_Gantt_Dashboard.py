@@ -18,15 +18,14 @@ st.title("📊 Ταμπλό Gantt & Βάρδιες")
 st.write("Σύνδεση με την υπάρχουσα βάση δεδομένων: Ενεργή (Schema-Aware)")
 st.write("---")
 
-# CSS για βελτίωση της εμφάνισης του διαγράμματος
+# CSS για να μοιάζει περισσότερο με δομημένο πίνακα (Excel-style)
 st.markdown("""
 <style>
     .stPlotlyChart {
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-        background-color: white;
-        padding: 10px;
+        border: 2px solid #334155;
+        border-radius: 8px;
+        background-color: #f8fafc;
+        padding: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -41,7 +40,6 @@ def quick_add_assignment():
         with st.form("quick_add_form"):
             col1, col2, col3 = st.columns(3)
             
-            # Φόρτωση δεδομένων για τα selectboxes
             emps = db.fetch_paginated('employees')
             projs = db.fetch_paginated('projects')
             
@@ -66,7 +64,6 @@ def quick_add_assignment():
                         emp_id = next(e['id'] for e in emps if e['name'] == sel_emp)
                         proj_id = next(p['id'] for p in projs if p['name'] == sel_proj)
                         
-                        # Χρήση των ονομάτων στηλών της παλιάς σου βάσης (camelCase)
                         new_data = {
                             'employeeId': emp_id,
                             'projectId': proj_id,
@@ -81,27 +78,27 @@ def quick_add_assignment():
                         
                         if res.data:
                             db.log_activity("ΠΡΟΣΘΗΚΗ", "assignments", f"Νέα βάρδια: {sel_emp} -> {sel_proj}", st.session_state.current_user)
-                            st.success("Η βάρδια καταχωρήθηκε επιτυχώς!")
+                            st.success("Η βάρδια καταχωρήθηκε!")
                             db.fetch_paginated.clear() 
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Σφάλμα κατά την αποθήκευση: {e}")
+                        st.error(f"Σφάλμα: {e}")
 
 
 # ==========================================
-# 3. ΔΙΑΓΡΑΜΜΑ GANTT (ΕΠΑΝΑΦΟΡΑ ΠΑΛΙΑΣ ΕΜΦΑΝΙΣΗΣ)
+# 3. ΔΙΑΓΡΑΜΜΑ GANTT (EXCEL-STYLE ΜΕ ΠΛΗΡΟΦΟΡΙΕΣ ΕΝΤΟΣ)
 # ==========================================
 @st.fragment
 def render_gantt_chart():
     st.subheader("Ημερολόγιο Προγράμματος")
     
-    # Φόρτωση Δεδομένων από τη Supabase
+    # Φόρτωση Δεδομένων
     assignments = db.fetch_paginated('assignments')
     employees = db.fetch_paginated('employees')
     projects = db.fetch_paginated('projects')
     
     if not assignments:
-        st.info("Δεν βρέθηκαν δεδομένα βαρδιών στη βάση.")
+        st.info("Δεν βρέθηκαν δεδομένα βαρδιών.")
         return
 
     df_assign = pd.DataFrame(assignments)
@@ -109,11 +106,10 @@ def render_gantt_chart():
     df_proj = pd.DataFrame(projects)
     
     if df_emp.empty or df_proj.empty:
-        st.warning("Απαραίτητη η ύπαρξη εργαζομένων και έργων για την προβολή.")
+        st.warning("Λείπουν δεδομένα για την προβολή.")
         return
 
-    # --- ΕΝΑΡΜΟΝΙΣΗ ΣΤΗΛΩΝ (Mapping από παλιά βάση) ---
-    # Μετατρέπουμε τα camelCase ονόματα στα ονόματα που περιμένει η λογική μας
+    # --- ΜΕΤΟΝΟΜΑΣΙΑ ΒΑΣΕΙ SCREENSHOT (CamelCase) ---
     mapping = {
         'employeeId': 'employee_id',
         'projectId': 'project_id',
@@ -124,84 +120,75 @@ def render_gantt_chart():
         if old_col in df_assign.columns:
             df_assign.rename(columns={old_col: new_col}, inplace=True)
 
-    # Έλεγχος κρίσιμων στηλών
-    required = ['employee_id', 'project_id', 'start_date', 'end_date']
-    if not all(c in df_assign.columns for c in required):
-        st.error("⚠️ Σφάλμα δομής δεδομένων στον πίνακα 'assignments'.")
-        return
-        
     try:
-        # Merge με Εργαζόμενους (για ονόματα στον Υ-άξονα)
+        # Merges
         df = df_assign.merge(df_emp[['id', 'name']], left_on='employee_id', right_on='id', how='left')
         df.rename(columns={'name': 'Εργαζόμενος'}, inplace=True)
         
-        # Merge με Έργα (για ονόματα στο Legend)
         df = df.merge(df_proj[['id', 'name']], left_on='project_id', right_on='id', how='left')
         df.rename(columns={'name': 'Έργο'}, inplace=True)
         
-        # Καθαρισμός ημερομηνιών
+        # Καθαρισμός Ημερομηνιών
         df['start_date'] = pd.to_datetime(df['start_date'], errors='coerce')
         df['end_date'] = pd.to_datetime(df['end_date'], errors='coerce')
         df = df.dropna(subset=['start_date', 'end_date', 'Εργαζόμενος'])
 
-        # --- ΕΠΙΛΟΓΗ ΧΡΩΜΑΤΙΣΜΟΥ (Όπως στον παλιό κώδικα) ---
-        # Αν υπάρχει στήλη colorHex στη βάση σου, τη χρησιμοποιούμε
-        color_col = 'Έργο'
-        discrete_map = None
-        
+        # --- ΔΗΜΙΟΥΡΓΙΑ EXCEL-LIKE LABEL ΓΙΑ ΤΗ ΜΠΑΡΑ ---
+        # Κατασκευάζουμε το κείμενο που θα φαίνεται ΜΕΣΑ στη μπάρα
+        def make_label(row):
+            start_t = row['start_date'].strftime('%H:%M')
+            end_t = row['end_date'].strftime('%H:%M')
+            return f"<b>{row['Έργο']}</b><br>{row['Εργαζόμενος']}<br>{start_t} - {end_t}"
+
+        df['display_label'] = df.apply(make_label, axis=1)
+
+        # Επιλογή Χρωμάτων
+        color_map = None
         if 'colorHex' in df.columns:
-            # Δημιουργούμε ένα λεξικό χρωμάτων αν υπάρχουν hex codes
-            temp_map = df.dropna(subset=['Έργο', 'colorHex']).set_index('Έργο')['colorHex'].to_dict()
-            if temp_map:
-                discrete_map = temp_map
+            color_map = df.dropna(subset=['Έργο', 'colorHex']).set_index('Έργο')['colorHex'].to_dict()
 
-        # Δυναμικό Hover Data
-        hover_list = ['Έργο']
-        if 'notes' in df.columns: hover_list.append('notes')
-        if 'role' in df.columns: hover_list.append('role')
-
-        # Δημιουργία του Gantt Chart με Plotly
+        # Δημιουργία Γραφήματος
         fig = px.timeline(
             df, 
             x_start="start_date", 
             x_end="end_date", 
             y="Εργαζόμενος", 
-            color=color_col,
-            color_discrete_map=discrete_map,
-            hover_data=hover_list,
-            template="plotly_white",
-            labels={"Εργαζόμενος": ""} # Κρύβουμε το label του άξονα Υ για καθαρότητα
+            color="Έργο",
+            color_discrete_map=color_map,
+            text="display_label", # Εμφάνιση του label μέσα στη μπάρα
+            hover_data=['Έργο', 'Εργαζόμενος', 'start_date', 'end_date'],
+            template="plotly_white"
         )
         
-        # Βελτίωση Layout (Αντιγραφή από την "παλιά" επιτυχημένη έκδοση)
-        fig.update_yaxes(autorange="reversed", tickfont=dict(size=12))
+        # Ρυθμίσεις εμφάνισης κειμένου εντός των μπαρών
+        fig.update_traces(
+            textposition='inside', 
+            insidetextanchor='start',
+            textfont=dict(size=11, color='white'),
+            marker=dict(line=dict(width=1, color='white')) # Λευκό περίγραμμα για "Excel" αίσθηση
+        )
+        
+        fig.update_yaxes(autorange="reversed", gridcolor="#e2e8f0")
         fig.update_xaxes(
-            dtick="D1", # Εμφάνιση ανά ημέρα
-            tickformat="%d %b",
-            gridcolor="#f1f5f9"
+            dtick="D1", 
+            tickformat="%d/%m\n%a", 
+            gridcolor="#e2e8f0",
+            side="top" # Οι ημερομηνίες πάνω όπως στο Excel
         )
         
         fig.update_layout(
-            height=400 + (len(df['Εργαζόμενος'].unique()) * 25), # Δυναμικό ύψος βάσει υπαλλήλων
-            margin=dict(l=10, r=10, t=50, b=10),
-            legend=dict(
-                orientation="h", 
-                yanchor="bottom", 
-                y=1.02, 
-                xanchor="right", 
-                x=1,
-                title=None
-            ),
-            hoverlabel=dict(bgcolor="white", font_size=13)
+            height=300 + (len(df['Εργαζόμενος'].unique()) * 50), # Πιο παχιές μπάρες για να χωράει το κείμενο
+            margin=dict(l=10, r=10, t=80, b=10),
+            showlegend=False, # Κρύβουμε το legend γιατί οι πληροφορίες είναι ήδη μέσα
+            font=dict(family="Arial", size=12)
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
     except Exception as e:
-        st.error(f"Σφάλμα κατά τη σχεδίαση: {e}")
-        st.info("💡 Δοκιμάστε να ανανεώσετε τα δεδομένα από τη σελίδα Διαχείρισης.")
+        st.error(f"Σφάλμα προβολής: {e}")
 
-# --- ΕΚΤΕΛΕΣΗ ΣΕΛΙΔΑΣ ---
+# --- ΕΚΤΕΛΕΣΗ ---
 quick_add_assignment()
 render_gantt_chart()
 gc.collect()
