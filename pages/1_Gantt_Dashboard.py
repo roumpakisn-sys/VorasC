@@ -30,7 +30,7 @@ st.markdown("""
 
 
 # ==========================================
-# 2. ΦΟΡΜΑ ΓΡΗΓΟΡΗΣ ΚΑΤΑΧΩΡΗΣΗΣ (ΣΕ FRAGMENT)
+# 2. ΦΟΡΜΑ ΓΡΗΓΟΡΗΣ ΚΑΤΑΧΩΡΗΣΗΣ
 # ==========================================
 @st.fragment
 def quick_add_assignment():
@@ -62,14 +62,15 @@ def quick_add_assignment():
                         emp_id = next(e['id'] for e in emps if e['name'] == sel_emp)
                         proj_id = next(p['id'] for p in projs if p['name'] == sel_proj)
                         
-                        # Εδώ χρησιμοποιούμε τα ονόματα που περιμένει η βάση σου
+                        # Χρήση των σωστών στηλών της βάσης σου για την εισαγωγή
                         new_data = {
-                            'employee_id': emp_id,
-                            'project_id': proj_id,
-                            'start_date': start_d.isoformat(),
-                            'end_date': end_d.isoformat(),
+                            'employeeId': emp_id,
+                            'projectId': proj_id,
+                            'startTime': start_d.isoformat(),
+                            'endTime': end_d.isoformat(),
                             'role': role,
-                            'notes': notes
+                            'notes': notes,
+                            'date': start_d.isoformat() # Προσθήκη και της στήλης date που υπάρχει στη βάση
                         }
                         
                         supabase = db.init_supabase()
@@ -85,7 +86,7 @@ def quick_add_assignment():
 
 
 # ==========================================
-# 3. ΔΙΑΓΡΑΜΜΑ GANTT (ΜΕ ΔΙΟΡΘΩΣΗ ΓΙΑ ΠΑΛΙΑ ΒΑΣΗ)
+# 3. ΔΙΑΓΡΑΜΜΑ GANTT (ΠΡΟΣΑΡΜΟΣΜΕΝΟ ΣΤΗ ΒΑΣΗ ΣΟΥ)
 # ==========================================
 @st.fragment
 def render_gantt_chart():
@@ -108,57 +109,63 @@ def render_gantt_chart():
         st.warning("Λείπουν δεδομένα Προσωπικού ή Έργων.")
         return
 
-    # --- ΕΞΥΠΝΗ ΔΙΟΡΘΩΣΗ ΣΤΗΛΩΝ ---
-    # Αν η βάση σου χρησιμοποιεί άλλα ονόματα αντί για employee_id / project_id
-    # προσπαθούμε να τα βρούμε και να τα μετονομάσουμε για το merge
+    # --- ΔΙΟΡΘΩΣΗ ΣΤΗΛΩΝ ΒΑΣΕΙ ΤΟΥ SCREENSHOT ---
     mapping = {
-        'worker_id': 'employee_id',
-        'emp_id': 'employee_id',
-        'proj_id': 'project_id'
+        'employeeId': 'employee_id',
+        'projectId': 'project_id',
+        'startTime': 'start_date',
+        'endTime': 'end_date'
     }
+    
     for old_col, new_col in mapping.items():
-        if old_col in df_assign.columns and new_col not in df_assign.columns:
+        if old_col in df_assign.columns:
             df_assign.rename(columns={old_col: new_col}, inplace=True)
 
-    # Έλεγχος αν μετά τη διόρθωση υπάρχουν οι στήλες
-    if 'employee_id' not in df_assign.columns or 'project_id' not in df_assign.columns:
-        st.error("⚠️ Σφάλμα Δομής: Η εφαρμογή δεν βρίσκει τις στήλες σύνδεσης (IDs) στον πίνακα assignments.")
-        st.info(f"Διαθέσιμες στήλες στη βάση σου: {', '.join(df_assign.columns)}")
+    # Έλεγχος αν υπάρχουν οι απαραίτητες στήλες για το γράφημα
+    required = ['employee_id', 'project_id', 'start_date', 'end_date']
+    missing = [c for c in required if c not in df_assign.columns]
+    
+    if missing:
+        st.error(f"⚠️ Σφάλμα: Λείπουν οι στήλες {', '.join(missing)} από τον πίνακα assignments.")
+        st.info(f"Στήλες που βρέθηκαν: {', '.join(df_assign.columns)}")
         return
         
     try:
-        # Συνένωση πινάκων
+        # Συνένωση με Εργαζομένους
         df = df_assign.merge(df_emp[['id', 'name']], left_on='employee_id', right_on='id')
         df.rename(columns={'name': 'Όνομα Εργαζομένου'}, inplace=True)
         
+        # Συνένωση με Έργα
         df = df.merge(df_proj[['id', 'name']], left_on='project_id', right_on='id')
         df.rename(columns={'name': 'Όνομα Έργου'}, inplace=True)
         
-        # Μετατροπή ημερομηνιών
+        # Μετατροπή ημερομηνιών σε μορφή pandas για το Plotly
         df['start_date'] = pd.to_datetime(df['start_date'])
         df['end_date'] = pd.to_datetime(df['end_date'])
         
-        # Δημιουργία Γραφήματος
+        # Δημιουργία Γραφήματος Gantt
         fig = px.timeline(
             df, 
             x_start="start_date", 
             x_end="end_date", 
             y="Όνομα Εργαζομένου", 
             color="Όνομα Έργου",
-            hover_name="role",
+            hover_data=['Όνομα Έργου', 'role', 'notes'],
             title="Πρόγραμμα Εργαζομένων",
             template="plotly_white"
         )
         
-        fig.update_yaxes(autorange="reversed")
-        fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10))
+        fig.update_yaxes(autorange="reversed") # Τα ονόματα από πάνω προς τα κάτω
+        fig.update_layout(
+            height=600, 
+            margin=dict(l=10, r=10, t=40, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
         
         st.plotly_chart(fig, use_container_width=True)
         
     except Exception as e:
         st.error(f"Σφάλμα κατά τη δημιουργία του γραφήματος: {e}")
-        st.write("Δοκιμάστε να πατήσετε 'Ανανέωση Δεδομένων' στη σελίδα Management.")
-
 
 # --- ΕΚΤΕΛΕΣΗ ---
 quick_add_assignment()
