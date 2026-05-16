@@ -51,7 +51,9 @@ def quick_add_assignment():
                 sel_proj = st.selectbox("Έργο", proj_names)
                 end_d = st.date_input("Έως Ημερομηνία", date.today() + timedelta(days=1))
             with col3:
-                role = st.selectbox("Τύπος", ["Κανονική Βάρδια", "Υπερωρία", "Άδεια"])
+                # Προσαρμογή: Αν δεν υπάρχει στήλη role, μπορούμε να βάζουμε την πληροφορία στις σημειώσεις
+                # ή να χρησιμοποιήσουμε κάποια άλλη στήλη όπως colorName αν τη χρησιμοποιούσες για κατηγορίες
+                role_val = st.selectbox("Τύπος", ["Κανονική Βάρδια", "Υπερωρία", "Άδεια"])
                 notes = st.text_input("Σημειώσεις")
             
             submit = st.form_submit_button("Αποθήκευση Βάρδιας")
@@ -62,15 +64,14 @@ def quick_add_assignment():
                         emp_id = next(e['id'] for e in emps if e['name'] == sel_emp)
                         proj_id = next(p['id'] for p in projs if p['name'] == sel_proj)
                         
-                        # Χρήση των σωστών στηλών της βάσης σου για την εισαγωγή
+                        # Χρήση των σωστών στηλών της βάσης σου
                         new_data = {
                             'employeeId': emp_id,
                             'projectId': proj_id,
                             'startTime': start_d.isoformat(),
                             'endTime': end_d.isoformat(),
-                            'role': role,
-                            'notes': notes,
-                            'date': start_d.isoformat() # Προσθήκη και της στήλης date που υπάρχει στη βάση
+                            'notes': f"[{role_val}] {notes}" if notes else role_val,
+                            'date': start_d.isoformat()
                         }
                         
                         supabase = db.init_supabase()
@@ -121,13 +122,12 @@ def render_gantt_chart():
         if old_col in df_assign.columns:
             df_assign.rename(columns={old_col: new_col}, inplace=True)
 
-    # Έλεγχος αν υπάρχουν οι απαραίτητες στήλες για το γράφημα
+    # Έλεγχος αν υπάρχουν οι απαραίτητες στήλες
     required = ['employee_id', 'project_id', 'start_date', 'end_date']
     missing = [c for c in required if c not in df_assign.columns]
     
     if missing:
         st.error(f"⚠️ Σφάλμα: Λείπουν οι στήλες {', '.join(missing)} από τον πίνακα assignments.")
-        st.info(f"Στήλες που βρέθηκαν: {', '.join(df_assign.columns)}")
         return
         
     try:
@@ -139,10 +139,17 @@ def render_gantt_chart():
         df = df.merge(df_proj[['id', 'name']], left_on='project_id', right_on='id')
         df.rename(columns={'name': 'Όνομα Έργου'}, inplace=True)
         
-        # Μετατροπή ημερομηνιών σε μορφή pandas για το Plotly
+        # Μετατροπή ημερομηνιών
         df['start_date'] = pd.to_datetime(df['start_date'])
         df['end_date'] = pd.to_datetime(df['end_date'])
         
+        # --- Δυναμική δημιουργία Hover Data ---
+        # Προσθέτουμε μόνο στήλες που υπάρχουν πραγματικά στο DataFrame
+        h_data = ['Όνομα Έργου']
+        if 'role' in df.columns: h_data.append('role')
+        if 'notes' in df.columns: h_data.append('notes')
+        if 'colorName' in df.columns: h_data.append('colorName')
+
         # Δημιουργία Γραφήματος Gantt
         fig = px.timeline(
             df, 
@@ -150,12 +157,12 @@ def render_gantt_chart():
             x_end="end_date", 
             y="Όνομα Εργαζομένου", 
             color="Όνομα Έργου",
-            hover_data=['Όνομα Έργου', 'role', 'notes'],
+            hover_data=h_data,
             title="Πρόγραμμα Εργαζομένων",
             template="plotly_white"
         )
         
-        fig.update_yaxes(autorange="reversed") # Τα ονόματα από πάνω προς τα κάτω
+        fig.update_yaxes(autorange="reversed")
         fig.update_layout(
             height=600, 
             margin=dict(l=10, r=10, t=40, b=10),
