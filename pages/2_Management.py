@@ -566,6 +566,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             elif r_type == "Επιλεγμένες Μέρες Εβδομάδας":
                                 if curr_date.weekday() in selected_weekday_ints: dates_to_assign.append(curr_date)
                                 curr_date += timedelta(days=1)
+                            else:
+                                curr_date += timedelta(days=1)
                                 
                         success_count, conflict_count, conflict_details = 0, 0, []
                         for d in dates_to_assign:
