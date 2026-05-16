@@ -3,8 +3,11 @@ import pandas as pd
 import database as db
 
 # ==========================================
-# 1. ΕΛΕΓΧΟΣ ΠΡΟΣΒΑΣΗΣ
+# 1. ΕΛΕΓΧΟΣ ΠΡΟΣΒΑΣΗΣ & ΡΥΘΜΙΣΗ ΣΕΛΙΔΑΣ
 # ==========================================
+# Ρύθμιση σελίδας για να έχουμε το σωστό τίτλο στο tab του browser
+st.set_page_config(page_title="Διαχείριση - Staff Manager", page_icon="🗂️", layout="wide")
+
 # Αν ο χρήστης δεν είναι συνδεδεμένος, σταματάμε την εκτέλεση
 if not st.session_state.get('current_user'):
     st.warning("⚠️ Παρακαλώ συνδεθείτε από την αρχική σελίδα για να δείτε αυτή την ενότητα.")
@@ -28,7 +31,7 @@ def render_employees_tab():
     employees = db.fetch_paginated('employees')
     
     # Φόρμα Προσθήκης
-    with st.expander("➕ Προσθήκη Νέου Εργαζομένου"):
+    with st.expander("➕ Προσθήκη Νέου Εργαζομένου", expanded=False):
         with st.form("new_employee_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -53,7 +56,7 @@ def render_employees_tab():
                             db.add_to_undo_stack("INSERT", "employees", inserted_id, new_emp)
                             
                             st.success(f"Ο/Η {name} προστέθηκε επιτυχώς!")
-                            db.fetch_paginated.clear() # Καθαρισμός cache για να φανεί αμέσως
+                            db.fetch_paginated.clear() # Καθαρισμός cache
                             st.rerun()
                     except Exception as e:
                         st.error(f"Σφάλμα κατά την αποθήκευση: {e}")
@@ -61,7 +64,6 @@ def render_employees_tab():
     # Προβολή του πίνακα
     if employees:
         df_emps = pd.DataFrame(employees)
-        # Επιλογή και μετονομασία στηλών για την οθόνη
         cols_to_show = ['name', 'specialty']
         if 'created_at' in df_emps.columns:
             cols_to_show.append('created_at')
@@ -86,7 +88,7 @@ def render_projects_tab():
     projects = db.fetch_paginated('projects')
     
     # Φόρμα Προσθήκης
-    with st.expander("➕ Προσθήκη Νέου Έργου"):
+    with st.expander("➕ Προσθήκη Νέου Έργου", expanded=False):
         with st.form("new_project_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
