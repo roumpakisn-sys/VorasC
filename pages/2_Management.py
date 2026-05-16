@@ -13,20 +13,20 @@ if not st.session_state.get('current_user'):
     st.stop()
 
 st.title("🗂️ Διαχείριση Προσωπικού & Έργων")
-st.write("Εδώ μπορείτε να διαχειριστείτε τους εργαζομένους και τα ενεργά έργα/τοποθεσίες σας.")
+st.write("Σύνδεση με την υπάρχουσα βάση δεδομένων ενεργή.")
 st.write("---")
 
-# Δημιουργούμε δύο καρτέλες (Tabs) για να είναι τακτοποιημένη η οθόνη
-tab_employees, tab_projects = st.tabs(["👥 Προσωπικό", "🏗️ Έργα"])
+# Δημιουργούμε τρεις καρτέλες (Tabs) για να συμπεριλάβουμε και το Ιστορικό της βάσης σου
+tab_employees, tab_projects, tab_history = st.tabs(["👥 Προσωπικό", "🏗️ Έργα", "📜 Ιστορικό Βάσης"])
 
 # ==========================================
-# 2. ΚΑΡΤΕΛΑ: ΠΡΟΣΩΠΙΚΟ (Χρήση στήλης 'position')
+# 2. ΚΑΡΤΕΛΑ: ΠΡΟΣΩΠΙΚΟ (Συγχρονισμένο με στήλη 'position')
 # ==========================================
 @st.fragment
 def render_employees_tab():
     st.subheader("Λίστα Εργαζομένων")
     
-    # Φόρτωση εργαζομένων από τη βάση (Cached)
+    # Φόρτωση εργαζομένων από την υπάρχουσα βάση
     employees = db.fetch_paginated('employees')
     
     # Φόρμα Προσθήκης
@@ -36,7 +36,7 @@ def render_employees_tab():
             with col1:
                 name = st.text_input("Ονοματεπώνυμο *")
             with col2:
-                # Χρησιμοποιούμε τη μεταβλητή για τη στήλη 'position' της βάσης σου
+                # Αντιστοίχιση με τη στήλη 'position' της βάσης σου
                 pos_input = st.text_input("Ειδικότητα / Πόστο")
             
             submit_emp = st.form_submit_button("Αποθήκευση Εργαζομένου")
@@ -47,18 +47,18 @@ def render_employees_tab():
                 else:
                     try:
                         supabase = db.init_supabase()
-                        # Αποθήκευση στη στήλη 'position' σύμφωνα με τη βάση σου
+                        # Χρήση 'position' για να "κουμπώσει" στην παλιά βάση
                         new_emp = {'name': name, 'position': pos_input}
                         res = supabase.table('employees').insert(new_emp).execute()
                         
                         if res.data:
                             inserted_id = res.data[0]['id']
-                            # Καταγραφή στο activity_logs (username, action_type)
+                            # Καταγραφή στο υπάρχον activity_logs (username, action_type)
                             db.log_activity("ΠΡΟΣΘΗΚΗ", "employees", f"Νέος εργαζόμενος: {name}", st.session_state.current_user)
                             db.add_to_undo_stack("INSERT", "employees", inserted_id, new_emp)
                             
                             st.success(f"Ο/Η {name} προστέθηκε επιτυχώς!")
-                            db.fetch_paginated.clear() # Καθαρισμός cache
+                            db.fetch_paginated.clear() 
                             st.rerun()
                     except Exception as e:
                         st.error(f"Σφάλμα κατά την αποθήκευση: {e}")
@@ -66,7 +66,7 @@ def render_employees_tab():
     # Προβολή του πίνακα
     if employees:
         df_emps = pd.DataFrame(employees)
-        # Επιλογή στηλών που υπάρχουν στη βάση σου
+        # Επιλογή στηλών που υπάρχουν ήδη στη βάση σου
         cols_to_show = [c for c in ['name', 'position', 'created_at'] if c in df_emps.columns]
             
         display_df = df_emps[cols_to_show].rename(columns={
@@ -76,19 +76,17 @@ def render_employees_tab():
         })
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("Δεν βρέθηκαν εργαζόμενοι στη βάση.")
+        st.info("Δεν βρέθηκαν εργαζόμενοι στην υπάρχουσα βάση.")
 
 # ==========================================
-# 3. ΚΑΡΤΕΛΑ: ΕΡΓΑ (ΣΕ FRAGMENT ΓΙΑ ΤΑΧΥΤΗΤΑ)
+# 3. ΚΑΡΤΕΛΑ: ΕΡΓΑ
 # ==========================================
 @st.fragment
 def render_projects_tab():
-    st.subheader("Λίστα Έργων")
+    st.subheader("Λίστα Έργων / Τοποθεσιών")
     
-    # Φόρτωση έργων από τη βάση
     projects = db.fetch_paginated('projects')
     
-    # Φόρμα Προσθήκης
     with st.expander("➕ Προσθήκη Νέου Έργου", expanded=False):
         with st.form("new_project_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -119,7 +117,6 @@ def render_projects_tab():
                     except Exception as e:
                         st.error(f"Σφάλμα κατά την αποθήκευση: {e}")
 
-    # Προβολή του πίνακα
     if projects:
         df_projs = pd.DataFrame(projects)
         cols_to_show = [c for c in ['name', 'location', 'created_at'] if c in df_projs.columns]
@@ -131,8 +128,40 @@ def render_projects_tab():
         })
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("Δεν βρέθηκαν ενεργά έργα στη βάση.")
+        st.info("Δεν βρέθηκαν ενεργά έργα στην υπάρχουσα βάση.")
 
+# ==========================================
+# 4. ΚΑΡΤΕΛΑ: ΙΣΤΟΡΙΚΟ (Ανάγνωση από activity_logs)
+# ==========================================
+@st.fragment
+def render_history_tab():
+    st.subheader("Ιστορικό Ενεργειών Συστήματος")
+    st.write("Προβολή των τελευταίων 100 κινήσεων στη βάση δεδομένων.")
+    
+    # Φόρτωση logs από τον πίνακα που μου έδειξες στην εικόνα
+    logs = db.fetch_paginated('activity_logs')
+    
+    if logs:
+        df_logs = pd.DataFrame(logs)
+        # Μετατροπή ημερομηνίας για καλύτερη ανάγνωση
+        if 'timestamp' in df_logs.columns:
+            df_logs['timestamp'] = pd.to_datetime(df_logs['timestamp']).dt.strftime('%d/%m/%Y %H:%M')
+        
+        # Αντιστοίχιση στηλών με τα ονόματα της βάσης σου (username, action_type)
+        cols_to_show = [c for c in ['timestamp', 'username', 'action_type', 'table_name', 'details'] if c in df_logs.columns]
+        
+        display_df = df_logs[cols_to_show].rename(columns={
+            'timestamp': 'Ημερομηνία/Ώρα',
+            'username': 'Χρήστης',
+            'action_type': 'Ενέργεια',
+            'table_name': 'Πίνακας',
+            'details': 'Λεπτομέρειες'
+        })
+        
+        # Εμφάνιση με τα πιο πρόσφατα πάνω-πάνω
+        st.dataframe(display_df.iloc[::-1], use_container_width=True, hide_index=True)
+    else:
+        st.info("Το ιστορικό είναι κενό.")
 
 # --- ΕΚΤΕΛΕΣΗ ΤΩΝ ΣΤΟΙΧΕΙΩΝ ΣΤΑ TABS ---
 with tab_employees:
@@ -140,3 +169,6 @@ with tab_employees:
 
 with tab_projects:
     render_projects_tab()
+
+with tab_history:
+    render_history_tab()
