@@ -25,6 +25,7 @@ st.markdown("""
     .stPlotlyChart {
         border: 1px solid #cbd5e1;
         border-radius: 8px;
+        background-color: #f8fafc;
     }
     .leave-conflict-box {
         padding: 12px;
@@ -121,7 +122,7 @@ def render_dashboard():
         curr_iso = curr_date.isoformat()
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
         
-        # --- ΑΔΕΙΕΣ ΗΜΕΡΑΣ (Μορφή PDF: Επίθετο Ο.) ---
+        # --- ΑΔΕΙΕΣ ΗΜΕΡΑΣ ---
         leaves_today = [l for l in leaves if l['startDate'] <= curr_iso <= l['endDate']]
         leaves_formatted = []
         for l in leaves_today:
@@ -139,11 +140,7 @@ def render_dashboard():
                 leaves_formatted.append(f"<b>{short}</b>")
         
         leaves_str = "<br><br>".join(leaves_formatted) if leaves_formatted else "Καμία"
-        
-        if leaves_formatted:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
-        else:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
+        base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
         
         # --- ΒΑΡΔΙΕΣ ΗΜΕΡΑΣ ---
         day_assigns = [a for a in assignments if a['date'] == curr_iso]
@@ -193,7 +190,7 @@ def render_dashboard():
             groups[key]['Employees'].append(fname)
             groups[key]['AssignmentIds'].append(a['id'])
 
-        # --- LANE ALLOCATION (Προτεραιότητα Χρωμάτων) ---
+        # --- LANE ALLOCATION ---
         nb_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
         b_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
         
@@ -230,7 +227,7 @@ def render_dashboard():
             if g['Notes']: txt += f" ({g['Notes'].upper()})"
             
             dur = (g['End'] - g['Start']).total_seconds() / 3600.0
-            wrapped = "<br>".join(textwrap.wrap(txt, width=max(15, int(dur * 16))))
+            wrapped = "<br>".join(textwrap.wrap(txt, width=max(15, int(dur * 18))))
             if g['is_cancelled']: wrapped = f"<s>{wrapped}</s>"
 
             data.append({
@@ -240,7 +237,7 @@ def render_dashboard():
             color_map[g['LegendGroup']] = g['ColorHex']
             wk_groups[g['Key']] = g
 
-        # Υπολογισμός Κεντραρίσματος στον Άξονα Υ
+        # Κεντράρισμα στον Άξονα Υ
         day_rows_sorted = sorted(day_row_ids)
         y_category_order.extend(day_rows_sorted)
         
@@ -254,16 +251,13 @@ def render_dashboard():
             tickvals_map[rid] = base_y_label
 
     # --- 3.4 Σχεδίαση με Plotly ---
-    if not data:
-        df_plot = pd.DataFrame([{'Y': f"day_{i}_empty", 'Start': datetime(1970,1,1,9,0), 'End': datetime(1970,1,1,9,0), 'Label': '', 'Proj': '', 'Color': '#ffffff', 'Key': 'Empty', 'Legend': ''} for i in range(7)])
-    else:
-        df_plot = pd.DataFrame(data)
+    df_plot = pd.DataFrame(data) if data else pd.DataFrame([{'Y': f"day_{i}_empty", 'Start': datetime(1970,1,1,9,0), 'End': datetime(1970,1,1,9,0), 'Label': '', 'Proj': '', 'Color': '#ffffff', 'Key': 'Empty', 'Legend': ''} for i in range(7)])
     
     ordered = y_category_order[::-1]
     
-    # Ρύθμιση Ύψους για Compact Εμφάνιση
-    row_h = 45 * zoom_factor
-    dyn_h = 600 # Σταθερό ύψος εσωτερικού παραθύρου
+    # Αυξημένο ύψος γραμμής για αποφυγή του "κολλήματος"
+    row_h = 55 * zoom_factor
+    dyn_h = max(750, int(len(ordered) * row_h) + 150)
 
     fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", 
                      color_discrete_map=color_map, text="Label", custom_data=["Key"])
@@ -274,30 +268,30 @@ def render_dashboard():
         if d_idxs:
             mn, mx = min(d_idxs), max(d_idxs)
             if di % 2 != 0: 
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.04)", layer="below", line_width=0)
             if (start_of_week + timedelta(days=di)) == date.today(): 
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=0.7, layer="below", line_width=0)
 
     # Έντονες μαύρες διαχωριστικές γραμμές
     for idx in range(len(ordered) - 1):
         if ordered[idx].split('_')[1] != ordered[idx+1].split('_')[1]:
-            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="black", width=4))
+            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#1e293b", width=3))
 
     fig.update_traces(
         textposition='inside', insidetextanchor='middle', 
-        textfont=dict(color='black', size=max(7, int(8.5*zoom_factor)), family="Arial Black"), 
-        marker=dict(line=dict(color='black', width=1)),
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial"), 
+        marker=dict(line=dict(color='black', width=0.5)),
         constraintext='none', hoverinfo='none'
     )
 
     fig.update_layout(
-        bargap=0.15, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
-        margin=dict(l=10, r=10, t=50, b=10),
-        dragmode='pan', # Ενεργοποίηση "μετακίνησης" μέσα στο παράθυρο
+        bargap=0.2, showlegend=False, plot_bgcolor='#f1f5f9', paper_bgcolor='#ffffff', height=dyn_h, 
+        margin=dict(l=10, r=10, t=60, b=10),
+        dragmode='pan',
         xaxis=dict(
-            side='top', tickformat="%H:%M", dtick=1800000, gridcolor='black', gridwidth=1, 
-            range=[datetime(1970,1,1,6,0), datetime(1970,1,1,18,0)],
-            tickfont=dict(size=max(8, int(10*zoom_factor)), color="black"),
+            side='top', tickformat="%H:%M", dtick=1800000, gridcolor='rgba(0,0,0,0.2)', gridwidth=1, 
+            range=[datetime(1970,1,1,6,0), datetime(1970,1,1,19,0)],
+            tickfont=dict(size=max(9, int(11*zoom_factor)), color="black", bold=True),
             fixedrange=False
         ),
         yaxis=dict(
@@ -307,19 +301,18 @@ def render_dashboard():
             categoryorder='array', 
             categoryarray=ordered, 
             title="",
-            tickfont=dict(size=max(8, int(11*zoom_factor)), color="black"),
-            fixedrange=False # Επιτρέπει την κίνηση στον άξονα Υ
+            tickfont=dict(size=max(8, int(11*zoom_factor)), color="#1e293b"),
+            fixedrange=False
         )
     )
 
     event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
     
-    # Διαχείριση κλικ
     clicked_key = None
     if event and "selection" in event and event["selection"]["points"]:
         clicked_key = event["selection"]["points"][0].get("customdata", [None])[0]
 
-    # --- 3.5 Interaction & Forms ---
+    # --- 3.5 Forms ---
     if not presentation_mode:
         st.divider()
         col_add, col_edit = st.columns(2)
