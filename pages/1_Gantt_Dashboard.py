@@ -88,7 +88,7 @@ def render_dashboard():
         st.write("")
         st.button(" Σήμερα", on_click=go_to_today, use_container_width=True)
     with col_zoom:
-        zoom_level = st.slider(" Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
+        zoom_level = st.slider(" Ζουμ Διαγράμματος (%)", min_value=50, max_value=150, value=100, step=5)
         zoom_factor = zoom_level / 100.0
     with col_pres:
         st.write("")
@@ -149,7 +149,6 @@ def render_dashboard():
         # --- ΒΑΡΔΙΕΣ ΗΜΕΡΑΣ ---
         day_assigns = [a for a in assignments if a['date'] == curr_iso]
         
-        # Ευρετήριο για το "ΜΕΤΑ ΑΠΟ"
         emp_day_map = {}
         for da in day_assigns:
             eid = da.get('employeeId')
@@ -167,7 +166,6 @@ def render_dashboard():
             arr = a.get('arrivalTime', "")
             if arr: arr = arr[:5]
 
-            # Key ομαδοποίησης ακριβώς όπως στο PDF
             key = f"{curr_iso}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_c}_{arr}"
             
             if key not in groups:
@@ -188,7 +186,6 @@ def render_dashboard():
                 np = raw_name.split()
                 fname = f"{np[-1]} {np[0][0]}." if len(np) > 1 else raw_name
                 
-                # Λογική "ΜΕΤΑ ΑΠΟ"
                 prevs = [pa for pa in emp_day_map.get(eid, []) if pa['id'] != a['id'] and pa['endTime'][:5] <= a['startTime'][:5]]
                 if prevs:
                     prevs.sort(key=lambda x: x['endTime'][:5], reverse=True)
@@ -202,34 +199,33 @@ def render_dashboard():
         nb_groups = [g for g in groups.values() if g['ColorHex'].lower() != "#4a86e8"]
         b_groups = [g for g in groups.values() if g['ColorHex'].lower() == "#4a86e8"]
         
-        mapping = []
-        lanes = [] # Για τα μη-μπλε
+        day_mapping = []
+        lanes = [] 
         for g in sorted(nb_groups, key=lambda x: x['Start']):
             idx = next((i for i, end in enumerate(lanes) if g['Start'] >= end), None)
             if idx is None:
                 lanes.append(g['End'])
-                mapping.append((g, len(lanes)-1))
+                day_mapping.append((g, len(lanes)-1))
             else:
                 lanes[idx] = g['End']
-                mapping.append((g, idx))
+                day_mapping.append((g, idx))
         
         nb_count = len(lanes)
-        blanes = [] # Για τα μπλε
+        blanes = [] 
         for g in sorted(b_groups, key=lambda x: x['Start']):
             idx = next((i for i, end in enumerate(blanes) if g['Start'] >= end), None)
             if idx is None:
                 blanes.append(g['End'])
-                mapping.append((g, len(blanes)-1 + nb_count))
+                day_mapping.append((g, len(blanes)-1 + nb_count))
             else:
                 blanes[idx] = g['End']
-                mapping.append((g, idx + nb_count))
+                day_mapping.append((g, idx + nb_count))
 
         day_row_ids = []
-        for g, row_idx in mapping:
+        for g, row_idx in day_mapping:
             rid = f"day_{i}_row_{row_idx}"
             day_row_ids.append(rid)
             
-            # Κατασκευή Label (Όπως στο PDF)
             emps_str = ", ".join(g['Employees']).upper()
             arrival_str = f"[Προσ: {g['ArrivalTime']}] " if g['ArrivalTime'] else ""
             txt = f"{arrival_str}{g['StartTime']}-{g['EndTime']} {g['Project'].upper()} // {emps_str}"
@@ -246,13 +242,18 @@ def render_dashboard():
             color_map[g['LegendGroup']] = g['ColorHex']
             wk_groups[g['Key']] = g
 
-        # Άξονας Υ
-        y_category_order.extend(day_row_ids)
-        for idx, rid in enumerate(day_row_ids):
-            tickvals_map[rid] = base_y_label if idx == len(day_row_ids)//2 else ""
-            
-        if not day_row_ids:
-            rid = f"day_{i}_empty"; y_category_order.append(rid); tickvals_map[rid] = base_y_label
+        # Υπολογισμός Κεντραρίσματος στον Άξονα Υ
+        day_rows_sorted = sorted(day_row_ids)
+        y_category_order.extend(day_rows_sorted)
+        
+        if day_rows_sorted:
+            mid_idx_pos = len(day_rows_sorted) // 2
+            for idx, rid in enumerate(day_rows_sorted):
+                tickvals_map[rid] = base_y_label if idx == mid_idx_pos else ""
+        else:
+            rid = f"day_{i}_empty"
+            y_category_order.append(rid)
+            tickvals_map[rid] = base_y_label
 
     # --- 3.4 Σχεδίαση με Plotly ---
     if not data:
@@ -260,15 +261,38 @@ def render_dashboard():
 
     df_plot = pd.DataFrame(data)
     ordered = y_category_order[::-1]
-    fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", color_discrete_map=color_map, text="Label", custom_data=["Key"])
+    
+    # Ύψος και Παράθυρο Πλοήγησης
+    row_h = 45 * zoom_factor # Πιο συμμαζεμένο ύψος ανά γραμμή
+    if presentation_mode:
+        dyn_h = max(600, int(len(ordered) * row_h) + 100)
+        y_range = None
+    else:
+        dyn_h = 650 # Σταθερό "εσωτερικό παράθυρο"
+        # Εστίαση στην τρέχουσα ημέρα αν υπάρχει
+        offset = (date.today() - start_of_week).days
+        if 0 <= offset <= 6:
+            current_day_cats = [idx for idx, v in enumerate(ordered) if v.startswith(f"day_{offset}_")]
+            if current_day_cats:
+                mid_val = sum(current_day_cats) / len(current_day_cats)
+                y_range = [mid_val - 6, mid_val + 6]
+            else:
+                y_range = [len(ordered)-12, len(ordered)]
+        else:
+            y_range = [len(ordered)-12, len(ordered)]
 
-    # Σκίαση Ημερών & Διαχωριστικά (Replica PDF)
+    fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", 
+                     color_discrete_map=color_map, text="Label", custom_data=["Key"])
+
+    # Σκίαση Ημερών & Διαχωριστικά
     for di in range(7):
         d_idxs = [idx for idx, v in enumerate(ordered) if v.startswith(f"day_{di}_")]
         if d_idxs:
             mn, mx = min(d_idxs), max(d_idxs)
-            if di % 2 != 0: fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
-            if (start_of_week + timedelta(days=di)) == date.today(): fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
+            if di % 2 != 0: 
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
+            if (start_of_week + timedelta(days=di)) == date.today(): 
+                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
 
     # Έντονες μαύρες διαχωριστικές γραμμές
     for idx in range(len(ordered) - 1):
@@ -277,25 +301,26 @@ def render_dashboard():
 
     fig.update_traces(
         textposition='inside', insidetextanchor='middle', 
-        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"), 
+        textfont=dict(color='black', size=max(7, int(8.5*zoom_factor)), family="Arial Black"), 
         marker=dict(line=dict(color='black', width=1)),
         constraintext='none', hoverinfo='none'
     )
-    
-    row_h = 55 * zoom_factor
-    dyn_h = max(500, int(len(ordered) * row_h) + 100)
 
     fig.update_layout(
-        bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
+        bargap=0.15, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
+        margin=dict(l=10, r=10, t=50, b=10),
+        dragmode='pan', # Ενεργοποίηση "μετακίνησης" μέσα στο παράθυρο
         xaxis=dict(
             side='top', tickformat="%H:%M", dtick=1800000, gridcolor='black', gridwidth=1, 
-            range=[datetime(1970,1,1,6,0), datetime(1970,1,1,17,0)],
-            tickfont=dict(size=max(8, int(11*zoom_factor)), color="black")
+            range=[datetime(1970,1,1,6,0), datetime(1970,1,1,18,0)],
+            tickfont=dict(size=max(8, int(10*zoom_factor)), color="black"),
+            fixedrange=False
         ),
         yaxis=dict(
             tickmode='array', tickvals=ordered, ticktext=[tickvals_map.get(v, "") for v in ordered], 
             categoryorder='array', categoryarray=ordered, title="",
-            tickfont=dict(size=max(8, int(12*zoom_factor)), color="black")
+            tickfont=dict(size=max(8, int(11*zoom_factor)), color="black"),
+            range=y_range, fixedrange=False
         )
     )
 
