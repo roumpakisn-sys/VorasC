@@ -107,7 +107,6 @@ def render_dashboard():
 
     # 3.3 Data Processing (Πιστή αντιγραφή από PDF)
     data = []
-    export_data = []
     color_map = {}
     y_category_order = []
     tickvals_map = {}
@@ -148,7 +147,6 @@ def render_dashboard():
         
         # --- ΒΑΡΔΙΕΣ ΗΜΕΡΑΣ ---
         day_assigns = [a for a in assignments if a['date'] == curr_iso]
-        
         emp_day_map = {}
         for da in day_assigns:
             eid = da.get('employeeId')
@@ -247,31 +245,25 @@ def render_dashboard():
         y_category_order.extend(day_rows_sorted)
         
         if day_rows_sorted:
-            # Το κείμενο της ημέρας μπαίνει ακριβώς στη μέση των γραμμών της ημέρας
             mid_idx_pos = len(day_rows_sorted) // 2
             for idx, rid in enumerate(day_rows_sorted):
                 tickvals_map[rid] = base_y_label if idx == mid_idx_pos else ""
         else:
-            # Αν η μέρα είναι κενή, δημιουργούμε μια εικονική γραμμή για να φαίνεται η ημερομηνία
             rid = f"day_{i}_empty"
             y_category_order.append(rid)
             tickvals_map[rid] = base_y_label
 
     # --- 3.4 Σχεδίαση με Plotly ---
     if not data:
-        # Ακόμα και αν δεν υπάρχουν δεδομένα, εμφανίζουμε τις κενές μέρες
         df_plot = pd.DataFrame([{'Y': f"day_{i}_empty", 'Start': datetime(1970,1,1,9,0), 'End': datetime(1970,1,1,9,0), 'Label': '', 'Proj': '', 'Color': '#ffffff', 'Key': 'Empty', 'Legend': ''} for i in range(7)])
     else:
         df_plot = pd.DataFrame(data)
     
     ordered = y_category_order[::-1]
     
-    # Ύψος και Παράθυρο Πλοήγησης
-    row_h = 45 * zoom_factor # Πιο συμμαζεμένο ύψος ανά γραμμή
-    if presentation_mode:
-        dyn_h = max(600, int(len(ordered) * row_h) + 100)
-    else:
-        dyn_h = 700 # Σταθερό "εσωτερικό παράθυρο" για όλες τις μέρες
+    # Ρύθμιση Ύψους για Compact Εμφάνιση
+    row_h = 45 * zoom_factor
+    dyn_h = 600 # Σταθερό ύψος εσωτερικού παραθύρου
 
     fig = px.timeline(df_plot, x_start="Start", x_end="End", y="Y", color="Legend", 
                      color_discrete_map=color_map, text="Label", custom_data=["Key"])
@@ -286,9 +278,8 @@ def render_dashboard():
             if (start_of_week + timedelta(days=di)) == date.today(): 
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", layer="below", line_width=0)
 
-    # Έντονες μαύρες διαχωριστικές γραμμές μεταξύ ημερών
+    # Έντονες μαύρες διαχωριστικές γραμμές
     for idx in range(len(ordered) - 1):
-        # Αν η επόμενη κατηγορία ανήκει σε άλλη μέρα (π.χ. day_0 vs day_1)
         if ordered[idx].split('_')[1] != ordered[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="black", width=4))
 
@@ -302,7 +293,7 @@ def render_dashboard():
     fig.update_layout(
         bargap=0.15, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', height=dyn_h, 
         margin=dict(l=10, r=10, t=50, b=10),
-        dragmode='pan', # Επιτρέπει τη μετακίνηση (scrolling) με το ποντίκι
+        dragmode='pan', # Ενεργοποίηση "μετακίνησης" μέσα στο παράθυρο
         xaxis=dict(
             side='top', tickformat="%H:%M", dtick=1800000, gridcolor='black', gridwidth=1, 
             range=[datetime(1970,1,1,6,0), datetime(1970,1,1,18,0)],
