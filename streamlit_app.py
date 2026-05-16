@@ -1,40 +1,45 @@
 import streamlit as st
-import database as db
-import time
 
-# ==========================================
-# 1. ΡΥΘΜΙΣΗ ΣΕΛΙΔΑΣ (Πρέπει να είναι η 1η εντολή)
-# ==========================================
-st.set_page_config(page_title="Staff Manager Pro", page_icon="🏢", layout="wide")
+# ΠΡΕΠΕΙ να είναι η πρώτη εντολή Streamlit
+st.set_page_config(page_title="Staff Manager Pro", layout="wide")
 
-# Αρχικοποίηση μεταβλητών μνήμης από τη βάση (database.py)
-db.init_session_state()
+import utils
 
-# ==========================================
-# 2. ΕΞΥΠΝΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ (SMART POLLING)
-# ==========================================
-# Το fragment αυτό τρέχει αόρατα στο παρασκήνιο κάθε 15 δευτερόλεπτα.
-# ΔΕΝ κάνει refresh όλη τη σελίδα, άρα δεν διακόπτει την εργασία σου!
-@st.fragment(run_every=15)
-def background_sync():
-    if st.session_state.get('current_user'):
-        latest_db_ts = db.get_latest_activity_timestamp()
-        
-        # Αν κάποιος άλλος χρήστης έκανε μια αλλαγή στη Supabase...
-        if latest_db_ts and latest_db_ts != st.session_state.global_db_ts:
-            st.session_state.global_db_ts = latest_db_ts
-            # Καθαρίζουμε την προσωρινή μνήμη. 
-            # Στο επόμενο κλικ, η εφαρμογή θα τραβήξει ακαριαία τα νέα δεδομένα!
-            db.fetch_paginated.clear()
+# --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
 
-# ==========================================
-# 3. ΣΥΣΤΗΜΑ ΕΙΣΟΔΟΥ (LOGIN)
-# ==========================================
-if not st.session_state.current_user:
-    # Αν ο χρήστης δεν έχει κάνει Login, κρύβουμε το μενού
-    st.markdown("""
-        <style>
-            [data-testid="stSidebar"] { display: none; }
+if not st.session_state.authenticated:
+    st.markdown("<h1 style='text-align: center; margin-top: 10vh;'>🛡️ Staff Manager Pro</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ επιλέξτε χρήστη και εισάγετε τον κωδικό πρόσβασης.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        with st.form("login_form"):
+            username = st.selectbox("Χρήστης", ["Admin", "EXOUZ", "MEMEK", "NAK", "TAN"])
+            password = st.text_input("Κωδικός Πρόσβασης", type="password")
+            submit = st.form_submit_button("Είσοδος", use_container_width=True)
+            
+            if submit:
+                valid_passwords = {
+                    "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
+                    "EXOUZ": st.secrets.get("USER1_PASSWORD", "pass1"),
+                    "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
+                    "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
+                    "TAN": st.secrets.get("USER4_PASSWORD", "pass4")
+                }
+                
+                if password == valid_passwords.get(username):
+                    st.session_state.authenticated = True
+                    st.session_state.current_user = username
+                    st.switch_page("pages/1_Gantt_Dashboard.py")
+                else:
+                    st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
+else:
+    # Αν είναι ήδη συνδεδεμένος, προώθηση στο Dashboard
+    st.switch_page("pages/1_Gantt_Dashboard.py")            [data-testid="stSidebar"] { display: none; }
         </style>
     """, unsafe_allow_html=True)
     
