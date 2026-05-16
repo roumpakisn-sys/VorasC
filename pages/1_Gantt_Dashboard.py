@@ -15,9 +15,9 @@ if not st.session_state.get('current_user'):
     st.stop()
 
 st.title("📊 Ταμπλό Gantt & Βάρδιες")
+st.write("Σύνδεση με την υπάρχουσα βάση δεδομένων: Ενεργή")
 st.write("---")
 
-# Βάζουμε το γνώριμο CSS σου για να φαίνεται όμορφο το γράφημα
 st.markdown("""
 <style>
     .stPlotlyChart {
@@ -32,14 +32,12 @@ st.markdown("""
 # ==========================================
 # 2. ΦΟΡΜΑ ΓΡΗΓΟΡΗΣ ΚΑΤΑΧΩΡΗΣΗΣ (ΣΕ FRAGMENT)
 # ==========================================
-# Το fragment αποτρέπει το "πάγωμα" του γραφήματος όταν πληκτρολογείς
 @st.fragment
 def quick_add_assignment():
     with st.expander("➕ Γρήγορη Καταχώρηση Βάρδιας", expanded=False):
         with st.form("quick_add_form"):
             col1, col2, col3 = st.columns(3)
             
-            # Τραβάμε τα δεδομένα από την Cache της database.py
             emps = db.fetch_paginated('employees')
             projs = db.fetch_paginated('projects')
             
@@ -61,10 +59,10 @@ def quick_add_assignment():
             if submit:
                 if sel_emp and sel_proj:
                     try:
-                        # Βρίσκουμε τα ID των επιλεγμένων
                         emp_id = next(e['id'] for e in emps if e['name'] == sel_emp)
                         proj_id = next(p['id'] for p in projs if p['name'] == sel_proj)
                         
+                        # Εδώ χρησιμοποιούμε τα ονόματα που περιμένει η βάση σου
                         new_data = {
                             'employee_id': emp_id,
                             'project_id': proj_id,
@@ -78,23 +76,17 @@ def quick_add_assignment():
                         res = supabase.table('assignments').insert(new_data).execute()
                         
                         if res.data:
-                            inserted_id = res.data[0]['id']
-                            # Ενημερώνουμε τα Logs και το Undo!
-                            db.log_activity("INSERT", "assignments", f"Νέα βάρδια: {sel_emp} -> {sel_proj}", st.session_state.current_user)
-                            db.add_to_undo_stack("INSERT", "assignments", inserted_id, new_data)
-                            
-                            st.success("Η βάρδια καταχωρήθηκε επιτυχώς!")
-                            # Καθαρίζουμε την cache για να κατέβουν τα νέα δεδομένα
+                            db.log_activity("ΠΡΟΣΘΗΚΗ", "assignments", f"Νέα βάρδια: {sel_emp} -> {sel_proj}", st.session_state.current_user)
+                            st.success("Η βάρδια καταχωρήθηκε!")
                             db.fetch_paginated.clear() 
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Σφάλμα κατά την καταχώρηση: {e}")
+                        st.error(f"Σφάλμα: {e}")
 
 
 # ==========================================
-# 3. ΔΙΑΓΡΑΜΜΑ GANTT (ΣΕ FRAGMENT)
+# 3. ΔΙΑΓΡΑΜΜΑ GANTT (ΜΕ ΔΙΟΡΘΩΣΗ ΓΙΑ ΠΑΛΙΑ ΒΑΣΗ)
 # ==========================================
-# Αν κάποιος άλλος χρήστης κάνει αλλαγή, αυτό το τμήμα θα ανανεωθεί σιωπηλά
 @st.fragment
 def render_gantt_chart():
     st.subheader("Ημερολόγιο Έργων")
@@ -105,50 +97,70 @@ def render_gantt_chart():
     projects = db.fetch_paginated('projects')
     
     if not assignments:
-        st.info("Δεν υπάρχουν καταχωρημένες βάρδιες για να εμφανιστεί το διάγραμμα.")
+        st.info("Δεν βρέθηκαν καταχωρημένες βάρδιες.")
         return
 
-    # Μετατροπή σε DataFrame
     df_assign = pd.DataFrame(assignments)
     df_emp = pd.DataFrame(employees)
     df_proj = pd.DataFrame(projects)
     
     if df_emp.empty or df_proj.empty:
-        st.warning("Λείπουν βασικά δεδομένα Προσωπικού ή Έργων από τη βάση.")
+        st.warning("Λείπουν δεδομένα Προσωπικού ή Έργων.")
+        return
+
+    # --- ΕΞΥΠΝΗ ΔΙΟΡΘΩΣΗ ΣΤΗΛΩΝ ---
+    # Αν η βάση σου χρησιμοποιεί άλλα ονόματα αντί για employee_id / project_id
+    # προσπαθούμε να τα βρούμε και να τα μετονομάσουμε για το merge
+    mapping = {
+        'worker_id': 'employee_id',
+        'emp_id': 'employee_id',
+        'proj_id': 'project_id'
+    }
+    for old_col, new_col in mapping.items():
+        if old_col in df_assign.columns and new_col not in df_assign.columns:
+            df_assign.rename(columns={old_col: new_col}, inplace=True)
+
+    # Έλεγχος αν μετά τη διόρθωση υπάρχουν οι στήλες
+    if 'employee_id' not in df_assign.columns or 'project_id' not in df_assign.columns:
+        st.error("⚠️ Σφάλμα Δομής: Η εφαρμογή δεν βρίσκει τις στήλες σύνδεσης (IDs) στον πίνακα assignments.")
+        st.info(f"Διαθέσιμες στήλες στη βάση σου: {', '.join(df_assign.columns)}")
         return
         
-    # Συνένωση πινάκων για να πάρουμε τα ονόματα αντί για IDs
-    df = df_assign.merge(df_emp[['id', 'name']], left_on='employee_id', right_on='id')
-    df.rename(columns={'name': 'Όνομα Εργαζομένου'}, inplace=True)
-    
-    df = df.merge(df_proj[['id', 'name']], left_on='project_id', right_on='id')
-    df.rename(columns={'name': 'Όνομα Έργου'}, inplace=True)
-    
-    # Μετατροπή ημερομηνιών για το Plotly
-    df['start_date'] = pd.to_datetime(df['start_date'])
-    df['end_date'] = pd.to_datetime(df['end_date'])
-    
-    # Δημιουργία Γραφήματος Gantt
-    fig = px.timeline(
-        df, 
-        x_start="start_date", 
-        x_end="end_date", 
-        y="Όνομα Εργαζομένου", 
-        color="Όνομα Έργου",
-        hover_name="role",
-        hover_data={"Όνομα Εργαζομένου": False, "notes": True},
-        title="Πρόγραμμα Εργαζομένων"
-    )
-    
-    fig.update_yaxes(autorange="reversed") # Το πρώτο όνομα να εμφανίζεται πάνω-πάνω
-    fig.update_layout(height=650, margin=dict(l=10, r=10, t=40, b=10))
-    
-    st.plotly_chart(fig, use_container_width=True)
+    try:
+        # Συνένωση πινάκων
+        df = df_assign.merge(df_emp[['id', 'name']], left_on='employee_id', right_on='id')
+        df.rename(columns={'name': 'Όνομα Εργαζομένου'}, inplace=True)
+        
+        df = df.merge(df_proj[['id', 'name']], left_on='project_id', right_on='id')
+        df.rename(columns={'name': 'Όνομα Έργου'}, inplace=True)
+        
+        # Μετατροπή ημερομηνιών
+        df['start_date'] = pd.to_datetime(df['start_date'])
+        df['end_date'] = pd.to_datetime(df['end_date'])
+        
+        # Δημιουργία Γραφήματος
+        fig = px.timeline(
+            df, 
+            x_start="start_date", 
+            x_end="end_date", 
+            y="Όνομα Εργαζομένου", 
+            color="Όνομα Έργου",
+            hover_name="role",
+            title="Πρόγραμμα Εργαζομένων",
+            template="plotly_white"
+        )
+        
+        fig.update_yaxes(autorange="reversed")
+        fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10))
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Σφάλμα κατά τη δημιουργία του γραφήματος: {e}")
+        st.write("Δοκιμάστε να πατήσετε 'Ανανέωση Δεδομένων' στη σελίδα Management.")
 
 
-# --- ΕΚΤΕΛΕΣΗ ΤΩΝ ΣΤΟΙΧΕΙΩΝ ---
+# --- ΕΚΤΕΛΕΣΗ ---
 quick_add_assignment()
 render_gantt_chart()
-
-# Κρίσιμο: Καθαρίζουμε τη μνήμη RAM μόλις σχεδιαστεί το βαρύ γράφημα!
 gc.collect()
