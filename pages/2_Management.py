@@ -13,7 +13,6 @@ if not st.session_state.get("authenticated"):
 import utils
 
 utils.init_data_and_sync()
-utils.setup_shared_ui()
 
 # Helpers local access
 is_full_admin = st.session_state.get('current_user') != "TAN"
@@ -24,8 +23,8 @@ menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδε
 if st.session_state.get('current_user') == "Admin":
     menu_options.append("Καταγραφή Κινήσεων")
 
-# Επιλογή Μενού (είτε με tabs είτε με radio button. Χρησιμοποιούμε radio όπως ήταν)
-menu = st.sidebar.radio("Μενού Διαχείρισης", menu_options)
+# Ενσωμάτωση του μενού ψηλά στο Sidebar
+menu = utils.setup_shared_ui(show_menu=True, menu_options=menu_options)
 
 # --- VIEW: PROJECTS ---
 if menu == "Διαχείριση Έργων":
