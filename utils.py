@@ -608,7 +608,10 @@ def init_data_and_sync():
     init_undo_stack()
     
     import database
-    database.sync_data_incremental()
+    try:
+        database.sync_data_incremental()
+    except Exception as e:
+        print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
 
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
