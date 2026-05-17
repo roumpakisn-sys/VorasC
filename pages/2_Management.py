@@ -12,6 +12,7 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
+import scheduling  # Εισαγωγή του module με τις Pure Functions
 
 utils.init_data_and_sync()
 
@@ -547,7 +548,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     r_end_date = r_start_date + timedelta(days=365)
                     dates_to_assign = []
                     curr_date = r_start_date
-                    day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
+                    day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "ΚυριαΚή": 6}
                     day_map_inv = {v: k for k, v in day_map.items()}
                     selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
                     
@@ -577,11 +578,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             for eid in emps_to_process:
                                 if eid:
                                     emp_name = utils.get_employee_name(eid)
-                                    if utils.is_on_leave(eid, d):
+                                    # Χρήση scheduling pure function για την άδεια
+                                    if scheduling.is_on_leave(eid, d, st.session_state.leaves_by_emp):
                                         conflict_count += 1
                                         conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                     else:
-                                        adj_start, adj_end, is_conflict, msg = utils.check_and_resolve_conflict(eid, d, str_start, str_end)
+                                        day_assigns = st.session_state.assignments_by_date.get(d, [])
+                                        # Χρήση scheduling pure function για επικάλυψη
+                                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                         if is_conflict:
                                             conflict_count += 1
                                             conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
@@ -620,7 +624,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             for c in conflict_details: st.write(f"⚠️ {c}")
 
         with tab_edit:
-            if not st.session_state.recurring_patterns: st.info("Δεν υπάρχ ενεργές επαναλαμβανόμενες εργασίες.")
+            if not st.session_state.recurring_patterns: st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
             else:
                 pattern_options = {p['id']: f"{utils.get_project_info(p['projectId'])['name'] if utils.get_project_info(p['projectId']) else 'Άγνωστο Έργο'} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})" for p in st.session_state.recurring_patterns}
                 selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
