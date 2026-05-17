@@ -104,15 +104,17 @@ else:
                     sub_full = utils.get_employee_name(sub_id)
                     sub_parts = sub_full.split()
                     sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
-                    leaves_today.append(f"<b>{emp_n}</b><br><span style='font-size: 10px; color:#991b1b;'>↳ Αντικατ: <b>{sub_n}</b></span>")
+                    leaves_today.append(f"{emp_n} (Αντ: {sub_n})")
                 else:
-                    leaves_today.append(f"<b>{emp_n}</b>")
+                    leaves_today.append(f"{emp_n}")
         
-        leaves_str = "<br><br>".join(leaves_today) if leaves_today else "Καμία"
+        # ΕΞΥΠΝΗ ΟΡΙΖΟΝΤΙΑ ΣΤΟΙΧΙΣΗ ΓΙΑ ΝΑ ΜΗΝ ΔΙΑΛΥΕΤΑΙ ΤΟ ΔΙΑΓΡΑΜΜΑ
         if leaves_today:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες:<br>{leaves_str}</span>"
+            leaves_str = ", ".join(leaves_today)
+            wrapped_leaves = "<br>".join(textwrap.wrap(leaves_str, width=35))
+            base_y_label = f"<b>{day_str}</b><br><span style='font-size:10px; color:#d32f2f;'>Άδειες:<br>{wrapped_leaves}</span>"
         else:
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:11px; color:#d32f2f;'>Άδειες: {leaves_str}</span>"
+            base_y_label = f"<b>{day_str}</b>"
             
         day_assignments = st.session_state.assignments_by_date.get(curr_date, [])
         day_row_ids = []
@@ -330,10 +332,13 @@ else:
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
+    # ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ: Δεν "τεντώνει" πλέον τις μπάρες αν έχεις λίγες εγγραφές
     row_h = 40 * zoom_factor
+    required_height = int(len(ordered_categories) * row_h) + 120
     visible_count = 650 / row_h
-    if presentation_mode or len(ordered_categories) <= visible_count:
-        dyn_h = max(500, int(len(ordered_categories) * row_h) + 100)
+    
+    if presentation_mode or required_height <= 750:
+        dyn_h = max(350, required_height)
         y_range = None
     else:
         dyn_h = 750
@@ -352,7 +357,8 @@ else:
         categoryorder='array', categoryarray=ordered_categories,
         tickmode='array', tickvals=ordered_categories,
         ticktext=[tickvals_map[v] for v in ordered_categories],
-        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1
+        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1,
+        automargin=True
     )
     fig.update_traces(
         textposition='inside', insidetextanchor='middle',
@@ -373,7 +379,7 @@ else:
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
             fixedrange=False, rangeslider=dict(visible=False)
         ),
-        yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=False, range=y_range)
+        yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=False, range=y_range, automargin=True)
     )
     st.session_state.cached_fig = fig
     st.session_state.cached_wk_groups = wk_groups
@@ -473,10 +479,15 @@ if not presentation_mode:
                             for err in errors: st.error(err)
                         else:
                             if custom_proj_name.strip():
-                                final_proj_id = str(uuid.uuid4())
-                                new_p = {'id': final_proj_id, 'name': custom_proj_name.strip(), 'color': config.BASIC_COLORS[color_choice]}
-                                st.session_state.projects.append(new_p)
-                                utils.db_insert('projects', new_p, track=False)
+                                c_name = custom_proj_name.strip()
+                                existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                                if existing_p:
+                                    final_proj_id = existing_p['id']
+                                else:
+                                    final_proj_id = str(uuid.uuid4())
+                                    new_p = {'id': final_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[color_choice]}
+                                    st.session_state.projects.append(new_p)
+                                    utils.db_insert('projects', new_p, track=False)
                             else:
                                 final_proj_id = proj_choice
                                 
@@ -653,10 +664,15 @@ if not presentation_mode:
                                     for err in errors: st.error(err)
                                 else:
                                     if edit_custom_proj_name.strip():
-                                        final_edit_proj_id = str(uuid.uuid4())
-                                        new_p = {'id': final_edit_proj_id, 'name': edit_custom_proj_name.strip(), 'color': config.BASIC_COLORS[edit_color]}
-                                        st.session_state.projects.append(new_p)
-                                        utils.db_insert('projects', new_p, track=False)
+                                        c_name = edit_custom_proj_name.strip()
+                                        existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                                        if existing_p:
+                                            final_edit_proj_id = existing_p['id']
+                                        else:
+                                            final_edit_proj_id = str(uuid.uuid4())
+                                            new_p = {'id': final_edit_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[edit_color]}
+                                            st.session_state.projects.append(new_p)
+                                            utils.db_insert('projects', new_p, track=False)
                                     else:
                                         final_edit_proj_id = edit_proj
                                         
