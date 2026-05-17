@@ -652,7 +652,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             if not st.session_state.recurring_patterns: 
                 st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
             else:
-                # Μηχανισμός Χειροκίνητου Συγχρονισμού (Επειδή το Auto-Polling είναι κλειστό στη Διαχείριση)
                 c_ref1, c_ref2 = st.columns([4, 1])
                 with c_ref1:
                     st.caption("💡 Η αυτόματη ανανέωση είναι προσωρινά ανενεργή για να μην διακόπτεται η πληκτρολόγηση σας. Αν περιμένετε αλλαγές από άλλον χρήστη, πατήστε ανανέωση.")
@@ -865,6 +864,8 @@ elif menu == "Αξιολόγηση Προσωπικού":
     with col_reset:
         if is_full_admin:
             if st.button("🔄 Επαναφορά Βαθμολογιών", use_container_width=True):
+                import database
+                database.sync_data_incremental()
                 evals_to_delete = [e['id'] for e in month_evals]
                 if evals_to_delete:
                     st.session_state.evaluations = [e for e in st.session_state.evaluations if e['id'] not in evals_to_delete]
@@ -927,7 +928,12 @@ elif menu == "Καταγραφή Κινήσεων":
     st.title("🛡️ Καταγραφή Κινήσεων (Audit Log)")
     col_b1, col_b2 = st.columns([1, 4])
     with col_b1:
-        if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True): st.session_state.global_db_ts = "force_refresh"; st.rerun()
+        if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True): 
+            import database
+            st.session_state.last_sync_time = None
+            database.sync_data_incremental()
+            st.session_state.global_db_ts = "force_refresh"
+            st.rerun()
     with col_b2:
         if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
             if utils.supabase and st.session_state.activity_logs:
