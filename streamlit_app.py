@@ -18,17 +18,22 @@ if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
-            username = st.selectbox("Χρήστης", ["Admin", "EXOUZ", "MEMEK", "NAK", "TAN"])
+            # 1. ΠΡΟΣΘΗΚΗ ΧΡΗΣΤΩΝ: Πρόσθεσε τα ονόματα των νέων χρηστών σε αυτή τη λίστα
+            users_list = ["Admin", "EXOU", "MEMEK", "NAK", "PAP", "TAN"]
+            username = st.selectbox("Χρήστης", users_list)
+            
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
+                # 2. ΠΡΟΣΘΗΚΗ ΚΩΔΙΚΩΝ: Αντιστοίχισε τα ονόματα με τους κωδικούς τους.
                 valid_passwords = {
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
-                    "EXOUZ": st.secrets.get("USER1_PASSWORD", "pass1"),
+                    "EXOU": st.secrets.get("USER1_PASSWORD", "pass1"),
                     "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
                     "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
-                    "TAN": st.secrets.get("USER4_PASSWORD", "pass4")
+                    "PAP": st.secrets.get("USER4_PASSWORD", "pass4"),
+                    "TAN": st.secrets.get("USER5_PASSWORD", "pass5")
                 }
                 
                 if password == valid_passwords.get(username):
