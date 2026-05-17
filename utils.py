@@ -78,6 +78,21 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
+def safe_date_parse(d_val):
+    """Έξυπνος μεταφραστής ημερομηνιών για απόλυτη συμβατότητα με παλιά δεδομένα."""
+    if isinstance(d_val, date) and not isinstance(d_val, datetime):
+        return d_val
+    if isinstance(d_val, datetime):
+        return d_val.date()
+    if isinstance(d_val, str):
+        s = d_val.split("T")[0][:10]
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+    return None
+
 def format_log_details(table_name, records):
     if not records: return "Καμία εγγραφή"
     if isinstance(records, dict): records = [records]
@@ -276,14 +291,8 @@ def auto_extend_recurring_patterns():
     for a in st.session_state.assignments:
         rid = a.get('recurring_id')
         if rid:
-            d = a.get('date')
-            if isinstance(d, str):
-                try: 
-                    if "T" in d: d = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
-                    elif "/" in d: d = datetime.strptime(d, "%d/%m/%Y").date()
-                    else: d = datetime.strptime(d, "%Y-%m-%d").date()
-                except: continue
-            if isinstance(d, date):
+            d = safe_date_parse(a.get('date'))
+            if d:
                 if rid not in max_dates or d > max_dates[rid]:
                     max_dates[rid] = d
     
@@ -324,7 +333,14 @@ def auto_extend_recurring_patterns():
             curr_date = start_ext_date
             day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
             day_map = {v: k for k, v in day_map_inv.items()}
-            selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
+            
+            selected_weekday_ints = []
+            if selected_weekdays:
+                for d_val in selected_weekdays:
+                    if isinstance(d_val, int):
+                        selected_weekday_ints.append(d_val)
+                    elif d_val in day_map:
+                        selected_weekday_ints.append(day_map[d_val])
             
             while curr_date <= end_ext_date:
                 if r_type == "Εβδομαδιαία":
@@ -362,17 +378,34 @@ def auto_extend_recurring_patterns():
                 day_assigns = st.session_state.assignments_by_date.get(d, [])
                 
                 for eid in emps_to_process:
+                    final_eid = eid
+                    final_start = str_start
+                    final_end = str_end
+                    conflict_note = ""
+                    
                     if eid:
-                        if scheduling.is_on_leave(eid, d, leaves_dict): continue
-                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
-                        if is_conflict: continue
-                    else:
-                        adj_start, adj_end = str_start, str_end
+                        if scheduling.is_on_leave(eid, d, leaves_dict):
+                            final_eid = ""
+                            emp_name = get_employee_name(eid)
+                            conflict_note = f"[Άδεια: {emp_name}]"
+                        else:
+                            adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
+                            if is_conflict:
+                                final_eid = ""
+                                emp_name = get_employee_name(eid)
+                                conflict_note = f"[Εμπλοκή: {emp_name}]"
+                            else:
+                                final_start = adj_start
+                                final_end = adj_end
+                    
+                    combined_notes = r_notes
+                    if conflict_note:
+                        combined_notes = f"{r_notes} {conflict_note}".strip()
                     
                     new_assign = {
-                        'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': eid, 'projectId': r_proj,
-                        'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end,
-                        'colorName': r_color, 'colorHex': c_hex, 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""
+                        'id': str(uuid.uuid4()), 'recurring_id': rid, 'employeeId': final_eid, 'projectId': r_proj,
+                        'date': d, 'arrivalTime': str_arrival, 'startTime': final_start, 'endTime': final_end,
+                        'colorName': r_color, 'colorHex': c_hex, 'notes': combined_notes, 'is_cancelled': False, 'cancel_reason': ""
                     }
                     new_assignments_batch.append(new_assign)
                     if d not in st.session_state.assignments_by_date:
@@ -415,18 +448,20 @@ def init_data_and_sync():
         st.session_state.view_week_date = date.today()
 
     # 1. ΕΞΥΠΝΗ & ΑΣΦΑΛΗΣ μετατροπή ημερομηνιών για ΑΠΟΛΥΤΗ συμβατότητα με παλιά δεδομένα!
+    valid_assignments = []
     for a in st.session_state.get('assignments', []):
-        d = a.get('date')
-        if isinstance(d, str):
-            try:
-                if "T" in d:
-                    a['date'] = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
-                elif "/" in d:
-                    a['date'] = datetime.strptime(d, "%d/%m/%Y").date()
-                else:
-                    a['date'] = datetime.strptime(d, "%Y-%m-%d").date()
-            except Exception:
-                pass # Αγνόησε το σφάλμα. ΜΗΝ το σπρώχνεις στο date.today()
+        parsed_d = safe_date_parse(a.get('date'))
+        if parsed_d:
+            a['date'] = parsed_d
+            valid_assignments.append(a)
+    st.session_state.assignments = valid_assignments
+
+    # 1β. Το ίδιο και για τις άδειες
+    for l in st.session_state.get('leaves', []):
+        sd = safe_date_parse(l.get('startDate'))
+        ed = safe_date_parse(l.get('endDate'))
+        if sd: l['startDate'] = sd
+        if ed: l['endDate'] = ed
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
