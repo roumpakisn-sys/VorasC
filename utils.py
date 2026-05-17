@@ -9,26 +9,13 @@ import threading
 import re
 import ast
 import time
+import config
 
 try:
     from supabase import create_client
     SUPABASE_INSTALLED = True
 except ImportError:
     SUPABASE_INSTALLED = False
-
-# --- 10 Βασικά Χρώματα ---
-BASIC_COLORS = {
-    "Μπλε": "#4a86e8",
-    "Κόκκινο": "#e00000",
-    "Πράσινο": "#6aa84f",
-    "Κίτρινο": "#f1c232",
-    "Μωβ": "#8e7cc3",
-    "Πορτοκαλί": "#e69138",
-    "Γαλάζιο": "#00ffff",
-    "Ροζ": "#c90076",
-    "Σκούρο Πράσινο": "#38761d",
-    "Γκρι": "#999999"
-}
 
 # --- SETUP SUPABASE ---
 try:
@@ -319,7 +306,7 @@ def auto_extend_recurring_patterns():
             r_emps = pat.get('employeeIds', [])
             r_proj = pat.get('projectId')
             r_color = pat.get('colorName')
-            c_hex = BASIC_COLORS.get(r_color, "#999999")
+            c_hex = config.BASIC_COLORS.get(r_color, "#999999") # <--- Χρήση config!
             r_notes = pat.get('notes', "")
             str_arrival = pat.get('arrivalTime', "")
             str_start = str(pat.get('startTime'))[:5]
@@ -353,7 +340,6 @@ def auto_extend_recurring_patterns():
                         dates_to_assign.append(curr_date)
                     curr_date += timedelta(days=1)
                 else:
-                    # FIX: Δικλείδα ασφαλείας για να μην "κολλάει" ποτέ σε περίπτωση κακών δεδομένων
                     curr_date += timedelta(days=1)
             
             for d in dates_to_assign:
@@ -535,7 +521,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     st.sidebar.title("STAFF.PRO")
     st.sidebar.write("---")
     
-    # Εδώ εμφανίζεται το μενού, εάν έχει ζητηθεί από τη σελίδα (π.χ. στο Management)
     selected_menu = None
     if show_menu and menu_options:
         selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options)
