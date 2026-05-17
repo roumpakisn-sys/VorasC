@@ -54,10 +54,18 @@ if menu == "Διαχείριση Έργων":
                 p_name = st.text_input("Όνομα Έργου")
                 p_color = st.color_picker("Χρώμα (Προεπιλογή)", "#4a86e8")
                 if st.form_submit_button("Δημιουργία"):
-                    new_p = {'id': str(uuid.uuid4()), 'name': p_name, 'color': p_color}
-                    st.session_state.projects.append(new_p)
-                    utils.db_insert('projects', new_p)
-                    st.rerun()
+                    c_name = p_name.strip()
+                    if c_name:
+                        existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                        if existing_p:
+                            st.warning("⚠️ Αυτό το έργο υπάρχει ήδη στη λίστα!")
+                        else:
+                            new_p = {'id': str(uuid.uuid4()), 'name': c_name, 'color': p_color}
+                            st.session_state.projects.append(new_p)
+                            utils.db_insert('projects', new_p)
+                            st.rerun()
+                    else:
+                        st.error("Το όνομα δεν μπορεί να είναι κενό.")
     else:
         st.info("🔒 Έχετε πρόσβαση μόνο για προβολή στα Έργα.")
 
@@ -564,11 +572,16 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 else:
                     actions = []
                     if r_custom_proj_name.strip():
-                        final_r_proj_id = str(uuid.uuid4())
-                        new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': config.BASIC_COLORS[r_color]}
-                        st.session_state.projects.append(new_p)
-                        utils.db_insert('projects', new_p, track=False)
-                        actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                        c_name = r_custom_proj_name.strip()
+                        existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                        if existing_p:
+                            final_r_proj_id = existing_p['id']
+                        else:
+                            final_r_proj_id = str(uuid.uuid4())
+                            new_p = {'id': final_r_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[r_color]}
+                            st.session_state.projects.append(new_p)
+                            utils.db_insert('projects', new_p, track=False)
+                            actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                     else: final_r_proj_id = r_proj
                     
                     pattern_id = str(uuid.uuid4())
@@ -631,13 +644,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         
                         if new_assignments_batch:
                             st.session_state.assignments.extend(new_assignments_batch)
-                            if utils.supabase:
-                                def insert_b(b):
-                                    chunk_size = 500
-                                    for i in range(0, len(b), chunk_size):
-                                        try: utils.supabase.table('assignments').insert(utils.serialize_dates(b[i:i+chunk_size])).execute()
-                                        except: pass
-                                threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
+                            utils.db_insert_bulk_background('assignments', new_assignments_batch, "ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", f"Δημιουργήθηκαν {len(new_assignments_batch)} βάρδιες")
                             actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                             
                     utils.add_transaction(actions)
@@ -748,11 +755,16 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         else:
                             actions = []
                             if e_r_custom_proj_name.strip():
-                                final_r_proj_id = str(uuid.uuid4())
-                                new_p = {'id': final_r_proj_id, 'name': e_r_custom_proj_name.strip(), 'color': config.BASIC_COLORS[e_r_color]}
-                                st.session_state.projects.append(new_p)
-                                utils.db_insert('projects', new_p, track=False)
-                                actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
+                                c_name = e_r_custom_proj_name.strip()
+                                existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                                if existing_p:
+                                    final_r_proj_id = existing_p['id']
+                                else:
+                                    final_r_proj_id = str(uuid.uuid4())
+                                    new_p = {'id': final_r_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[e_r_color]}
+                                    st.session_state.projects.append(new_p)
+                                    utils.db_insert('projects', new_p, track=False)
+                                    actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                             else: final_r_proj_id = e_r_proj
                             
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
@@ -818,13 +830,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 
                                 if new_assignments_batch:
                                     st.session_state.assignments.extend(new_assignments_batch)
-                                    if utils.supabase:
-                                        def insert_b(b):
-                                            chunk_size = 500
-                                            for i in range(0, len(b), chunk_size):
-                                                try: utils.supabase.table('assignments').insert(utils.serialize_dates(b[i:i+chunk_size])).execute()
-                                                except: pass
-                                        threading.Thread(target=insert_b, args=(new_assignments_batch,), daemon=True).start()
+                                    utils.db_insert_bulk_background('assignments', new_assignments_batch, "ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", f"Δημιουργήθηκαν {len(new_assignments_batch)} βάρδιες")
                                     actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
                                     
                             utils.add_transaction(actions)
