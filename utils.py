@@ -155,15 +155,13 @@ def parse_old_log_details(table_name, details_str):
 def log_activity(action_type, table_name, details_raw):
     if not supabase or table_name == 'activity_logs': return
     user = st.session_state.get("current_user", "Άγνωστος")
-    try:
-        from zoneinfo import ZoneInfo
-        now_gr = datetime.now(ZoneInfo("Europe/Athens")).isoformat()
-    except:
-        now_gr = (datetime.utcnow() + timedelta(hours=3)).isoformat()
+    
+    # ΠΑΝΤΑ UTC ώρα για να ταιριάζει ΑΠΟΛΥΤΑ με τον server της Supabase
+    now_utc = datetime.utcnow().isoformat() + "Z"
     
     log_entry = {
         "id": str(uuid.uuid4()),
-        "timestamp": now_gr,
+        "timestamp": now_utc,
         "username": user,
         "action_type": action_type,
         "table_name": table_name,
@@ -175,6 +173,34 @@ def log_activity(action_type, table_name, details_raw):
             st.session_state.global_db_ts = res.data[0]['timestamp']
     except Exception as e:
         print(f"Log Error: {e}")
+
+# ΝΕΟΣ ΜΗΧΑΝΙΣΜΟΣ: ΜΑΖΙΚΗ ΕΙΣΑΓΩΓΗ ΠΟΥ ΕΙΔΟΠΟΙΕΙ ΤΟΥΣ ΑΛΛΟΥΣ ΧΡΗΣΤΕΣ
+def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
+    if not supabase or not data: return
+    
+    def _thread_task():
+        chunk_size = 500
+        for i in range(0, len(data), chunk_size):
+            try:
+                supabase.table(table).insert(serialize_dates(data[i:i+chunk_size])).execute()
+            except Exception as e:
+                print(f"Bulk insert error: {e}")
+        
+        # ΜΟΛΙΣ ΤΕΛΕΙΩΣΕΙ: Φωνάζει τους άλλους χρήστες για ενημέρωση (Εδώ έλειπε!)
+        try:
+            now_utc = datetime.utcnow().isoformat() + "Z"
+            log_entry = {
+                "id": str(uuid.uuid4()),
+                "timestamp": now_utc,
+                "username": st.session_state.get("current_user", "Σύστημα (Παρασκήνιο)"),
+                "action_type": log_action,
+                "table_name": table,
+                "details": log_details or f"Προστέθηκαν {len(data)} εγγραφές"
+            }
+            supabase.table("activity_logs").insert(log_entry).execute()
+        except: pass
+
+    threading.Thread(target=_thread_task, daemon=True).start()
 
 def db_insert(table, data, track=True):
     mark_data_changed()
@@ -218,8 +244,6 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         if supabase:
             try:
-                # --- ΔΙΟΡΘΩΣΗ: CHUNKING ΓΙΑ ΑΣΦΑΛΗ ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ ---
-                # Χωρίζουμε τα IDs σε πακέτα των 100 για να μην "χτυπάει" όριο μεγέθους το API
                 chunk_size = 100
                 for i in range(0, len(values), chunk_size):
                     chunk_values = values[i:i+chunk_size]
@@ -433,27 +457,7 @@ def auto_extend_recurring_patterns():
         st.session_state.assignments.extend(new_assignments_batch)
         st.session_state.data_dirty = True
         st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
-        if supabase:
-            def insert_batch(batch):
-                chunk_size = 500
-                for i in range(0, len(batch), chunk_size):
-                    try:
-                        supabase.table('assignments').insert(serialize_dates(batch[i:i+chunk_size])).execute()
-                    except Exception as e:
-                        print(f"Auto-extend insert error: {e}")
-                try:
-                    log_entry = {
-                        "id": str(uuid.uuid4()),
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "username": "Σύστημα (Αυτόματη Επέκταση)",
-                        "action_type": "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ",
-                        "table_name": "assignments",
-                        "details": f"Επεκτάθηκαν {len(batch)} βάρδιες στο παρασκήνιο"
-                    }
-                    supabase.table("activity_logs").insert(log_entry).execute()
-                except: pass
-
-            threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
+        db_insert_bulk_background('assignments', new_assignments_batch, "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ", f"Επεκτάθηκαν {len(new_assignments_batch)} βάρδιες στο παρασκήνιο")
 
 def cleanup_duplicates():
     """Ο Σιωπηλός Καθαριστής: Εξολοθρεύει τα "Φαντάσματα" (Διπλοεγγραφές) από τη βάση."""
@@ -464,7 +468,6 @@ def cleanup_duplicates():
     clean_assignments = []
     
     for a in st.session_state.assignments:
-        # Χαρακτηριστική υπογραφή (Signature) μιας βάρδιας
         sig = (
             a.get('date'), 
             a.get('projectId'), 
@@ -484,7 +487,6 @@ def cleanup_duplicates():
         st.session_state.data_dirty = True
         dup_ids = [d['id'] for d in duplicates_to_kill]
         
-        # Εκτελούμε τη μαζική διαγραφή στο παρασκήνιο για να μη νιώσει καθυστέρηση ο χρήστης
         if supabase:
             def delete_ghosts():
                 chunk_size = 100
@@ -492,7 +494,23 @@ def cleanup_duplicates():
                     chunk = dup_ids[i:i+chunk_size]
                     try:
                         supabase.table('assignments').delete().in_('id', chunk).execute()
+                        for rec_id in chunk:
+                            import database
+                            database.track_deletion('assignments', rec_id)
                     except: pass
+                
+                try:
+                    now_utc = datetime.utcnow().isoformat() + "Z"
+                    log_entry = {
+                        "id": str(uuid.uuid4()),
+                        "timestamp": now_utc,
+                        "username": "Σύστημα (Καθαριστής)",
+                        "action_type": "ΕΚΚΑΘΑΡΙΣΗ",
+                        "table_name": "assignments",
+                        "details": f"Διαγράφηκαν {len(dup_ids)} διπλότυπες βάρδιες"
+                    }
+                    supabase.table("activity_logs").insert(log_entry).execute()
+                except: pass
             threading.Thread(target=delete_ghosts, daemon=True).start()
 
 def init_data_and_sync():
@@ -504,7 +522,6 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # 1. ΕΞΥΠΝΗ & ΑΣΦΑΛΗΣ μετατροπή ημερομηνιών
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         parsed_d = safe_date_parse(a.get('date'))
@@ -513,22 +530,18 @@ def init_data_and_sync():
             valid_assignments.append(a)
     st.session_state.assignments = valid_assignments
 
-    # 1β. Το ίδιο και για τις άδειες
     for l in st.session_state.get('leaves', []):
         sd = safe_date_parse(l.get('startDate'))
         ed = safe_date_parse(l.get('endDate'))
         if sd: l['startDate'] = sd
         if ed: l['endDate'] = ed
 
-    # 2. ΣΚΟΤΩΝΟΥΜΕ ΤΑ ΦΑΝΤΑΣΜΑΤΑ!
     cleanup_duplicates()
 
-    # 3. ΕΛΕΓΧΟΣ ΓΙΑ ΕΠΕΚΤΑΣΗ (Μετά τον καθαρισμό)
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
         st.session_state.last_auto_extend_check = time.time()
 
-    # 4. ΧΤΙΣΙΜΟ ΓΡΗΓΟΡΩΝ ΕΥΡΕΤΗΡΙΩΝ
     if st.session_state.get('data_dirty', True):
         st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
         st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
