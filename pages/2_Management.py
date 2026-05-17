@@ -362,7 +362,7 @@ elif menu == "Άδειες":
         if not st.session_state.leaves: st.info("Δεν υπάρχουν άδειες προς επεξεργασία.")
         else:
             leave_options = {lv['id']: f"{utils.get_employee_name(lv['employeeId'])} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})" for lv in st.session_state.leaves}
-            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x])
+            leave_to_edit_id = st.selectbox("Επιλέ Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x])
             leave_to_edit = next(l for l in st.session_state.leaves if l['id'] == leave_to_edit_id)
             c1, c2 = st.columns(2)
             with c1:
@@ -714,8 +714,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                         st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                         st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
-                        utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], track=False)
-                        utils.db_delete('recurring_patterns', 'id', selected_pattern_id, track=False)
+                        utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
+                        utils.db_delete('recurring_patterns', 'id', selected_pattern_id, deleted_records=[pat], track=False)
                         utils.add_transaction([{'type': 'delete', 'table': 'assignments', 'records': old_assigns}, {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}])
                         st.rerun()
 
@@ -737,7 +737,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                            utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], track=False)
+                            utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
                             
                             r_end_date = e_r_start_date + timedelta(days=365)
                             dates_to_assign = []
