@@ -218,7 +218,13 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             add_transaction([{'type': 'delete', 'table': table, 'records': deleted_records}])
         if supabase:
             try:
-                supabase.table(table).delete().in_(column, values).execute()
+                # --- ΔΙΟΡΘΩΣΗ: CHUNKING ΓΙΑ ΑΣΦΑΛΗ ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ ---
+                # Χωρίζουμε τα IDs σε πακέτα των 100 για να μην "χτυπάει" όριο μεγέθους το API
+                chunk_size = 100
+                for i in range(0, len(values), chunk_size):
+                    chunk_values = values[i:i+chunk_size]
+                    supabase.table(table).delete().in_(column, chunk_values).execute()
+                
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
                 
                 import database
@@ -301,12 +307,23 @@ def auto_extend_recurring_patterns():
     for pat in st.session_state.recurring_patterns:
         rid = pat['id']
         latest_date = max_dates.get(rid)
-        if latest_date and (latest_date - today).days <= 30:
+        
+        if not latest_date:
+            pat_start = safe_date_parse(pat.get('startDate'))
+            if pat_start:
+                latest_date = pat_start - timedelta(days=1)
+            else:
+                latest_date = today - timedelta(days=1)
+        
+        if (latest_date - today).days <= 30:
             start_ext_date = latest_date + timedelta(days=1)
-            end_ext_date = start_ext_date + timedelta(days=365)
-            r_type = pat.get('type')
+            target_end_date = today + timedelta(days=365)
+            end_ext_date = max(start_ext_date + timedelta(days=30), target_end_date)
             
-            # SAFE EVAL ΓΙΑ ΠΑΛΙΑ ΔΕΔΟΜΕΝΑ ΤΗΣ ΒΑΣΗΣ (Συμβατότητα)
+            if start_ext_date > end_ext_date:
+                continue
+            
+            r_type = pat.get('type')
             r_emps_raw = pat.get('employeeIds', [])
             if isinstance(r_emps_raw, str):
                 try: r_emps = ast.literal_eval(r_emps_raw)
@@ -438,6 +455,46 @@ def auto_extend_recurring_patterns():
 
             threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
 
+def cleanup_duplicates():
+    """Ο Σιωπηλός Καθαριστής: Εξολοθρεύει τα "Φαντάσματα" (Διπλοεγγραφές) από τη βάση."""
+    if not st.session_state.get('assignments'): return
+    
+    seen_signatures = set()
+    duplicates_to_kill = []
+    clean_assignments = []
+    
+    for a in st.session_state.assignments:
+        # Χαρακτηριστική υπογραφή (Signature) μιας βάρδιας
+        sig = (
+            a.get('date'), 
+            a.get('projectId'), 
+            a.get('employeeId'), 
+            str(a.get('startTime'))[:5] if a.get('startTime') else "", 
+            str(a.get('endTime'))[:5] if a.get('endTime') else "",
+            a.get('notes', '')
+        )
+        if sig in seen_signatures:
+            duplicates_to_kill.append(a)
+        else:
+            seen_signatures.add(sig)
+            clean_assignments.append(a)
+            
+    if duplicates_to_kill:
+        st.session_state.assignments = clean_assignments
+        st.session_state.data_dirty = True
+        dup_ids = [d['id'] for d in duplicates_to_kill]
+        
+        # Εκτελούμε τη μαζική διαγραφή στο παρασκήνιο για να μη νιώσει καθυστέρηση ο χρήστης
+        if supabase:
+            def delete_ghosts():
+                chunk_size = 100
+                for i in range(0, len(dup_ids), chunk_size):
+                    chunk = dup_ids[i:i+chunk_size]
+                    try:
+                        supabase.table('assignments').delete().in_('id', chunk).execute()
+                    except: pass
+            threading.Thread(target=delete_ghosts, daemon=True).start()
+
 def init_data_and_sync():
     init_undo_stack()
     
@@ -447,7 +504,7 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # 1. ΕΞΥΠΝΗ & ΑΣΦΑΛΗΣ μετατροπή ημερομηνιών για ΑΠΟΛΥΤΗ συμβατότητα με παλιά δεδομένα!
+    # 1. ΕΞΥΠΝΗ & ΑΣΦΑΛΗΣ μετατροπή ημερομηνιών
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         parsed_d = safe_date_parse(a.get('date'))
@@ -463,10 +520,15 @@ def init_data_and_sync():
         if sd: l['startDate'] = sd
         if ed: l['endDate'] = ed
 
+    # 2. ΣΚΟΤΩΝΟΥΜΕ ΤΑ ΦΑΝΤΑΣΜΑΤΑ!
+    cleanup_duplicates()
+
+    # 3. ΕΛΕΓΧΟΣ ΓΙΑ ΕΠΕΚΤΑΣΗ (Μετά τον καθαρισμό)
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
         st.session_state.last_auto_extend_check = time.time()
 
+    # 4. ΧΤΙΣΙΜΟ ΓΡΗΓΟΡΩΝ ΕΥΡΕΤΗΡΙΩΝ
     if st.session_state.get('data_dirty', True):
         st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
         st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
@@ -505,8 +567,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </style>
     """, unsafe_allow_html=True)
     
-    # Το Javascript ρωτάει: "Είμαι σε λειτουργία επεξεργασίας στο Ταμπλό;"
-    # Αν ναι (isEditing), ΔΕΝ κάνει κλικ για ανανέωση, ώστε να μην σε διακόψει!
     polling_js = """
     setInterval(() => {
         const isEditing = doc.getElementById("is_editing_flag");
