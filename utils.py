@@ -436,13 +436,19 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         padding: 12px; border-radius: 8px; background-color: #fee2e2;
         border: 1px solid #ef4444; margin-bottom: 8px; color: #b91c1c; font-weight: 500;
     }
+    /* Κρύβουμε το κουμπί αυτόματης ανανέωσης από το UI */
+    .hidden-btn-container {
+        display: none !important;
+    }
     </style>
     """, unsafe_allow_html=True)
     
-    # ΨΗΦΙΑΚΟ ΡΟΛΟΙ
+    # ΨΗΦΙΑΚΟ ΡΟΛΟΙ & SILENT MULTI-USER POLLING
     components.html("""
     <script>
     const doc = window.parent.document;
+    
+    // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
@@ -457,6 +463,17 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
     updateClock();
     setInterval(updateClock, 1000);
+
+    // 2. Multi-User Polling (Κλικ στο κρυφό κουμπί κάθε 15 δευτερόλεπτα)
+    setInterval(() => {
+        const buttons = doc.querySelectorAll("button");
+        for (let btn of buttons) {
+            if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
+                btn.click();
+                break;
+            }
+        }
+    }, 15000);
     </script>
     """, height=0, width=0)
 
@@ -483,6 +500,13 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     st.sidebar.subheader("Κατάσταση Συστήματος")
     if supabase:
         st.sidebar.success("☁️ Cloud Sync (Incremental)")
+        
+        # Το κρυφό κουμπί που ενεργοποιείται αυτόματα από το JavaScript
+        st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
+        if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
+            st.rerun()
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
+        
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
             st.session_state.last_sync_time = None  # Αναγκάζει πλήρες sync
             st.rerun()
