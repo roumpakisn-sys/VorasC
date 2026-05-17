@@ -1,16 +1,17 @@
 import streamlit as st
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import uuid
 import scheduling
 import config
 import utils
 
+# Αναφορά στον έτοιμο Supabase Client από το utils
 supabase = utils.supabase
 
 def get_db_current_time():
     """
-    Ανακτά την τρέχουσα ώρα του εξυπηρετητή (Supabase server time) 
-    χρησιμοποιώντας τη συνάρτηση RPC 'get_server_time' που δημιουργήσαμε.
+    Ανακτά την ακριβή τρέχουσα ώρα του εξυπηρετητή (Supabase server time) 
+    χρησιμοποιώντας τη συνάρτηση RPC 'get_server_time' που δημιουργήσαμε στην PostgreSQL.
     """
     if not supabase:
         return datetime.utcnow().isoformat()
@@ -19,19 +20,19 @@ def get_db_current_time():
         if res.data:
             return res.data
     except Exception as e:
-        # Fallback σε περίπτωση σφάλματος
         print(f"Error getting server time: {e}")
     return datetime.utcnow().isoformat()
 
 def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
     """
-    Εφαρμόζει τις αλλαγές (updates/inserts) και τις διαγραφές στην τοπική λίστα του Session State.
+    Pure Logic: Εφαρμόζει τις μερικές αλλαγές (εισαγωγές, ενημερώσεις, διαγραφές)
+    στην τοπική λίστα που βρίσκεται αποθηκευμένη στο Session State του χρήστη.
     """
-    # 1. Αφαίρεση των διαγραμμένων εγγραφών
+    # 1. Αφαίρεση των εγγραφών που έχουν διαγραφεί από άλλον χρήστη
     if deleted_ids:
         local_list = [r for r in local_list if str(r.get('id')) not in deleted_ids]
     
-    # 2. Ενημέρωση/Προσθήκη νέων εγγραφών
+    # 2. Αντικατάσταση των παλιών εγγραφών με τις νέες/ενημερωμένες
     updated_ids = {str(r['id']) for r in delta_records}
     local_list = [r for r in local_list if str(r.get('id')) not in updated_ids]
     local_list.extend(delta_records)
@@ -40,7 +41,8 @@ def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
 
 def track_deletion(table_name, record_id):
     """
-    Καταγράφει μια διαγραφή στον πίνακα 'deleted_records' της Supabase.
+    Καταγράφει τη διαγραφή μιας εγγραφής στον πίνακα 'deleted_records' της Supabase,
+    ώστε οι υπόλοιποι συνδεδεμένοι χρήστες να ενημερωθούν άμεσα για το ποιο ID αφαιρέθηκε.
     """
     if not supabase:
         return
@@ -55,42 +57,11 @@ def track_deletion(table_name, record_id):
     except Exception as e:
         print(f"Error logging deletion: {e}")
 
-def db_delete_with_tracking(table, column, value, deleted_records=None):
-    """
-    Εκτελεί τη διαγραφή και καταγράφει το ID της εγγραφής που διαγράφηκε για τους άλλους χρήστες.
-    """
-    # Αναζήτηση των εγγραφών που πρόκειται να διαγραφούν (για να βρούμε τα ID τους)
-    if not deleted_records:
-        table_data = st.session_state.get(table, [])
-        deleted_records = [r for r in table_data if r.get(column) == value]
-        
-    # Κλασική διαγραφή στη βάση μέσω utils
-    utils.db_delete(table, column, value, deleted_records=deleted_records, track=True)
-    
-    # Καταγραφή των διαγραφών για Delta Updates
-    for r in deleted_records:
-        rec_id = r.get('id')
-        if rec_id:
-            track_deletion(table, rec_id)
-
-def db_delete_in_with_tracking(table, column, values, deleted_records=None):
-    """
-    Μαζική διαγραφή με καταγραφή.
-    """
-    if not deleted_records:
-        table_data = st.session_state.get(table, [])
-        deleted_records = [r for r in table_data if r.get(column) in values]
-        
-    utils.db_delete_in(table, column, values, deleted_records=deleted_records, track=True)
-    
-    for r in deleted_records:
-        rec_id = r.get('id')
-        if rec_id:
-            track_deletion(table, rec_id)
-
 def sync_data_incremental():
     """
-    Ο πυρήνας του μηχανισμού Delta Updates. Φέρνει ΜΟΝΟ ό,τι άλλαξε ή διαγράφηκε από το last_sync_time.
+    Ο έξυπνος μηχανισμός Delta Updates.
+    Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας 
+    ένα ελαφρύ Polling Guard για την ελαχιστοποίηση των ερωτημάτων στη βάση.
     """
     if not supabase:
         return
@@ -98,7 +69,7 @@ def sync_data_incremental():
     last_sync = st.session_state.get("last_sync_time", None)
     current_db_time = get_db_current_time()
 
-    # Αν δεν υπάρχει προηγούμενο sync, κάνουμε ένα αρχικό FULL FETCH
+    # --- FULL FETCH (Εκτελείται ΜΟΝΟ κατά την πρώτη είσοδο στην εφαρμογή) ---
     if not last_sync:
         with st.spinner("Πρώτος πλήρης συγχρονισμός δεδομένων..."):
             st.session_state.employees = utils.fetch_paginated("employees")
@@ -133,12 +104,24 @@ def sync_data_incremental():
             utils.mark_data_changed()
             return
 
-    # INCREMENTAL SYNC (Delta Updates)
+    # --- INCREMENTAL SYNC (Delta Updates) με Polling Guard ---
     try:
-        # 1. Φέρνουμε όλες τις διαγραφές που έγιναν μετά το τελευταίο συγχρονισμό
+        # 1. ULTRA-LIGHT POLLING GUARD
+        # Κάνουμε select μόνο μία εγγραφή (την τελευταία) από το activity_logs.
+        # Αν η ημερομηνία της τελευταίας δραστηριότητας στη βάση είναι παλαιότερη ή ίση 
+        # με το δικό μας last_sync, σημαίνει ότι δεν έχει αλλάξει απολύτως τίποτα!
+        # Τερματίζουμε αμέσως τη συνάρτηση, γλιτώνοντας 7 βαριά queries στη Supabase!
+        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
+        if res_logs.data:
+            latest_activity_ts = res_logs.data[0]['timestamp']
+            if latest_activity_ts <= last_sync:
+                return
+
+        # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές που έγιναν μετά το τελευταίο μας sync
         deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
         deletions = deleted_res.data or []
         
+        # Ομαδοποίηση των διαγραμμένων IDs ανά πίνακα
         deleted_by_table = {}
         for d in deletions:
             t = d['table_name']
@@ -146,12 +129,12 @@ def sync_data_incremental():
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 2. Συγχρονίζουμε κάθε πίνακα ξεχωριστά
+        # 3. Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
         tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
         changes_detected = False
 
         for table in tables_to_sync:
-            # Ανάκτηση μόνο των νέων ή τροποποιημένων εγγραφών
+            # Ζητάμε μόνο τις εγγραφές που προστέθηκαν ή τροποποιήθηκαν μετά το last_sync
             delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
             delta_records = delta_res.data or []
             
@@ -160,7 +143,7 @@ def sync_data_incremental():
             if delta_records or table_deleted_ids:
                 changes_detected = True
                 
-                # Προσαρμογή ημερομηνιών σε Python dates
+                # Μετατροπή των ISO string ημερομηνιών σε Python date objects
                 if table == "assignments":
                     for r in delta_records:
                         if isinstance(r.get('date'), str):
@@ -176,7 +159,7 @@ def sync_data_incremental():
                         if isinstance(r.get('startDate'), str):
                             r['startDate'] = datetime.strptime(r['startDate'].split("T")[0], "%Y-%m-%d").date()
 
-                # Εφαρμογή των μερικών αλλαγών στη μνήμη
+                # Εφαρμογή των αλλαγών στην τοπική μνήμη του χρήστη
                 st.session_state[table] = apply_delta_updates(
                     table, 
                     st.session_state.get(table, []), 
@@ -185,11 +168,12 @@ def sync_data_incremental():
                 )
 
         if changes_detected:
+            # Αν υπήρξαν αλλαγές, ενημερώνουμε το σύστημα να ξαναχτίσει τα ευρετήρια (Gantt, maps κλπ)
             utils.mark_data_changed()
             
         st.session_state.last_sync_time = current_db_time
 
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
-        # Αν κάτι πάει στραβά, κάνουμε fallback σε full fetch στο επόμενο run
+        # Σε περίπτωση σφάλματος, καθαρίζουμε το sync_time για να γίνει full fetch στην επόμενη προσπάθεια
         st.session_state.last_sync_time = None
