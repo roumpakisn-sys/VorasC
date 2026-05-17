@@ -185,7 +185,6 @@ def db_delete(table, column, value, deleted_records=None, track=True):
             supabase.table(table).delete().eq(column, value).execute()
             log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
             
-            # Καταγραφή διαγραφών για Delta Updates (αποφυγή κυκλικού import)
             import database
             for r in deleted_records:
                 rec_id = r.get('id')
@@ -207,7 +206,6 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 supabase.table(table).delete().in_(column, values).execute()
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
                 
-                # Καταγραφή διαγραφών για Delta Updates (αποφυγή κυκλικού import)
                 import database
                 for r in deleted_records:
                     rec_id = r.get('id')
@@ -260,7 +258,6 @@ def perform_redo():
                 db_update(act['table'], new_r['id'], new_r, track=False)
     mark_data_changed()
 
-# --- HELPERS ΓΙΑ ΔΕΔΟΜΕΝΑ ---
 def get_employee_name(emp_id):
     if not emp_id: return "Χωρίς Προσωπικό"
     emp = st.session_state.emp_map.get(emp_id)
@@ -273,15 +270,20 @@ def get_project_name(proj_id):
 def get_project_info(proj_id):
     return st.session_state.proj_map.get(proj_id)
 
-# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΡΓΑΣΙΩΝ ---
 def auto_extend_recurring_patterns():
     if not st.session_state.get('recurring_patterns'): return
     max_dates = {}
     for a in st.session_state.assignments:
         rid = a.get('recurring_id')
         if rid:
-            if rid not in max_dates or a['date'] > max_dates[rid]:
-                max_dates[rid] = a['date']
+            # Ασφαλής σύγκριση ημερομηνιών
+            d = a.get('date')
+            if isinstance(d, str):
+                try: d = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+                except: continue
+            if isinstance(d, date):
+                if rid not in max_dates or d > max_dates[rid]:
+                    max_dates[rid] = d
     
     new_assignments_batch = []
     today = date.today()
@@ -339,7 +341,6 @@ def auto_extend_recurring_patterns():
                     emps_to_process = r_emps
                 
                 emps_to_process = emps_to_process if emps_to_process else [""]
-                
                 leaves_dict = st.session_state.leaves_by_emp
                 day_assigns = st.session_state.assignments_by_date.get(d, [])
                 
@@ -373,24 +374,47 @@ def auto_extend_recurring_patterns():
                         supabase.table('assignments').insert(serialize_dates(batch[i:i+chunk_size])).execute()
                     except Exception as e:
                         print(f"Auto-extend insert error: {e}")
+                # Καταγραφή κίνησης μετά την ολοκλήρωση του thread ώστε να ενημερωθούν οι άλλοι χρήστες
+                try:
+                    log_entry = {
+                        "id": str(uuid.uuid4()),
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "username": "Σύστημα (Αυτόματη Επέκταση)",
+                        "action_type": "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ",
+                        "table_name": "assignments",
+                        "details": f"Επεκτάθηκαν {len(batch)} βάρδιες στο παρασκήνιο"
+                    }
+                    supabase.table("activity_logs").insert(log_entry).execute()
+                except: pass
+
             threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
 
-# --- ΣΥΓΧΡΟΝΙΣΜΟΣ ΔΕΔΟΜΕΝΩΝ ---
 def init_data_and_sync():
     """
     Ανακατευθύνει τον συγχρονισμό στον νέο μηχανισμό Delta Updates (database.py)
-    για μέγιστη ταχύτητα και αποφυγή υπερφόρτωσης της βάσης.
     """
     init_undo_stack()
     
-    # Καλούμε το incremental sync από το database.py
     import database
     database.sync_data_incremental()
 
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # Δημιουργία γρήγορων ευρετηρίων (FAST INDEXING) αν έχουν αλλάξει τα δεδομένα
+    # 1. Ασφαλής μετατροπή: Διασφαλίζουμε ότι καμία ημερομηνία δεν έμεινε ως string
+    for a in st.session_state.get('assignments', []):
+        if isinstance(a.get('date'), str):
+            try:
+                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+            except Exception:
+                a['date'] = date.today()
+
+    # 2. Έλεγχος αυτόματης επέκτασης ΠΡΙΝ χτιστεί το Ευρετήριο
+    if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+        auto_extend_recurring_patterns()
+        st.session_state.last_auto_extend_check = time.time()
+
+    # 3. Δημιουργία γρήγορων ευρετηρίων (FAST INDEXING)
     if st.session_state.get('data_dirty', True):
         st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
         st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
@@ -408,14 +432,9 @@ def init_data_and_sync():
             if eid not in leaves_by_emp: leaves_by_emp[eid] = []
             leaves_by_emp[eid].append(l)
         st.session_state.leaves_by_emp = leaves_by_emp
+        
         st.session_state.data_dirty = False
 
-    # Έλεγχος αυτόματης επέκτασης (ανά 1 ώρα)
-    if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
-        auto_extend_recurring_patterns()
-        st.session_state.last_auto_extend_check = time.time()
-
-# --- ΚΟΙΝΟ UI & SIDEBAR (ΚΑΛΕΙΤΑΙ ΑΠΟ ΟΛΕΣ ΤΙΣ ΣΕΛΙΔΕΣ) ---
 def setup_shared_ui(show_menu=False, menu_options=None):
     # CSS
     st.markdown("""
@@ -429,16 +448,13 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         padding: 12px; border-radius: 8px; background-color: #fee2e2;
         border: 1px solid #ef4444; margin-bottom: 8px; color: #b91c1c; font-weight: 500;
     }
-    /* Κρύβουμε το κουμπί αυτόματης ανανέωσης από το UI */
     .hidden-btn-container {
         display: none !important;
     }
     </style>
     """, unsafe_allow_html=True)
     
-    # Απενεργοποίηση Polling στη Διαχείριση (show_menu == True σημαίνει ότι είμαστε στη Διαχείριση)
     polling_js = """
-    // 2. Multi-User Polling (Κλικ στο κρυφό κουμπί κάθε 15 δευτερόλεπτα)
     setInterval(() => {
         const buttons = doc.querySelectorAll("button");
         for (let btn of buttons) {
@@ -450,12 +466,10 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }, 15000);
     """ if not show_menu else ""
     
-    # ΨΗΦΙΑΚΟ ΡΟΛΟΙ & SILENT MULTI-USER POLLING
     components.html("""
     <script>
     const doc = window.parent.document;
     
-    // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
@@ -474,7 +488,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </script>
     """, height=0, width=0)
 
-    # SIDEBAR CONTROLS
     st.sidebar.title("STAFF.PRO")
     st.sidebar.write("---")
     
@@ -498,14 +511,13 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     if supabase:
         st.sidebar.success("☁️ Cloud Sync (Incremental)")
         
-        # Το κρυφό κουμπί που ενεργοποιείται αυτόματα από το JavaScript (Μόνο αν τρέχει το script)
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
             st.rerun()
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
         
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            st.session_state.last_sync_time = None  # Αναγκάζει πλήρες sync
+            st.session_state.last_sync_time = None 
             st.rerun()
     else:
         st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
@@ -522,7 +534,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         st.session_state.current_user = None
         st.switch_page("streamlit_app.py")
 
-    # ALERTS ΟΡΦΑΝΩΝ ΒΑΡΔΙΩΝ (Στο Main Window)
     today_date = date.today()
     orphan_count = 0
     orphan_details = []
