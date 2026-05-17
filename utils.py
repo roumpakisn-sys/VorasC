@@ -276,7 +276,6 @@ def auto_extend_recurring_patterns():
     for a in st.session_state.assignments:
         rid = a.get('recurring_id')
         if rid:
-            # Ασφαλής σύγκριση ημερομηνιών
             d = a.get('date')
             if isinstance(d, str):
                 try: d = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
@@ -374,7 +373,6 @@ def auto_extend_recurring_patterns():
                         supabase.table('assignments').insert(serialize_dates(batch[i:i+chunk_size])).execute()
                     except Exception as e:
                         print(f"Auto-extend insert error: {e}")
-                # Καταγραφή κίνησης μετά την ολοκλήρωση του thread ώστε να ενημερωθούν οι άλλοι χρήστες
                 try:
                     log_entry = {
                         "id": str(uuid.uuid4()),
@@ -390,9 +388,6 @@ def auto_extend_recurring_patterns():
             threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
 
 def init_data_and_sync():
-    """
-    Ανακατευθύνει τον συγχρονισμό στον νέο μηχανισμό Delta Updates (database.py)
-    """
     init_undo_stack()
     
     import database
@@ -401,7 +396,6 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # 1. Ασφαλής μετατροπή: Διασφαλίζουμε ότι καμία ημερομηνία δεν έμεινε ως string
     for a in st.session_state.get('assignments', []):
         if isinstance(a.get('date'), str):
             try:
@@ -409,12 +403,10 @@ def init_data_and_sync():
             except Exception:
                 a['date'] = date.today()
 
-    # 2. Έλεγχος αυτόματης επέκτασης ΠΡΙΝ χτιστεί το Ευρετήριο
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
         st.session_state.last_auto_extend_check = time.time()
 
-    # 3. Δημιουργία γρήγορων ευρετηρίων (FAST INDEXING)
     if st.session_state.get('data_dirty', True):
         st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
         st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
@@ -436,7 +428,6 @@ def init_data_and_sync():
         st.session_state.data_dirty = False
 
 def setup_shared_ui(show_menu=False, menu_options=None):
-    # CSS
     st.markdown("""
     <style>
     [data-testid="stSidebar"] {
@@ -454,8 +445,13 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </style>
     """, unsafe_allow_html=True)
     
+    # Το Javascript ρωτάει: "Είμαι σε λειτουργία επεξεργασίας στο Ταμπλό;"
+    # Αν ναι (isEditing), ΔΕΝ κάνει κλικ για ανανέωση, ώστε να μην σε διακόψει!
     polling_js = """
     setInterval(() => {
+        const isEditing = doc.getElementById("is_editing_flag");
+        if (isEditing) return;
+        
         const buttons = doc.querySelectorAll("button");
         for (let btn of buttons) {
             if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
