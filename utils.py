@@ -421,8 +421,8 @@ def auto_extend_recurring_patterns():
                     emps_to_process = r_emps
                 
                 emps_to_process = emps_to_process if emps_to_process else [""]
-                leaves_dict = st.session_state.leaves_by_emp
-                day_assigns = st.session_state.assignments_by_date.get(d, [])
+                leaves_dict = st.session_state.get('leaves_by_emp', {})
+                day_assigns = st.session_state.get('assignments_by_date', {}).get(d, [])
                 
                 for eid in emps_to_process:
                     final_eid = eid
@@ -633,29 +633,31 @@ def init_data_and_sync():
     cleanup_duplicates()
     cleanup_projects()
 
+    # ΧΤΙΣΙΜΟ ΓΡΗΓΟΡΩΝ ΕΥΡΕΤΗΡΙΩΝ (ΠΡΕΠΕΙ ΝΑ ΓΙΝΕΙ ΠΡΙΝ ΤΗΝ ΕΠΕΚΤΑΣΗ)
+    st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
+    st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
+    
+    assign_date_map = {}
+    for a in st.session_state.assignments:
+        d = a['date']
+        if d not in assign_date_map: assign_date_map[d] = []
+        assign_date_map[d].append(a)
+    st.session_state.assignments_by_date = assign_date_map
+    
+    leaves_by_emp = {}
+    for l in st.session_state.leaves:
+        eid = l.get('employeeId')
+        if eid:
+            if eid not in leaves_by_emp: leaves_by_emp[eid] = []
+            leaves_by_emp[eid].append(l)
+    st.session_state.leaves_by_emp = leaves_by_emp
+    
+    st.session_state.data_dirty = False
+
+    # ΤΩΡΑ ΜΠΟΡΕΙ ΝΑ ΤΡΕΞΕΙ Η ΕΠΕΚΤΑΣΗ ΜΕ ΑΣΦΑΛΕΙΑ!
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
         st.session_state.last_auto_extend_check = time.time()
-
-    if st.session_state.get('data_dirty', True):
-        st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
-        st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
-        
-        assign_date_map = {}
-        for a in st.session_state.assignments:
-            d = a['date']
-            if d not in assign_date_map: assign_date_map[d] = []
-            assign_date_map[d].append(a)
-        st.session_state.assignments_by_date = assign_date_map
-        
-        leaves_by_emp = {}
-        for l in st.session_state.leaves:
-            eid = l['employeeId']
-            if eid not in leaves_by_emp: leaves_by_emp[eid] = []
-            leaves_by_emp[eid].append(l)
-        st.session_state.leaves_by_emp = leaves_by_emp
-        
-        st.session_state.data_dirty = False
 
 def setup_shared_ui(show_menu=False, menu_options=None):
     st.markdown("""
