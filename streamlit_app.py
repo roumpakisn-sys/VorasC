@@ -18,7 +18,7 @@ if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
-            # 1. ΠΡΟΣΘΗΚΗ ΧΡΗΣΤΩΝ: Πρόσθεσε τα ονόματα των νέων χρηστών σε αυτή τη λίστα
+            # Η νέα λίστα με τους χρήστες της εφαρμογής
             users_list = ["Admin", "EXOU", "MEMEK", "NAK", "PAP", "TAN"]
             username = st.selectbox("Χρήστης", users_list)
             
@@ -26,7 +26,8 @@ if not st.session_state.authenticated:
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # 2. ΠΡΟΣΘΗΚΗ ΚΩΔΙΚΩΝ: Αντιστοίχισε τα ονόματα με τους κωδικούς τους.
+                # Αντιστοίχιση των χρηστών με τους κωδικούς από τα Secrets. 
+                # (Αν για κάποιο λόγο δεν διαβαστούν τα secrets, χρησιμοποιούνται οι προεπιλεγμένοι κωδικοί π.χ. pass1)
                 valid_passwords = {
                     "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
                     "EXOU": st.secrets.get("USER1_PASSWORD", "pass1"),
@@ -43,5 +44,5 @@ if not st.session_state.authenticated:
                 else:
                     st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
 else:
-    # Αν είναι ήδη συνδεδεμένος, προώθηση στο Dashboard
+    # Αν ο χρήστης είναι ήδη συνδεδεμένος, τον προωθεί κατευθείαν στο Dashboard
     st.switch_page("pages/1_Gantt_Dashboard.py")
