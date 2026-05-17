@@ -10,7 +10,7 @@ import re
 import ast
 import time
 import config
-import scheduling  # ΝΕΟ: Εισαγωγή του νέου module!
+import scheduling
 
 try:
     from supabase import create_client
@@ -91,7 +91,7 @@ def format_log_details(table_name, records):
             lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
         elif table_name == 'assignments':
             emp_id = r.get('employeeId')
-            emp_name = "Χωρίς Προσωπικό"
+            emp_name = "Χαμηλό / Χωρίς Προσωπικό"
             if emp_id and 'employees' in st.session_state:
                 e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
                 if e_info: emp_name = e_info['name']
@@ -174,6 +174,10 @@ def db_insert(table, data, track=True):
             st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
 
 def db_delete(table, column, value, deleted_records=None, track=True):
+    """
+    Αναβαθμισμένη διαγραφή: Διαγράφει από τη βάση και καταγράφει αυτόματα 
+    τη διαγραφή στον πίνακα Delta Updates για τους άλλους χρήστες.
+    """
     mark_data_changed()
     if not deleted_records:
         table_data = st.session_state.get(table, [])
@@ -184,10 +188,20 @@ def db_delete(table, column, value, deleted_records=None, track=True):
         try:
             supabase.table(table).delete().eq(column, value).execute()
             log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
+            
+            # Καταγραφή διαγραφών για Delta Updates (αποφυγή κυκλικού import)
+            import database
+            for r in deleted_records:
+                rec_id = r.get('id')
+                if rec_id:
+                    database.track_deletion(table, rec_id)
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
+    """
+    Αναβαθμισμένη μαζική διαγραφή με αυτόματη καταγραφή Delta Tracking.
+    """
     mark_data_changed()
     if values:
         if not deleted_records:
@@ -199,6 +213,13 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
             try:
                 supabase.table(table).delete().in_(column, values).execute()
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
+                
+                # Καταγραφή διαγραφών για Delta Updates (αποφυγή κυκλικού import)
+                import database
+                for r in deleted_records:
+                    rec_id = r.get('id')
+                    if rec_id:
+                        database.track_deletion(table, rec_id)
             except Exception as e:
                 st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
@@ -326,7 +347,6 @@ def auto_extend_recurring_patterns():
                 
                 emps_to_process = emps_to_process if emps_to_process else [""]
                 
-                # --- Χρήση του scheduling.py ---
                 leaves_dict = st.session_state.leaves_by_emp
                 day_assigns = st.session_state.assignments_by_date.get(d, [])
                 
@@ -362,79 +382,22 @@ def auto_extend_recurring_patterns():
                         print(f"Auto-extend insert error: {e}")
             threading.Thread(target=insert_batch, args=(new_assignments_batch,), daemon=True).start()
 
-# --- ΣΥΓΧΡΟΝΙΣΜΟΣ ΔΕΔΟΜΕΝΩΝ (ΚΑΛΕΙΤΑΙ ΑΠΟ ΤΙΣ ΣΕΛΙΔΕΣ) ---
+# --- ΣΥΓΧΡΟΝΙΣΜΟΣ ΔΕΔΟΜΕΝΩΝ ---
 def init_data_and_sync():
+    """
+    Ανακατευθύνει τον συγχρονισμό στον νέο μηχανισμό Delta Updates (database.py)
+    για μέγιστη ταχύτητα και αποφυγή υπερφόρτωσης της βάσης.
+    """
     init_undo_stack()
-    if supabase:
-        st.session_state.is_cloud = True
-        latest_ts = None
-        try:
-            res = supabase.table('activity_logs').select('timestamp').order('timestamp', desc=True).limit(1).execute()
-            if res.data:
-                latest_ts = res.data[0]['timestamp']
-        except:
-            pass
-        
-        if "global_db_ts" not in st.session_state or st.session_state.global_db_ts != latest_ts:
-            with st.spinner("Λήψη νέων δεδομένων από Supabase..."):
-                st.session_state.employees = fetch_paginated("employees")
-                st.session_state.projects = fetch_paginated("projects")
-                
-                assigns = fetch_paginated("assignments")
-                for a in assigns:
-                    if isinstance(a.get('date'), str):
-                        a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
-                st.session_state.assignments = assigns
-                
-                leaves = fetch_paginated("leaves")
-                for l in leaves:
-                    if isinstance(l.get('startDate'), str):
-                        l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-                    if isinstance(l.get('endDate'), str):
-                        l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
-                st.session_state.leaves = leaves
-                
-                patterns = fetch_paginated("recurring_patterns")
-                for p in patterns:
-                    if isinstance(p.get('startDate'), str):
-                        p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
-                st.session_state.recurring_patterns = patterns
-                
-                try:
-                    st.session_state.evaluations = fetch_paginated("evaluations")
-                except:
-                    st.session_state.evaluations = []
-                    
-                try:
-                    st.session_state.activity_logs = supabase.table("activity_logs").select("*").order("timestamp", desc=True).limit(500).execute().data
-                except:
-                    st.session_state.activity_logs = []
-                    
-                st.session_state.global_db_ts = latest_ts
-                mark_data_changed()
-    else:
-        if 'local_data_loaded' not in st.session_state:
-            st.session_state.local_data_loaded = True
-            st.session_state.is_cloud = False
-            st.session_state.employees = [
-                {'id': '1', 'name': 'Γιάννης Παπαδόπουλος', 'position': 'ΕΡΓΑΤΗΣ', 'id_number': 'ΑΙ123456', 'phone': '6912345678', 'status': 'Ενεργός'},
-                {'id': '2', 'name': 'Μαρία Παππά', 'position': 'ΕΠΟΠΤΗΣ', 'id_number': 'ΑΚ654321', 'phone': '6987654321', 'status': 'Ενεργός'}
-            ]
-            st.session_state.projects = [
-                {'id': 'p1', 'name': 'Ανακαίνιση Γραφείων', 'color': '#4a86e8'},
-                {'id': 'p2', 'name': 'Συντήρηση Δικτύου', 'color': '#e69138'}
-            ]
-            st.session_state.assignments = []
-            st.session_state.recurring_patterns = []
-            st.session_state.leaves = []
-            st.session_state.evaluations = []
-            st.session_state.activity_logs = []
-            mark_data_changed()
+    
+    # Καλούμε το incremental sync από το database.py
+    import database
+    database.sync_data_incremental()
 
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # FAST INDEXING
+    # Δημιουργία γρήγορων ευρετηρίων (FAST INDEXING) αν έχουν αλλάξει τα δεδομένα
     if st.session_state.get('data_dirty', True):
         st.session_state.emp_map = {e['id']: e for e in st.session_state.employees}
         st.session_state.proj_map = {p['id']: p for p in st.session_state.projects}
@@ -518,10 +481,10 @@ def setup_shared_ui(show_menu=False, menu_options=None):
             
     st.sidebar.write("---")
     st.sidebar.subheader("Κατάσταση Συστήματος")
-    if st.session_state.get('is_cloud'):
-        st.sidebar.success("☁️ Cloud Sync (Real-time)")
+    if supabase:
+        st.sidebar.success("☁️ Cloud Sync (Incremental)")
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            st.session_state.global_db_ts = "force_refresh"
+            st.session_state.last_sync_time = None  # Αναγκάζει πλήρες sync
             st.rerun()
     else:
         st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
