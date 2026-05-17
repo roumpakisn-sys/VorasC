@@ -311,6 +311,18 @@ else:
             tickvals_map[rid] = base_y_label if idx == mid_idx else ""
             
     df = pd.DataFrame(data)
+
+    # --- ΠΡΟΣΘΗΚΗ ΑΣΦΑΛΕΙΑΣ ΓΙΑ ΑΔΕΙΕΣ ΕΒΔΟΜΑΔΕΣ ---
+    # Αν ο πίνακας είναι εντελώς άδειος (π.χ. μετά από TRUNCATE στη βάση), 
+    # δημιουργούμε τις στήλες χειροκίνητα για να μην κρασάρει το Plotly.
+    if df.empty:
+        df = pd.DataFrame(columns=[
+            'Y_Axis', 'Έργο', 'Έναρξη', 'Λήξη', 'Προσωπικό', 
+            'Προσέλευση', 'Παρατηρήσεις', 'Ετικέτα', 'LegendGroup', 
+            'ColorHex', 'GroupKey'
+        ])
+    # -----------------------------------------------
+
     ordered_categories = y_category_order[::-1]
     
     fig = px.timeline(
