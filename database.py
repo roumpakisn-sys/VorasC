@@ -8,6 +8,37 @@ import utils
 # Αναφορά στον έτοιμο Supabase Client από το utils
 supabase = utils.supabase
 
+def inject_silent_refresh_css():
+    """
+    Εισάγει CSS κανόνες που απενεργοποιούν εντελώς τα προεπιλεγμένα 
+    οπτικά εφέ φόρτωσης του Streamlit (το γκριζάρισμα και το Running...).
+    Έτσι, το Auto-Polling λειτουργεί 100% αόρατα στο παρασκήνιο!
+    """
+    st.markdown(
+        """
+        <style>
+        /* Εξαφανίζει το εικονίδιο 'Running...' πάνω δεξιά */
+        [data-testid="stStatusWidget"] {
+            visibility: hidden !important;
+            display: none !important;
+        }
+        /* Αποτρέπει το γκριζάρισμα/ημιδιαφάνεια της οθόνης κατά το polling */
+        [data-testid="stAppViewBlockContainer"] {
+            opacity: 1 !important;
+            transition: none !important;
+        }
+        .stApp {
+            opacity: 1 !important;
+        }
+        /* Κρύβει τη λεπτή γραμμή φόρτωσης (loading progress bar) στην κορυφή */
+        .stApp [data-testid="stDecoration"] {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 def get_db_current_time():
     """
     Ανακτά την ακριβή τρέχουσα ώρα του εξυπηρετητή (Supabase server time) 
@@ -63,6 +94,9 @@ def sync_data_incremental():
     Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας 
     ένα ελαφρύ Polling Guard για την ελαχιστοποίηση των ερωτημάτων στη βάση.
     """
+    # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
+    inject_silent_refresh_css()
+
     if not supabase:
         return
 
@@ -107,10 +141,6 @@ def sync_data_incremental():
     # --- INCREMENTAL SYNC (Delta Updates) με Polling Guard ---
     try:
         # 1. ULTRA-LIGHT POLLING GUARD
-        # Κάνουμε select μόνο μία εγγραφή (την τελευταία) από το activity_logs.
-        # Αν η ημερομηνία της τελευταίας δραστηριότητας στη βάση είναι παλαιότερη ή ίση 
-        # με το δικό μας last_sync, σημαίνει ότι δεν έχει αλλάξει απολύτως τίποτα!
-        # Τερματίζουμε αμέσως τη συνάρτηση, γλιτώνοντας 7 βαριά queries στη Supabase!
         res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
         if res_logs.data:
             latest_activity_ts = res_logs.data[0]['timestamp']
@@ -175,5 +205,6 @@ def sync_data_incremental():
 
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
-        # Σε περίπτωση σφάλματος, καθαρίζουμε το sync_time για να γίνει full fetch στην επόμενη προσπάθεια
-        st.session_state.last_sync_time = None
+        # ΔΕΝ μηδενίζουμε πλέον το last_sync_time εδώ.
+        # Έτσι αποφεύγουμε τα "Full Fetch Spinners" σε περίπτωση στιγμιαίας πτώσης δικτύου!
+        pass
