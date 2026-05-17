@@ -12,21 +12,30 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
-import scheduling  # Εισαγωγή του module με τις Pure Functions
+import scheduling
 
 utils.init_data_and_sync()
 
 # Helpers local access
-is_full_admin = st.session_state.get('current_user') != "TAN"
+current_user = st.session_state.get('current_user')
+is_full_admin = current_user != "TAN"
 # Φιλτράρισμα: Μόνο οι "Ενεργοί" υπάλληλοι είναι διαθέσιμοι για τοποθετήσεις
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
-if st.session_state.get('current_user') == "Admin":
-    menu_options.append("Καταγραφή Κινήσεων")
+# --- ΛΟΓΙΚΗ ΠΡΟΣΒΑΣΗΣ / ΜΕΝΟΥ ---
+if current_user == "TAN":
+    # Ο ΤΑΝ βλέπει ΜΟΝΟ Προσωπικό και Άδειες (και τις συγκεντρωτικές άδειες)
+    menu_options = ["Προσωπικό", "Άδειες", "Σύνολο Αδειών"]
+else:
+    # Οι υπόλοιποι βλέπουν τα πάντα ΕΚΤΟΣ από την Καταγραφή Κινήσεων
+    menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
+    # ΜΟΝΟ ο Admin βλέπει την Καταγραφή Κινήσεων (Audit Log)
+    if current_user == "Admin":
+        menu_options.append("Καταγραφή Κινήσεων")
 
 # Ενσωμάτωση του μενού ψηλά στο Sidebar
 menu = utils.setup_shared_ui(show_menu=True, menu_options=menu_options)
+
 
 # --- VIEW: PROJECTS ---
 if menu == "Διαχείριση Έργων":
@@ -548,7 +557,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     r_end_date = r_start_date + timedelta(days=365)
                     dates_to_assign = []
                     curr_date = r_start_date
-                    day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "ΚυριαΚή": 6}
+                    day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                     day_map_inv = {v: k for k, v in day_map.items()}
                     selected_weekday_ints = [day_map[d] for d in selected_weekdays] if selected_weekdays else []
                     
