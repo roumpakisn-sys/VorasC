@@ -174,10 +174,6 @@ def db_insert(table, data, track=True):
             st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
 
 def db_delete(table, column, value, deleted_records=None, track=True):
-    """
-    Αναβαθμισμένη διαγραφή: Διαγράφει από τη βάση και καταγράφει αυτόματα 
-    τη διαγραφή στον πίνακα Delta Updates για τους άλλους χρήστες.
-    """
     mark_data_changed()
     if not deleted_records:
         table_data = st.session_state.get(table, [])
@@ -199,9 +195,6 @@ def db_delete(table, column, value, deleted_records=None, track=True):
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
 def db_delete_in(table, column, values, deleted_records=None, track=True):
-    """
-    Αναβαθμισμένη μαζική διαγραφή με αυτόματη καταγραφή Delta Tracking.
-    """
     mark_data_changed()
     if values:
         if not deleted_records:
@@ -443,6 +436,20 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </style>
     """, unsafe_allow_html=True)
     
+    # Απενεργοποίηση Polling στη Διαχείριση (show_menu == True σημαίνει ότι είμαστε στη Διαχείριση)
+    polling_js = """
+    // 2. Multi-User Polling (Κλικ στο κρυφό κουμπί κάθε 15 δευτερόλεπτα)
+    setInterval(() => {
+        const buttons = doc.querySelectorAll("button");
+        for (let btn of buttons) {
+            if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
+                btn.click();
+                break;
+            }
+        }
+    }, 15000);
+    """ if not show_menu else ""
+    
     # ΨΗΦΙΑΚΟ ΡΟΛΟΙ & SILENT MULTI-USER POLLING
     components.html("""
     <script>
@@ -463,17 +470,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
     updateClock();
     setInterval(updateClock, 1000);
-
-    // 2. Multi-User Polling (Κλικ στο κρυφό κουμπί κάθε 15 δευτερόλεπτα)
-    setInterval(() => {
-        const buttons = doc.querySelectorAll("button");
-        for (let btn of buttons) {
-            if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
-                btn.click();
-                break;
-            }
-        }
-    }, 15000);
+    """ + polling_js + """
     </script>
     """, height=0, width=0)
 
@@ -501,7 +498,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     if supabase:
         st.sidebar.success("☁️ Cloud Sync (Incremental)")
         
-        # Το κρυφό κουμπί που ενεργοποιείται αυτόματα από το JavaScript
+        # Το κρυφό κουμπί που ενεργοποιείται αυτόματα από το JavaScript (Μόνο αν τρέχει το script)
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
             st.rerun()
