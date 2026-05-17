@@ -13,7 +13,7 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
-import scheduling  # Εισαγωγή του νέου "καθαρού" module για βάρδιες/άδειες
+import scheduling  # Εισαγωγή του καθαρού module για βάρδιες/άδειες
 
 utils.init_data_and_sync()
 utils.setup_shared_ui()
@@ -54,6 +54,7 @@ with col_pres:
 
 zoom_factor = zoom_level / 100.0
 
+# Το Ταμπλό εξαρτάται από το local_gantt_version. Κάθε φορά που γίνεται προσθήκη/διαγραφή (ή έρχεται αλλαγή από Delta Sync), το νούμερο αλλάζει και η Cache σπάει!
 current_gantt_params = {
     "week": start_of_week,
     "zoom": zoom_factor,
@@ -175,7 +176,6 @@ else:
                             pa_name = pa_proj['name'].strip().lower() if pa_proj else "1"
                             a_name = a_proj['name'].strip().lower() if a_proj else "2"
                             
-                            # --- ΑΥΣΤΗΡΗ ΛΟΓΙΚΗ ΓΙΑ [ΜΕΤΑ ΑΠΟ...] ---
                             is_diff_project = (pa_name != a_name)
                             starts_earlier_or_same = (t_pa_start_str <= t_a_start_str)
                             overlaps = (t_pa_end_str > t_a_start_str)
@@ -242,7 +242,6 @@ else:
                 if g['Notes']:
                     base_text += f" ({g['Notes'].upper()})"
                 
-                # --- ΣΦΙΧΤΗ ΑΝΑΔΙΠΛΩΣΗ ΚΕΙΜΕΝΟΥ (TEXT WRAP) ---
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
                 wrap_w = max(12, int(duration_hours * 13))
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
@@ -317,7 +316,6 @@ else:
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
-    # --- ΜΙΚΡΟΤΕΡΟ ΥΨΟΣ ΜΠΑΡΩΝ ---
     row_h = 40 * zoom_factor
     visible_count = 650 / row_h
     if presentation_mode or len(ordered_categories) <= visible_count:
@@ -350,8 +348,7 @@ else:
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
     fig.update_layout(
-        bargap=0.02, # --- ΜΙΚΡΟΤΕΡΟ ΚΕΝΟ ΜΕΤΑΞΥ ΜΠΑΡΩΝ ---
-        showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
+        bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
         height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
@@ -440,7 +437,6 @@ if not presentation_mode:
                         for eid in emps_to_process:
                             if eid:
                                 emp_name = utils.get_employee_name(eid)
-                                # Χρήση scheduling pure function
                                 if scheduling.is_on_leave(eid, add_date, st.session_state.leaves_by_emp):
                                     errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
                                     st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
@@ -535,7 +531,6 @@ if not presentation_mode:
                                     
                             if new_a['employeeId']:
                                 emp_name = utils.get_employee_name(new_a['employeeId'])
-                                # Χρήση scheduling pure function
                                 if scheduling.is_on_leave(new_a['employeeId'], new_a['date'], st.session_state.leaves_by_emp):
                                     st.toast(f"Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
                                     has_error = True; break
@@ -622,7 +617,6 @@ if not presentation_mode:
                                 for eid in emps_to_process:
                                     if eid:
                                         emp_name = utils.get_employee_name(eid)
-                                        # Χρήση scheduling pure function
                                         if scheduling.is_on_leave(eid, edit_date, st.session_state.leaves_by_emp):
                                             errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
                                             st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
