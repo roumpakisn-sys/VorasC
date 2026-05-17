@@ -10,6 +10,7 @@ import threading
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
 
+import config
 import utils
 
 utils.init_data_and_sync()
@@ -493,7 +494,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], format_func=utils.get_project_name, key=f"new_r_proj_{rc}")
                 r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο", key=f"new_r_custom_proj_{rc}")
                 c_r_color, c_r_notes = st.columns(2)
-                with c_r_color: r_color = st.selectbox("Χρώμα Μπάρας", options=list(utils.BASIC_COLORS.keys()), key=f"new_r_color_{rc}")
+                with c_r_color: r_color = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"new_r_color_{rc}")
                 with c_r_notes: r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"new_r_notes_{rc}")
                 r_type = st.selectbox("Συχνότητα Επανάληψης", ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"], key=f"new_r_type_{rc}")
                 
@@ -536,7 +537,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     actions = []
                     if r_custom_proj_name.strip():
                         final_r_proj_id = str(uuid.uuid4())
-                        new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': utils.BASIC_COLORS[r_color]}
+                        new_p = {'id': final_r_proj_id, 'name': r_custom_proj_name.strip(), 'color': config.BASIC_COLORS[r_color]}
                         st.session_state.projects.append(new_p)
                         utils.db_insert('projects', new_p, track=False)
                         actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
@@ -585,11 +586,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             conflict_count += 1
                                             conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                         else:
-                                            new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color, 'colorHex': utils.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                            new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color, 'colorHex': config.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
                                             new_assignments_batch.append(new_assign)
                                             success_count += 1
                                 else:
-                                    new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "", 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': str_start, 'endTime': str_end, 'colorName': r_color, 'colorHex': utils.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                    new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "", 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': str_start, 'endTime': str_end, 'colorName': r_color, 'colorHex': config.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
                                     new_assignments_batch.append(new_assign)
                                     success_count += 1
                                     
@@ -619,7 +620,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             for c in conflict_details: st.write(f"⚠️ {c}")
 
         with tab_edit:
-            if not st.session_state.recurring_patterns: st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
+            if not st.session_state.recurring_patterns: st.info("Δεν υπάρχ ενεργές επαναλαμβανόμενες εργασίες.")
             else:
                 pattern_options = {p['id']: f"{utils.get_project_info(p['projectId'])['name'] if utils.get_project_info(p['projectId']) else 'Άγνωστο Έργο'} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})" for p in st.session_state.recurring_patterns}
                 selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
