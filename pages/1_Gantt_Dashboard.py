@@ -246,8 +246,10 @@ else:
                 base_text = f"{times_str} {proj_name} // {emps_str}"
                 if g['Notes']:
                     base_text += f" ({g['Notes'].upper()})"
+                
                 duration_hours = (g['End'] - g['Start']).total_seconds() / 3600.0
-                wrap_w = max(15, int(duration_hours * 16))
+                # Αυστηρότερη αναδίπλωση: ~13 χαρακτήρες ανά ώρα αντί για 16
+                wrap_w = max(12, int(duration_hours * 13))
                 wrapped_base = "<br>".join(textwrap.wrap(base_text, width=wrap_w))
                 
                 if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str:
@@ -320,7 +322,8 @@ else:
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
-    row_h = 55 * zoom_factor
+    # Μείωση ύψους της κάθε μπάρας/γραμμής (από 55 σε 40)
+    row_h = 40 * zoom_factor
     visible_count = 650 / row_h
     if presentation_mode or len(ordered_categories) <= visible_count:
         dyn_h = max(500, int(len(ordered_categories) * row_h) + 100)
@@ -352,7 +355,7 @@ else:
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
     fig.update_layout(
-        bargap=0.12, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
+        bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff', # Μείωση απόστασης μεταξύ των μπαρών (από 0.12 σε 0.02)
         height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
