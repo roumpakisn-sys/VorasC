@@ -16,6 +16,15 @@ import utils
 import scheduling  # Εισαγωγή του καθαρού module για βάρδιες/άδειες
 
 utils.init_data_and_sync()
+
+# ΑΥΤΟΜΑΤΗ ΕΠΙΔΙΟΡΘΩΣΗ (Self-Healing): Αν μπήκαν επαναλαμβανόμενες εργασίες
+# και το ευρετήριο ημερομηνιών δεν πρόλαβε να ανανεωθεί, το καταλαβαίνουμε
+# από τη διαφορά στο πλήθος και αναγκάζουμε άμεση αναδόμηση του ευρετηρίου!
+total_indexed = sum(len(v) for v in st.session_state.get('assignments_by_date', {}).values())
+if total_indexed != len(st.session_state.get('assignments', [])):
+    utils.mark_data_changed()
+    utils.init_data_and_sync()
+
 utils.setup_shared_ui()
 
 # Helpers local access
@@ -54,15 +63,17 @@ with col_pres:
 
 zoom_factor = zoom_level / 100.0
 
-# Το Ταμπλό εξαρτάται από το local_gantt_version. Κάθε φορά που γίνεται προσθήκη/διαγραφή (ή έρχεται αλλαγή από Delta Sync), το νούμερο αλλάζει και η Cache σπάει!
+# Το Ταμπλό εξαρτάται από το local_gantt_version ΚΑΙ από το συνολικό πλήθος των βαρδιών!
 current_gantt_params = {
     "week": start_of_week,
     "zoom": zoom_factor,
     "presentation": presentation_mode,
-    "local_version": st.session_state.get('local_gantt_version', 0)
+    "local_version": st.session_state.get('local_gantt_version', 0),
+    "total_assigns": len(st.session_state.get('assignments', [])) # Προσθήκη για να σπάει η cache στις επαναλαμβανόμενες
 }
 
-if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state:
+# Εξασφαλίζουμε ότι αν το data_dirty είναι True, η Cache αγνοείται ούτως ή άλλως
+if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state and not st.session_state.get('data_dirty', False):
     fig = st.session_state.cached_fig
     wk_groups = st.session_state.cached_wk_groups
     export_data = st.session_state.cached_export_data
