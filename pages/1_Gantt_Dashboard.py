@@ -13,6 +13,7 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
+import scheduling  # Εισαγωγή του νέου "καθαρού" module για βάρδιες/άδειες
 
 utils.init_data_and_sync()
 utils.setup_shared_ui()
@@ -439,11 +440,13 @@ if not presentation_mode:
                         for eid in emps_to_process:
                             if eid:
                                 emp_name = utils.get_employee_name(eid)
-                                if utils.is_on_leave(eid, add_date):
+                                # Χρήση scheduling pure function
+                                if scheduling.is_on_leave(eid, add_date, st.session_state.leaves_by_emp):
                                     errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
                                     st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
                                 else:
-                                    adj_start, adj_end, is_conflict, msg = utils.check_and_resolve_conflict(eid, add_date, str_start, str_end)
+                                    day_assigns = st.session_state.assignments_by_date.get(add_date, [])
+                                    adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                     if is_conflict:
                                         errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει ({str_start} - {str_end}).")
                                         st.toast(f"Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="⚠️")
@@ -532,10 +535,13 @@ if not presentation_mode:
                                     
                             if new_a['employeeId']:
                                 emp_name = utils.get_employee_name(new_a['employeeId'])
-                                if utils.is_on_leave(new_a['employeeId'], new_a['date']):
+                                # Χρήση scheduling pure function
+                                if scheduling.is_on_leave(new_a['employeeId'], new_a['date'], st.session_state.leaves_by_emp):
                                     st.toast(f"Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
                                     has_error = True; break
-                                adj_start, adj_end, is_conflict, msg = utils.check_and_resolve_conflict(new_a['employeeId'], new_a['date'], new_a['startTime'], new_a['endTime'], exclude_ids=target_group['AssignmentIds'])
+                                
+                                day_assigns = st.session_state.assignments_by_date.get(new_a['date'], [])
+                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(new_a['employeeId'], new_a['startTime'], new_a['endTime'], day_assigns, exclude_ids=target_group['AssignmentIds'])
                                 if is_conflict:
                                     st.toast(f"Αδύνατη μετακίνηση: Διπλοκράτηση {emp_name}!", icon="⚠️")
                                     has_error = True; break
@@ -616,11 +622,13 @@ if not presentation_mode:
                                 for eid in emps_to_process:
                                     if eid:
                                         emp_name = utils.get_employee_name(eid)
-                                        if utils.is_on_leave(eid, edit_date):
+                                        # Χρήση scheduling pure function
+                                        if scheduling.is_on_leave(eid, edit_date, st.session_state.leaves_by_emp):
                                             errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
                                             st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
                                         else:
-                                            adj_start, adj_end, is_conflict, msg = utils.check_and_resolve_conflict(eid, edit_date, str_start, str_end, exclude_ids=target_group['AssignmentIds'])
+                                            day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
+                                            adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns, exclude_ids=target_group['AssignmentIds'])
                                             if is_conflict:
                                                 errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει.")
                                                 st.toast(f"Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="⚠️")
