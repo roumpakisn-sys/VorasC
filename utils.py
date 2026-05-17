@@ -108,30 +108,30 @@ def format_log_details(table_name, records):
             emp_id = r.get('employeeId')
             emp_name = "Χαμηλό / Χωρίς Προσωπικό"
             if emp_id and 'employees' in st.session_state:
-                e_info = next((e for e in st.session_state.employees if e['id'] == emp_id), None)
-                if e_info: emp_name = e_info['name']
+                e_info = next((e for e in st.session_state.get('employees', []) if e.get('id') == emp_id), None)
+                if e_info: emp_name = e_info.get('name', emp_name)
             proj_id = r.get('projectId')
             proj_name = "Άγνωστο Έργο"
             if proj_id and 'projects' in st.session_state:
-                p_info = next((p for p in st.session_state.projects if p['id'] == proj_id), None)
-                if p_info: proj_name = p_info['name']
+                p_info = next((p for p in st.session_state.get('projects', []) if p.get('id') == proj_id), None)
+                if p_info: proj_name = p_info.get('name', proj_name)
             d = r.get('date', "")
             if isinstance(d, date): d = d.strftime('%d/%m/%Y')
             elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
             lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
         elif table_name == 'leaves':
             emp_id = r.get('employeeId')
-            emp_name = next((e['name'] for e in st.session_state.get('employees', []) if e['id'] == emp_id), "Άγνωστος")
+            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
             sd = r.get('startDate', "")
             ed = r.get('endDate', "")
             if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
             if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
             sub_id = r.get('substituteId')
-            sub_str = f" [Αντικατ: {next((e['name'] for e in st.session_state.employees if e['id'] == sub_id), 'Άγνωστος')}]" if sub_id else ""
+            sub_str = f" [Αντικατ: {next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == sub_id), 'Άγνωστος')}]" if sub_id else ""
             lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
         elif table_name == 'evaluations':
             emp_id = r.get('employeeId')
-            emp_name = next((e['name'] for e in st.session_state.get('employees', []) if e['id'] == emp_id), "Άγνωστος")
+            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
         elif table_name == 'recurring_patterns':
             lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
@@ -275,7 +275,7 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
 
 def perform_undo():
-    if not st.session_state.undo_stack: return
+    if not st.session_state.get('undo_stack'): return
     transaction = st.session_state.undo_stack.pop()
     st.session_state.redo_stack.append(transaction)
     for act in reversed(transaction):
@@ -290,7 +290,7 @@ def perform_undo():
     mark_data_changed()
 
 def perform_redo():
-    if not st.session_state.redo_stack: return
+    if not st.session_state.get('redo_stack'): return
     transaction = st.session_state.redo_stack.pop()
     st.session_state.undo_stack.append(transaction)
     for act in transaction:
@@ -306,20 +306,20 @@ def perform_redo():
 
 def get_employee_name(emp_id):
     if not emp_id: return "Χωρίς Προσωπικό"
-    emp = st.session_state.emp_map.get(emp_id)
-    return emp['name'] if emp else "Άγνωστος"
+    emp = st.session_state.get('emp_map', {}).get(emp_id)
+    return emp.get('name', 'Άγνωστος') if emp else "Άγνωστος"
 
 def get_project_name(proj_id):
-    proj = st.session_state.proj_map.get(proj_id)
-    return proj['name'] if proj else "Άγνωστο Έργο"
+    proj = st.session_state.get('proj_map', {}).get(proj_id)
+    return proj.get('name', 'Άγνωστο Έργο') if proj else "Άγνωστο Έργο"
 
 def get_project_info(proj_id):
-    return st.session_state.proj_map.get(proj_id)
+    return st.session_state.get('proj_map', {}).get(proj_id)
 
 def auto_extend_recurring_patterns():
     if not st.session_state.get('recurring_patterns'): return
     max_dates = {}
-    for a in st.session_state.assignments:
+    for a in st.session_state.get('assignments', []):
         if not isinstance(a, dict): continue
         rid = a.get('recurring_id')
         if rid:
@@ -330,7 +330,7 @@ def auto_extend_recurring_patterns():
     
     new_assignments_batch = []
     today = date.today()
-    for pat in st.session_state.recurring_patterns:
+    for pat in st.session_state.get('recurring_patterns', []):
         if not isinstance(pat, dict): continue
         rid = pat.get('id')
         if not rid: continue
@@ -455,11 +455,15 @@ def auto_extend_recurring_patterns():
                         'colorName': r_color, 'colorHex': c_hex, 'notes': combined_notes, 'is_cancelled': False, 'cancel_reason': ""
                     }
                     new_assignments_batch.append(new_assign)
+                    if 'assignments_by_date' not in st.session_state:
+                        st.session_state.assignments_by_date = {}
                     if d not in st.session_state.assignments_by_date:
                         st.session_state.assignments_by_date[d] = []
                     st.session_state.assignments_by_date[d].append(new_assign)
                     
     if new_assignments_batch:
+        if 'assignments' not in st.session_state:
+            st.session_state.assignments = []
         st.session_state.assignments.extend(new_assignments_batch)
         st.session_state.data_dirty = True
         st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
@@ -473,7 +477,7 @@ def cleanup_duplicates():
     duplicates_to_kill = []
     clean_assignments = []
     
-    for a in st.session_state.assignments:
+    for a in st.session_state.get('assignments', []):
         if not isinstance(a, dict): continue
         sig = (
             str(a.get('date', '')), 
@@ -529,9 +533,8 @@ def cleanup_projects():
     projects_to_keep = []
     id_remap = {}
     
-    for p in st.session_state.projects:
+    for p in st.session_state.get('projects', []):
         if not isinstance(p, dict): continue
-        # Εδώ ήταν το λάθος! Μετατρέπουμε το όνομα σε str για να μην «σκάσει» αν είναι None
         name_lower = str(p.get('name') or '').strip().lower()
         
         if not name_lower:
@@ -555,14 +558,14 @@ def cleanup_projects():
         
         # Ενημέρωση των βαρδιών που έδειχναν στα διεγραμμένα έργα
         assignments_to_update = []
-        for a in st.session_state.assignments:
+        for a in st.session_state.get('assignments', []):
             if isinstance(a, dict) and a.get('projectId') in id_remap:
                 a['projectId'] = id_remap[a['projectId']]
                 assignments_to_update.append(a)
                 
         # Ενημέρωση των επαναλαμβανόμενων που έδειχναν στα διεγραμμένα
         patterns_to_update = []
-        for pat in st.session_state.recurring_patterns:
+        for pat in st.session_state.get('recurring_patterns', []):
             if isinstance(pat, dict) and pat.get('projectId') in id_remap:
                 pat['projectId'] = id_remap[pat['projectId']]
                 patterns_to_update.append(pat)
@@ -638,14 +641,15 @@ def init_data_and_sync():
     st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
     
     assign_date_map = {}
-    for a in st.session_state.assignments:
-        d = a['date']
-        if d not in assign_date_map: assign_date_map[d] = []
-        assign_date_map[d].append(a)
+    for a in st.session_state.get('assignments', []):
+        d = a.get('date')
+        if d:
+            if d not in assign_date_map: assign_date_map[d] = []
+            assign_date_map[d].append(a)
     st.session_state.assignments_by_date = assign_date_map
     
     leaves_by_emp = {}
-    for l in st.session_state.leaves:
+    for l in st.session_state.get('leaves', []):
         eid = l.get('employeeId')
         if eid:
             if eid not in leaves_by_emp: leaves_by_emp[eid] = []
@@ -770,8 +774,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
             if not a.get('employeeId') and not a.get('is_cancelled', False):
                 orphan_count += 1
                 proj = get_project_info(a['projectId'])
-                proj_name = proj['name'] if proj else "Άγνωστο Έργο"
-                orphan_details.append(f"🔴 **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {a['startTime'][:5]}-{a['endTime'][:5]} | Έργο: **{proj_name}**")
+                proj_name = proj.get('name', "Άγνωστο Έργο") if proj else "Άγνωστο Έργο"
+                orphan_details.append(f"🔴 **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {str(a.get('startTime', ''))[:5]}-{str(a.get('endTime', ''))[:5]} | Έργο: **{proj_name}**")
     
     if orphan_count > 0:
         st.error(f"⚠️ **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
