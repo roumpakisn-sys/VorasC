@@ -17,9 +17,7 @@ import scheduling  # Εισαγωγή του καθαρού module για βάρ
 
 utils.init_data_and_sync()
 
-# ΑΥΤΟΜΑΤΗ ΕΠΙΔΙΟΡΘΩΣΗ (Self-Healing): Αν μπήκαν επαναλαμβανόμενες εργασίες
-# και το ευρετήριο ημερομηνιών δεν πρόλαβε να ανανεωθεί, το καταλαβαίνουμε
-# από τη διαφορά στο πλήθος και αναγκάζουμε άμεση αναδόμηση του ευρετηρίου!
+# ΑΥΤΟΜΑΤΗ ΕΠΙΔΙΟΡΘΩΣΗ (Self-Healing):
 total_indexed = sum(len(v) for v in st.session_state.get('assignments_by_date', {}).values())
 if total_indexed != len(st.session_state.get('assignments', [])):
     utils.mark_data_changed()
@@ -31,12 +29,16 @@ utils.setup_shared_ui()
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
+# Μηχανισμός Κλειδώματος Εβδομάδας
+if "view_week_date_val" not in st.session_state:
+    st.session_state.view_week_date_val = date.today()
+
 def go_prev_week():
-    st.session_state.view_week_date -= timedelta(days=7)
+    st.session_state.view_week_date_val -= timedelta(days=7)
 def go_next_week():
-    st.session_state.view_week_date += timedelta(days=7)
+    st.session_state.view_week_date_val += timedelta(days=7)
 def go_to_today():
-    st.session_state.view_week_date = date.today()
+    st.session_state.view_week_date_val = date.today()
 
 # --- VIEW: DASHBOARD (GANTT) ---
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
@@ -46,8 +48,11 @@ with col_nav1:
     st.write("")
     st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
 with col_date:
-    selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
-    start_of_week = selected_date - timedelta(days=selected_date.weekday())
+    selected_date = st.date_input("Επιλογή Εβδομάδας", value=st.session_state.view_week_date_val)
+    if selected_date != st.session_state.view_week_date_val:
+        st.session_state.view_week_date_val = selected_date
+        st.rerun()
+    start_of_week = st.session_state.view_week_date_val - timedelta(days=st.session_state.view_week_date_val.weekday())
 with col_nav2:
     st.write("")
     st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -63,16 +68,14 @@ with col_pres:
 
 zoom_factor = zoom_level / 100.0
 
-# Το Ταμπλό εξαρτάται από το local_gantt_version ΚΑΙ από το συνολικό πλήθος των βαρδιών!
 current_gantt_params = {
     "week": start_of_week,
     "zoom": zoom_factor,
     "presentation": presentation_mode,
     "local_version": st.session_state.get('local_gantt_version', 0),
-    "total_assigns": len(st.session_state.get('assignments', [])) # Προσθήκη για να σπάει η cache στις επαναλαμβανόμενες
+    "total_assigns": len(st.session_state.get('assignments', []))
 }
 
-# Εξασφαλίζουμε ότι αν το data_dirty είναι True, η Cache αγνοείται ούτως ή άλλως
 if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state and not st.session_state.get('data_dirty', False):
     fig = st.session_state.cached_fig
     wk_groups = st.session_state.cached_wk_groups
@@ -388,6 +391,10 @@ try:
 except Exception:
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+# Εάν έχουμε επιλέξει κάτι, ΔΙΑΚΟΠΤΟΥΜΕ ΤΟ ΑΥΤΟΜΑΤΟ POLLING!
+if clicked_key:
+    st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
+
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
 
 if export_data:
@@ -655,7 +662,7 @@ if not presentation_mode:
                                         
                                     old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                                     st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                                    utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], track=False)
+                                    utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns, track=False)
                                     
                                     new_assigns = []
                                     for va in valid_assignments:
