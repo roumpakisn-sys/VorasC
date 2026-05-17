@@ -10,6 +10,7 @@ import re
 import ast
 import time
 import config
+import scheduling  # ΝΕΟ: Εισαγωγή του νέου module!
 
 try:
     from supabase import create_client
@@ -258,33 +259,7 @@ def get_project_name(proj_id):
 def get_project_info(proj_id):
     return st.session_state.proj_map.get(proj_id)
 
-def is_on_leave(emp_id, check_date):
-    if not emp_id: return False
-    emp_leaves = st.session_state.leaves_by_emp.get(emp_id, [])
-    for l in emp_leaves:
-        if l['startDate'] <= check_date <= l['endDate']: return True
-    return False
-
-def check_and_resolve_conflict(emp_id, check_date, t_start, t_end, exclude_ids=None):
-    if not emp_id: return t_start, t_end, False, ""
-    if exclude_ids is None: exclude_ids = []
-    new_s = str(t_start)[:5]
-    new_e = str(t_end)[:5]
-    day_assigns = st.session_state.assignments_by_date.get(check_date, [])
-    emp_assigns = [a for a in day_assigns if a['employeeId'] == emp_id and a['id'] not in exclude_ids]
-    
-    allowed_overlap = False
-    for ea in emp_assigns:
-        ea_s = str(ea['startTime'])[:5]
-        ea_e = str(ea['endTime'])[:5]
-        if new_s < ea_e and new_e > ea_s:
-            if new_e > ea_e:
-                allowed_overlap = True
-            else:
-                return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
-    return t_start, t_end, False, "Allowed Overlap" if allowed_overlap else ""
-
-# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ---
+# --- ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ ΕΡΓΑΣΙΩΝ ---
 def auto_extend_recurring_patterns():
     if not st.session_state.get('recurring_patterns'): return
     max_dates = {}
@@ -306,7 +281,7 @@ def auto_extend_recurring_patterns():
             r_emps = pat.get('employeeIds', [])
             r_proj = pat.get('projectId')
             r_color = pat.get('colorName')
-            c_hex = config.BASIC_COLORS.get(r_color, "#999999") # <--- Χρήση config!
+            c_hex = config.BASIC_COLORS.get(r_color, "#999999")
             r_notes = pat.get('notes', "")
             str_arrival = pat.get('arrivalTime', "")
             str_start = str(pat.get('startTime'))[:5]
@@ -350,10 +325,15 @@ def auto_extend_recurring_patterns():
                     emps_to_process = r_emps
                 
                 emps_to_process = emps_to_process if emps_to_process else [""]
+                
+                # --- Χρήση του scheduling.py ---
+                leaves_dict = st.session_state.leaves_by_emp
+                day_assigns = st.session_state.assignments_by_date.get(d, [])
+                
                 for eid in emps_to_process:
                     if eid:
-                        if is_on_leave(eid, d): continue
-                        adj_start, adj_end, is_conflict, msg = check_and_resolve_conflict(eid, d, str_start, str_end)
+                        if scheduling.is_on_leave(eid, d, leaves_dict): continue
+                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                         if is_conflict: continue
                     else:
                         adj_start, adj_end = str_start, str_end
