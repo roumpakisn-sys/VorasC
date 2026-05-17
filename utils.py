@@ -176,7 +176,144 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
-# ΝΕΟΣ ΜΗΧΑΝΙΣΜΟΣ: ΜΑΖΙΚΗ ΕΙΣΑΓΩΓΗ ΠΟΥ ΕΙΔΟΠΟΙΕΙ ΤΟΥΣ ΑΛΛΟΥΣ ΧΡΗΣΤΕΣ
+# ==========================================
+# ΕΝΣΩΜΑΤΩΣΗ ΛΟΓΙΚΗΣ ΣΥΓΧΡΟΝΙΣΜΟΥ (ΑΠΟΦΥΓΗ CIRCULAR IMPORTS)
+# ==========================================
+
+def inject_silent_refresh_css():
+    st.markdown(
+        """
+        <style>
+        [data-testid="stStatusWidget"] { visibility: hidden !important; display: none !important; }
+        [data-testid="stAppViewBlockContainer"] { opacity: 1 !important; transition: none !important; }
+        .stApp { opacity: 1 !important; }
+        .stApp [data-testid="stDecoration"] { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+def to_timestamp(iso_str):
+    if not iso_str: return 0.0
+    try: return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
+    except Exception: return 0.0
+
+def get_db_current_time():
+    if not supabase: return datetime.utcnow().isoformat()
+    try:
+        res = supabase.rpc("get_server_time").execute()
+        if res.data: return res.data
+    except Exception: pass
+    return datetime.utcnow().isoformat()
+
+def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
+    if deleted_ids:
+        local_list = [r for r in local_list if str(r.get('id')) not in deleted_ids]
+    updated_ids = {str(r['id']) for r in delta_records}
+    local_list = [r for r in local_list if str(r.get('id')) not in updated_ids]
+    local_list.extend(delta_records)
+    return local_list
+
+def track_deletion(table_name, record_id):
+    if not supabase: return
+    deletion_log = {"table_name": table_name, "record_id": str(record_id)}
+    try: supabase.table("deleted_records").insert(deletion_log).execute()
+    except Exception: pass
+
+def sync_data_incremental():
+    inject_silent_refresh_css()
+    if not supabase: return
+
+    last_sync = st.session_state.get("last_sync_time", None)
+    current_db_time = get_db_current_time()
+
+    if not last_sync:
+        with st.spinner("Φόρτωση δεδομένων..."):
+            st.session_state.employees = fetch_paginated("employees")
+            st.session_state.projects = fetch_paginated("projects")
+            
+            assigns = fetch_paginated("assignments")
+            for a in assigns:
+                d = safe_date_parse(a.get('date'))
+                if d: a['date'] = d
+            st.session_state.assignments = assigns
+            
+            leaves = fetch_paginated("leaves")
+            for l in leaves:
+                sd = safe_date_parse(l.get('startDate'))
+                if sd: l['startDate'] = sd
+                ed = safe_date_parse(l.get('endDate'))
+                if ed: l['endDate'] = ed
+            st.session_state.leaves = leaves
+            
+            patterns = fetch_paginated("recurring_patterns")
+            for p in patterns:
+                sd = safe_date_parse(p.get('startDate'))
+                if sd: p['startDate'] = sd
+            st.session_state.recurring_patterns = patterns
+            
+            try: st.session_state.evaluations = fetch_paginated("evaluations")
+            except Exception: st.session_state.evaluations = []
+                
+            st.session_state.last_sync_time = current_db_time
+            mark_data_changed()
+            return
+
+    try:
+        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
+        if res_logs.data:
+            latest_ts = to_timestamp(res_logs.data[0]['timestamp'])
+            sync_ts = to_timestamp(last_sync)
+            if (latest_ts + 30.0) <= sync_ts: return
+
+        deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
+        deletions = deleted_res.data or []
+        
+        deleted_by_table = {}
+        for d in deletions:
+            t = d['table_name']
+            if t not in deleted_by_table: deleted_by_table[t] = []
+            deleted_by_table[t].append(str(d['record_id']))
+
+        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
+        changes_detected = False
+
+        for table in tables_to_sync:
+            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
+            delta_records = delta_res.data or []
+            table_deleted_ids = deleted_by_table.get(table, [])
+            
+            if delta_records or table_deleted_ids:
+                changes_detected = True
+                if table == "assignments":
+                    for r in delta_records:
+                        d = safe_date_parse(r.get('date'))
+                        if d: r['date'] = d
+                elif table == "leaves":
+                    for r in delta_records:
+                        sd = safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
+                        ed = safe_date_parse(r.get('endDate'))
+                        if ed: r['endDate'] = ed
+                elif table == "recurring_patterns":
+                    for r in delta_records:
+                        sd = safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
+
+                st.session_state[table] = apply_delta_updates(
+                    table, st.session_state.get(table, []), delta_records, table_deleted_ids
+                )
+
+        if changes_detected: mark_data_changed()
+        st.session_state.last_sync_time = current_db_time
+
+    except Exception as e:
+        print(f"Incremental Sync Error: {e}")
+
+# ==========================================
+# ΣΥΝΕΧΕΙΑ ΛΕΙΤΟΥΡΓΙΩΝ ΒΑΣΗΣ
+# ==========================================
+
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
     
@@ -226,12 +363,9 @@ def db_delete(table, column, value, deleted_records=None, track=True):
         try:
             supabase.table(table).delete().eq(column, value).execute()
             log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
-            
-            import database
             for r in deleted_records:
                 rec_id = r.get('id')
-                if rec_id:
-                    database.track_deletion(table, rec_id)
+                if rec_id: track_deletion(table, rec_id)
         except Exception as e:
             st.error(f"Σφάλμα διαγραφής στη βάση: {e}")
 
@@ -249,14 +383,11 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 for i in range(0, len(values), chunk_size):
                     chunk_values = values[i:i+chunk_size]
                     supabase.table(table).delete().in_(column, chunk_values).execute()
-                
+                    
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
-                
-                import database
                 for r in deleted_records:
                     rec_id = r.get('id')
-                    if rec_id:
-                        database.track_deletion(table, rec_id)
+                    if rec_id: track_deletion(table, rec_id)
             except Exception as e:
                 st.error(f"Σφάλμα μαζικής διαγραφής: {e}")
 
@@ -506,8 +637,7 @@ def cleanup_duplicates():
                     try:
                         supabase.table('assignments').delete().in_('id', chunk).execute()
                         for rec_id in chunk:
-                            import database
-                            database.track_deletion('assignments', rec_id)
+                            track_deletion('assignments', rec_id)
                     except: pass
                 
                 try:
@@ -556,14 +686,12 @@ def cleanup_projects():
     if projects_to_kill:
         st.session_state.projects = projects_to_keep
         
-        # Ενημέρωση των βαρδιών που έδειχναν στα διεγραμμένα έργα
         assignments_to_update = []
         for a in st.session_state.get('assignments', []):
             if isinstance(a, dict) and a.get('projectId') in id_remap:
                 a['projectId'] = id_remap[a['projectId']]
                 assignments_to_update.append(a)
                 
-        # Ενημέρωση των επαναλαμβανόμενων που έδειχναν στα διεγραμμένα
         patterns_to_update = []
         for pat in st.session_state.get('recurring_patterns', []):
             if isinstance(pat, dict) and pat.get('projectId') in id_remap:
@@ -572,7 +700,6 @@ def cleanup_projects():
                 
         st.session_state.data_dirty = True
         
-        # Αποθήκευση στη Supabase στο παρασκήνιο
         if supabase:
             def merge_db():
                 for a in assignments_to_update:
@@ -587,7 +714,11 @@ def cleanup_projects():
                 chunk_size = 100
                 del_ids = [p['id'] for p in projects_to_kill if p.get('id')]
                 for i in range(0, len(del_ids), chunk_size):
-                    try: supabase.table('projects').delete().in_('id', del_ids[i:i+chunk_size]).execute()
+                    try: 
+                        chunk = del_ids[i:i+chunk_size]
+                        supabase.table('projects').delete().in_('id', chunk).execute()
+                        for rec_id in chunk:
+                            track_deletion('projects', rec_id)
                     except: pass
                 
                 try:
@@ -607,9 +738,8 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
-    import database
     try:
-        database.sync_data_incremental()
+        sync_data_incremental()
     except Exception as e:
         print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
 
@@ -635,11 +765,9 @@ def init_data_and_sync():
             valid_leaves.append(l)
     st.session_state.leaves = valid_leaves
 
-    # ΣΚΟΤΩΝΟΥΜΕ ΤΑ ΦΑΝΤΑΣΜΑΤΑ ΚΑΙ ΤΑ ΔΙΠΛΟΤΥΠΑ ΕΡΓΑ!
     cleanup_duplicates()
     cleanup_projects()
 
-    # ΧΤΙΣΙΜΟ ΓΡΗΓΟΡΩΝ ΕΥΡΕΤΗΡΙΩΝ (ΠΡΕΠΕΙ ΝΑ ΓΙΝΕΙ ΠΡΙΝ ΤΗΝ ΕΠΕΚΤΑΣΗ)
     st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
     st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
     
@@ -661,7 +789,6 @@ def init_data_and_sync():
     
     st.session_state.data_dirty = False
 
-    # ΤΩΡΑ ΜΠΟΡΕΙ ΝΑ ΤΡΕΞΕΙ Η ΕΠΕΚΤΑΣΗ ΜΕ ΑΣΦΑΛΕΙΑ!
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
         st.session_state.last_auto_extend_check = time.time()
