@@ -73,11 +73,13 @@ if menu == "Διαχείριση Έργων":
 # --- VIEW: EMPLOYEES ---
 elif menu == "Προσωπικό":
     st.title("👥 Προσωπικό")
+    
+    if "emp_reset_counter" not in st.session_state: st.session_state.emp_reset_counter = 0
+    erc = st.session_state.emp_reset_counter
+    
     tab_list, tab_add, tab_edit, tab_import = st.tabs(["📋 Λίστα Υπαλλήλων", "➕ Προσθήκη Υπαλλήλου", "✏️ Επεξεργασία", "📁 Εισαγωγή από Αρχείο"])
     
     with tab_add:
-        if "emp_reset_counter" not in st.session_state: st.session_state.emp_reset_counter = 0
-        erc = st.session_state.emp_reset_counter
         c1, c2, c3 = st.columns(3)
         with c1:
             e_fname = st.text_input("Όνομα", key=f"new_emp_fname_{erc}")
@@ -126,7 +128,7 @@ elif menu == "Προσωπικό":
         if not st.session_state.employees:
             st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
         else:
-            emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", options=[e['id'] for e in st.session_state.employees], format_func=utils.get_employee_name)
+            emp_to_edit_id = st.selectbox("Επιλέξτε Υπάλληλο για Επεξεργασία", options=[e['id'] for e in st.session_state.employees], format_func=utils.get_employee_name, key=f"edit_emp_sel_{erc}")
             emp_to_edit = next(e for e in st.session_state.employees if e['id'] == emp_to_edit_id)
             with st.form(f"edit_emp_form_{emp_to_edit_id}", clear_on_submit=False):
                 c1, c2, c3 = st.columns(3)
@@ -167,6 +169,7 @@ elif menu == "Προσωπικό":
                             emp_to_edit.update({'name': ed_name, 'position': ed_pos.strip(), 'id_number': ed_id_num.strip(), 'phone': ed_phone.strip(), 'status': ed_status})
                             utils.db_update('employees', emp_to_edit_id, emp_to_edit, old_data=old_emp_data)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
+                            st.session_state.emp_reset_counter += 1
                             time.sleep(1)
                             st.rerun()
 
@@ -277,13 +280,15 @@ elif menu == "Προσωπικό":
 # --- VIEW: LEAVES ---
 elif menu == "Άδειες":
     st.title("🌴 Διαχείριση Αδειών")
+    
+    if "leave_reset_counter" not in st.session_state: st.session_state.leave_reset_counter = 0
+    lrc = st.session_state.leave_reset_counter
+    
     if "pending_leave" not in st.session_state: st.session_state.pending_leave = None
     if "leave_conflicts" not in st.session_state: st.session_state.leave_conflicts = []
     
     tab_list, tab_add, tab_edit = st.tabs(["📋 Λίστα Αδειών", "➕ Καταχώρηση", "✏️ Επεξεργασία"])
     with tab_add:
-        if "leave_reset_counter" not in st.session_state: st.session_state.leave_reset_counter = 0
-        lrc = st.session_state.leave_reset_counter
         c1, c2 = st.columns(2)
         with c1:
             l_emp = st.selectbox("Υπάλληλος (Μόνο Ενεργοί)", options=active_employee_ids, format_func=utils.get_employee_name, key=f"l_emp_{lrc}")
@@ -362,21 +367,21 @@ elif menu == "Άδειες":
         if not st.session_state.leaves: st.info("Δεν υπάρχουν άδειες προς επεξεργασία.")
         else:
             leave_options = {lv['id']: f"{utils.get_employee_name(lv['employeeId'])} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})" for lv in st.session_state.leaves}
-            leave_to_edit_id = st.selectbox("Επιλέ Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x])
+            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x], key=f"edit_leave_sel_{lrc}")
             leave_to_edit = next(l for l in st.session_state.leaves if l['id'] == leave_to_edit_id)
             c1, c2 = st.columns(2)
             with c1:
                 emp_options_safe = active_employee_ids + [leave_to_edit['employeeId']] if leave_to_edit['employeeId'] not in active_employee_ids else active_employee_ids
-                ed_l_emp = st.selectbox("Αλλαγή Υπαλλήλου", options=emp_options_safe, index=emp_options_safe.index(leave_to_edit['employeeId']), format_func=utils.get_employee_name, key=f"ed_l_emp_{leave_to_edit_id}")
-                ed_l_start = st.date_input("Αλλαγή Ημερομηνίας 'Από'", value=leave_to_edit['startDate'], key=f"ed_l_start_{leave_to_edit_id}")
+                ed_l_emp = st.selectbox("Αλλαγή Υπαλλήλου", options=emp_options_safe, index=emp_options_safe.index(leave_to_edit['employeeId']), format_func=utils.get_employee_name, key=f"ed_l_emp_{leave_to_edit_id}_{lrc}")
+                ed_l_start = st.date_input("Αλλαγή Ημερομηνίας 'Από'", value=leave_to_edit['startDate'], key=f"ed_l_start_{leave_to_edit_id}_{lrc}")
             with c2:
                 current_sub = leave_to_edit.get('substituteId') or ""
                 sub_options = [""] + active_employee_ids
                 if current_sub and current_sub not in sub_options: sub_options.append(current_sub)
-                ed_l_sub_emp = st.selectbox("Αλλαγή Αντικαταστάτη", options=sub_options, index=sub_options.index(current_sub), format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else utils.get_employee_name(x), key=f"ed_l_sub_{leave_to_edit_id}")
-                ed_l_end = st.date_input("Αλλαγή Ημερομηνίας 'Έως'", value=leave_to_edit['endDate'], key=f"ed_l_end_{leave_to_edit_id}")
+                ed_l_sub_emp = st.selectbox("Αλλαγή Αντικαταστάτη", options=sub_options, index=sub_options.index(current_sub), format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else utils.get_employee_name(x), key=f"ed_l_sub_{leave_to_edit_id}_{lrc}")
+                ed_l_end = st.date_input("Αλλαγή Ημερομηνίας 'Έως'", value=leave_to_edit['endDate'], key=f"ed_l_end_{leave_to_edit_id}_{lrc}")
                 
-            if st.button("💾 Αποθήκευση Αλλαγών", type="primary", key=f"btn_save_leave_{leave_to_edit_id}"):
+            if st.button("💾 Αποθήκευση Αλλαγών", type="primary", key=f"btn_save_leave_{leave_to_edit_id}_{lrc}"):
                 if ed_l_start > ed_l_end: st.error("Η ημερομηνία 'Από' πρέπει να είναι πριν ή ίση με την 'Έως'.")
                 elif ed_l_emp == ed_l_sub_emp: st.error("Ο αντικαταστάτης δεν μπορεί να είναι το ίδιο πρόσωπο.")
                 else:
@@ -396,6 +401,7 @@ elif menu == "Άδειες":
                         leave_to_edit.update({'employeeId': ed_l_emp, 'startDate': ed_l_start, 'endDate': ed_l_end, 'substituteId': ed_l_sub_emp if ed_l_sub_emp else None})
                         utils.db_update('leaves', leave_to_edit_id, leave_to_edit, old_data=old_leave_data)
                         st.success("Οι αλλαγές στην άδεια αποθηκεύτηκαν!")
+                        st.session_state.leave_reset_counter += 1
                         time.sleep(1)
                         st.rerun()
 
@@ -426,6 +432,7 @@ elif menu == "Άδειες":
                     utils.db_update('leaves', leave_id, leave_obj, old_data=old_data)
                     st.session_state.pending_leave = None
                     st.success("Όλες οι επικαλύψεις επιλύθηκαν! Οι αλλαγές αποθηκεύτηκαν.")
+                    st.session_state.leave_reset_counter += 1
                     time.sleep(1.5)
                     st.rerun()
 
@@ -503,9 +510,11 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
         st.info("🔒 Έχετε δικαιώματα μόνο για ανάγνωση.")
     else:
         st.write("Προσθέστε ή επεξεργαστείτε εργασίες που επαναλαμβάνονται «για πάντα» (επεκτείνονται αυτόματα κάθε χρόνο).")
-        tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "⚙️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
+        
         if "rec_reset_counter" not in st.session_state: st.session_state.rec_reset_counter = 0
         rc = st.session_state.rec_reset_counter
+        
+        tab_new, tab_edit = st.tabs(["➕ Νέα Καταχώρηση", "⚙️ Διαχείριση/Επεξεργασία Υπαρχουσών"])
         
         with tab_new:
             r_col1, r_col2 = st.columns(2)
@@ -643,8 +652,17 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
             if not st.session_state.recurring_patterns: 
                 st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
             else:
+                # Μηχανισμός Χειροκίνητου Συγχρονισμού (Επειδή το Auto-Polling είναι κλειστό στη Διαχείριση)
+                c_ref1, c_ref2 = st.columns([4, 1])
+                with c_ref1:
+                    st.caption("💡 Η αυτόματη ανανέωση είναι προσωρινά ανενεργή για να μην διακόπτεται η πληκτρολόγηση σας. Αν περιμένετε αλλαγές από άλλον χρήστη, πατήστε ανανέωση.")
+                with c_ref2:
+                    if st.button("🔄 Ανανέωση Λίστας", use_container_width=True, key=f"btn_sync_rec_{rc}"):
+                        st.session_state.last_sync_time = None
+                        st.rerun()
+
                 pattern_options = {p['id']: f"{utils.get_project_info(p['projectId'])['name'] if utils.get_project_info(p['projectId']) else 'Άγνωστο Έργο'} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})" for p in st.session_state.recurring_patterns}
-                selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x])
+                selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x], key=f"edit_pat_sel_{rc}")
                 
                 if selected_pattern_id:
                     pat = next(p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id)
@@ -657,25 +675,25 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     with r_col1:
                         proj_ids = [p['id'] for p in st.session_state.projects]
                         def_proj_idx = proj_ids.index(pat['projectId']) if pat['projectId'] in proj_ids else 0
-                        e_r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=proj_ids, index=def_proj_idx, format_func=utils.get_project_name, key=f"er_proj_{selected_pattern_id}")
-                        e_r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key=f"er_cproj_{selected_pattern_id}")
+                        e_r_proj = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=proj_ids, index=def_proj_idx, format_func=utils.get_project_name, key=f"er_proj_{selected_pattern_id}_{rc}")
+                        e_r_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)", key=f"er_cproj_{selected_pattern_id}_{rc}")
                         
                         c_r_color, c_r_notes = st.columns(2)
                         with c_r_color: 
                             def_color_idx = list(config.BASIC_COLORS.keys()).index(pat.get('colorName', 'Μπλε')) if pat.get('colorName') in config.BASIC_COLORS else 0
-                            e_r_color = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), index=def_color_idx, key=f"er_color_{selected_pattern_id}")
+                            e_r_color = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), index=def_color_idx, key=f"er_color_{selected_pattern_id}_{rc}")
                         with c_r_notes: 
-                            e_r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key=f"er_notes_{selected_pattern_id}")
+                            e_r_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=pat.get('notes', ''), key=f"er_notes_{selected_pattern_id}_{rc}")
                             
                         type_opts = ["Εβδομαδιαία", "Μηνιαία", "Επιλεγμένες Μέρες Εβδομάδας"]
                         def_type_idx = type_opts.index(pat['type']) if pat['type'] in type_opts else 0
-                        e_r_type = st.selectbox("Συχνότητα Επανάληψης", type_opts, index=def_type_idx, key=f"er_type_{selected_pattern_id}")
+                        e_r_type = st.selectbox("Συχνότητα Επανάληψης", type_opts, index=def_type_idx, key=f"er_type_{selected_pattern_id}_{rc}")
                         
                         e_r_emps, e_selected_weekdays, e_selected_weekdays_data = [], [], {}
                         if e_r_type in ["Εβδομαδιαία", "Μηνιαία"]:
                             def_emps = pat_emp_ids if isinstance(pat_emp_ids, list) else []
                             valid_def_emps = [e for e in def_emps if e in active_employee_ids]
-                            e_r_emps = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids, default=valid_def_emps, format_func=utils.get_employee_name, key=f"er_emps_{selected_pattern_id}")
+                            e_r_emps = st.multiselect("Προσωπικό (Μόνο Ενεργοί)", options=active_employee_ids, default=valid_def_emps, format_func=utils.get_employee_name, key=f"er_emps_{selected_pattern_id}_{rc}")
                         else:
                             st.markdown("**Επιλέξτε Μέρες και Προσωπικό (ξεχωριστά ανά μέρα):**")
                             day_names = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -685,38 +703,41 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             for i, d_name in enumerate(day_names):
                                 c_chk, c_emp = st.columns([1, 3])
                                 is_checked = d_name in existing_weekdays
-                                if c_chk.checkbox(d_name, value=is_checked, key=f"er_chk_{i}_{selected_pattern_id}"):
+                                if c_chk.checkbox(d_name, value=is_checked, key=f"er_chk_{i}_{selected_pattern_id}_{rc}"):
                                     e_selected_weekdays.append(d_name)
                                     def_emps = existing_emp_data.get(d_name, [])
                                     valid_def_emps = [e for e in def_emps if e in active_employee_ids]
-                                    e_selected_weekdays_data[d_name] = c_emp.multiselect(f"Προσωπικό ({d_name})", options=active_employee_ids, default=valid_def_emps, format_func=utils.get_employee_name, key=f"er_emps_day_{i}_{selected_pattern_id}", label_visibility="collapsed")
+                                    e_selected_weekdays_data[d_name] = c_emp.multiselect(f"Προσωπικό ({d_name})", options=active_employee_ids, default=valid_def_emps, format_func=utils.get_employee_name, key=f"er_emps_day_{i}_{selected_pattern_id}_{rc}", label_visibility="collapsed")
                                     
                     with r_col2:
-                        e_r_start_date = st.date_input("Από Ημερομηνία", value=pat['startDate'], key=f"er_sdate_{selected_pattern_id}")
+                        e_r_start_date = st.date_input("Από Ημερομηνία", value=pat['startDate'], key=f"er_sdate_{selected_pattern_id}_{rc}")
                         r_arr, r_start, r_end = st.columns(3)
                         
                         existing_arr = pat.get('arrivalTime', '')
                         with r_arr:
-                            e_use_arr_rec = st.checkbox("Προσέλευση;", value=bool(existing_arr), key=f"er_use_arr_{selected_pattern_id}")
+                            e_use_arr_rec = st.checkbox("Προσέλευση;", value=bool(existing_arr), key=f"er_use_arr_{selected_pattern_id}_{rc}")
                             def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(str(pat['startTime'])[:5], "%H:%M").time()
-                            e_r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=def_arr, disabled=not e_use_arr_rec, key=f"er_arr_time_{selected_pattern_id}")
+                            e_r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=def_arr, disabled=not e_use_arr_rec, key=f"er_arr_time_{selected_pattern_id}_{rc}")
                         with r_start: 
-                            e_r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime(str(pat['startTime'])[:5], "%H:%M").time(), key=f"er_start_{selected_pattern_id}")
+                            e_r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime(str(pat['startTime'])[:5], "%H:%M").time(), key=f"er_start_{selected_pattern_id}_{rc}")
                         with r_end: 
-                            e_r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime(str(pat['endTime'])[:5], "%H:%M").time(), key=f"er_end_{selected_pattern_id}")
+                            e_r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime(str(pat['endTime'])[:5], "%H:%M").time(), key=f"er_end_{selected_pattern_id}_{rc}")
 
                     st.markdown("---")
                     col_b1, col_b2 = st.columns(2)
-                    with col_b1: save_rec = st.button("💾 Αποθήκευση Αλλαγών", type="primary", use_container_width=True, key=f"btn_save_rec_{selected_pattern_id}")
-                    with col_b2: del_rec = st.button("🗑️ Διαγραφή ΟΛΗΣ της σειράς", use_container_width=True, key=f"btn_del_rec_{selected_pattern_id}")
+                    with col_b1: save_rec = st.button("💾 Αποθήκευση Αλλαγών", type="primary", use_container_width=True, key=f"btn_save_rec_{selected_pattern_id}_{rc}")
+                    with col_b2: del_rec = st.button("🗑️ Διαγραφή ΟΛΗΣ της σειράς", use_container_width=True, key=f"btn_del_rec_{selected_pattern_id}_{rc}")
                     
                     if del_rec:
+                        st.success("Η σειρά διαγράφεται οριστικά. Παρακαλώ περιμένετε...")
                         old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                         st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                         st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
                         utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
                         utils.db_delete('recurring_patterns', 'id', selected_pattern_id, deleted_records=[pat], track=False)
                         utils.add_transaction([{'type': 'delete', 'table': 'assignments', 'records': old_assigns}, {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}])
+                        st.session_state.rec_reset_counter += 1
+                        time.sleep(1.0)
                         st.rerun()
 
                     if save_rec:
