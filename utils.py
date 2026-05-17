@@ -278,7 +278,10 @@ def auto_extend_recurring_patterns():
         if rid:
             d = a.get('date')
             if isinstance(d, str):
-                try: d = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+                try: 
+                    if "T" in d: d = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+                    elif "/" in d: d = datetime.strptime(d, "%d/%m/%Y").date()
+                    else: d = datetime.strptime(d, "%Y-%m-%d").date()
                 except: continue
             if isinstance(d, date):
                 if rid not in max_dates or d > max_dates[rid]:
@@ -293,15 +296,30 @@ def auto_extend_recurring_patterns():
             start_ext_date = latest_date + timedelta(days=1)
             end_ext_date = start_ext_date + timedelta(days=365)
             r_type = pat.get('type')
-            r_emps = pat.get('employeeIds', [])
+            
+            # SAFE EVAL ΓΙΑ ΠΑΛΙΑ ΔΕΔΟΜΕΝΑ ΤΗΣ ΒΑΣΗΣ (Συμβατότητα)
+            r_emps_raw = pat.get('employeeIds', [])
+            if isinstance(r_emps_raw, str):
+                try: r_emps = ast.literal_eval(r_emps_raw)
+                except: r_emps = []
+            else:
+                r_emps = r_emps_raw
+                
             r_proj = pat.get('projectId')
             r_color = pat.get('colorName')
             c_hex = config.BASIC_COLORS.get(r_color, "#999999")
             r_notes = pat.get('notes', "")
             str_arrival = pat.get('arrivalTime', "")
-            str_start = str(pat.get('startTime'))[:5]
-            str_end = str(pat.get('endTime'))[:5]
-            selected_weekdays = pat.get('weekdays', [])
+            str_start = str(pat.get('startTime'))[:5] if pat.get('startTime') else "09:00"
+            str_end = str(pat.get('endTime'))[:5] if pat.get('endTime') else "17:00"
+            
+            weekdays_raw = pat.get('weekdays', [])
+            if isinstance(weekdays_raw, str):
+                try: selected_weekdays = ast.literal_eval(weekdays_raw)
+                except: selected_weekdays = []
+            else:
+                selected_weekdays = weekdays_raw
+                
             dates_to_assign = []
             curr_date = start_ext_date
             day_map_inv = {0: "Δευτέρα", 1: "Τρίτη", 2: "Τετάρτη", 3: "Πέμπτη", 4: "Παρασκευή", 5: "Σάββατο", 6: "Κυριακή"}
@@ -396,12 +414,19 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
+    # 1. ΕΞΥΠΝΗ & ΑΣΦΑΛΗΣ μετατροπή ημερομηνιών για ΑΠΟΛΥΤΗ συμβατότητα με παλιά δεδομένα!
     for a in st.session_state.get('assignments', []):
-        if isinstance(a.get('date'), str):
+        d = a.get('date')
+        if isinstance(d, str):
             try:
-                a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                if "T" in d:
+                    a['date'] = datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+                elif "/" in d:
+                    a['date'] = datetime.strptime(d, "%d/%m/%Y").date()
+                else:
+                    a['date'] = datetime.strptime(d, "%Y-%m-%d").date()
             except Exception:
-                a['date'] = date.today()
+                pass # Αγνόησε το σφάλμα. ΜΗΝ το σπρώχνεις στο date.today()
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
