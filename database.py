@@ -116,28 +116,29 @@ def sync_data_incremental():
 
     # --- FULL FETCH (Εκτελείται ΜΟΝΟ κατά την πρώτη είσοδο στην εφαρμογή) ---
     if not last_sync:
-        with st.spinner("Πρώτος πλήρης συγχρονισμός δεδομένων..."):
+        with st.spinner("Φόρτωση δεδομένων..."):
             st.session_state.employees = utils.fetch_paginated("employees")
             st.session_state.projects = utils.fetch_paginated("projects")
             
+            # ΔΙΟΡΘΩΣΗ: Πλέον χρησιμοποιούμε τον έξυπνο μεταφραστή για να μη «σκάει» με παλιές ημερομηνίες
             assigns = utils.fetch_paginated("assignments")
             for a in assigns:
-                if isinstance(a.get('date'), str):
-                    a['date'] = datetime.strptime(a['date'].split("T")[0], "%Y-%m-%d").date()
+                d = utils.safe_date_parse(a.get('date'))
+                if d: a['date'] = d
             st.session_state.assignments = assigns
             
             leaves = utils.fetch_paginated("leaves")
             for l in leaves:
-                if isinstance(l.get('startDate'), str):
-                    l['startDate'] = datetime.strptime(l['startDate'].split("T")[0], "%Y-%m-%d").date()
-                if isinstance(l.get('endDate'), str):
-                    l['endDate'] = datetime.strptime(l['endDate'].split("T")[0], "%Y-%m-%d").date()
+                sd = utils.safe_date_parse(l.get('startDate'))
+                if sd: l['startDate'] = sd
+                ed = utils.safe_date_parse(l.get('endDate'))
+                if ed: l['endDate'] = ed
             st.session_state.leaves = leaves
             
             patterns = utils.fetch_paginated("recurring_patterns")
             for p in patterns:
-                if isinstance(p.get('startDate'), str):
-                    p['startDate'] = datetime.strptime(p['startDate'].split("T")[0], "%Y-%m-%d").date()
+                sd = utils.safe_date_parse(p.get('startDate'))
+                if sd: p['startDate'] = sd
             st.session_state.recurring_patterns = patterns
             
             try:
@@ -156,20 +157,16 @@ def sync_data_incremental():
         if res_logs.data:
             latest_activity_ts = res_logs.data[0]['timestamp']
             
-            # Μετατροπή των ημερομηνιών σε αριθμούς (timestamps)
             latest_ts = to_timestamp(latest_activity_ts)
             sync_ts = to_timestamp(last_sync)
             
-            # Βάζουμε +30s tolerance (ανοχή) στο Polling Guard.
-            # Αν η δραστηριότητα (ακόμα και με +30s) είναι παλαιότερη από το τελευταίο sync, δεν κάνουμε fetch!
             if (latest_ts + 30.0) <= sync_ts:
                 return
 
-        # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές που έγιναν μετά το τελευταίο μας sync
+        # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές
         deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
         deletions = deleted_res.data or []
         
-        # Ομαδοποίηση των διαγραμμένων IDs ανά πίνακα
         deleted_by_table = {}
         for d in deletions:
             t = d['table_name']
@@ -182,7 +179,6 @@ def sync_data_incremental():
         changes_detected = False
 
         for table in tables_to_sync:
-            # Ζητάμε μόνο τις εγγραφές που προστέθηκαν ή τροποποιήθηκαν μετά το last_sync
             delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
             delta_records = delta_res.data or []
             
@@ -191,23 +187,22 @@ def sync_data_incremental():
             if delta_records or table_deleted_ids:
                 changes_detected = True
                 
-                # Μετατροπή των ISO string ημερομηνιών σε Python date objects
+                # ΔΙΟΡΘΩΣΗ: Ασφαλής μετάφραση και στο Incremental Update
                 if table == "assignments":
                     for r in delta_records:
-                        if isinstance(r.get('date'), str):
-                            r['date'] = datetime.strptime(r['date'].split("T")[0], "%Y-%m-%d").date()
+                        d = utils.safe_date_parse(r.get('date'))
+                        if d: r['date'] = d
                 elif table == "leaves":
                     for r in delta_records:
-                        if isinstance(r.get('startDate'), str):
-                            r['startDate'] = datetime.strptime(r['startDate'].split("T")[0], "%Y-%m-%d").date()
-                        if isinstance(r.get('endDate'), str):
-                            r['endDate'] = datetime.strptime(r['endDate'].split("T")[0], "%Y-%m-%d").date()
+                        sd = utils.safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
+                        ed = utils.safe_date_parse(r.get('endDate'))
+                        if ed: r['endDate'] = ed
                 elif table == "recurring_patterns":
                     for r in delta_records:
-                        if isinstance(r.get('startDate'), str):
-                            r['startDate'] = datetime.strptime(r['startDate'].split("T")[0], "%Y-%m-%d").date()
+                        sd = utils.safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
 
-                # Εφαρμογή των αλλαγών στην τοπική μνήμη του χρήστη
                 st.session_state[table] = apply_delta_updates(
                     table, 
                     st.session_state.get(table, []), 
@@ -216,12 +211,10 @@ def sync_data_incremental():
                 )
 
         if changes_detected:
-            # Αν υπήρξαν αλλαγές, ενημερώνουμε το σύστημα να ξαναχτίσει τα ευρετήρια (Gantt, maps κλπ)
             utils.mark_data_changed()
             
         st.session_state.last_sync_time = current_db_time
 
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
-        # ΔΕΝ μηδενίζουμε πλέον το last_sync_time εδώ.
         pass
