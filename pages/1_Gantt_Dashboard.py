@@ -168,31 +168,32 @@ else:
                             t_pa_start_str = str(pa['startTime'])[:5]
                             t_pa_end_str = str(pa['endTime'])[:5]
                             
-                            # Συγκρίνουμε τα ΟΝΟΜΑΤΑ των έργων (όχι τα ID) για να μην
-                            # το εμφανίζει αν δημιουργήθηκε κατά λάθος το ίδιο έργο 2 φορές.
                             pa_proj = utils.get_project_info(pa['projectId'])
                             a_proj = utils.get_project_info(a['projectId'])
-                            pa_name = pa_proj['name'] if pa_proj else "1"
-                            a_name = a_proj['name'] if a_proj else "2"
+                            pa_name = pa_proj['name'].strip().lower() if pa_proj else "1"
+                            a_name = a_proj['name'].strip().lower() if a_proj else "2"
                             
-                            # --- ΝΕΑ ΛΟΓΙΚΗ ΓΙΑ [ΜΕΤΑ ΑΠΟ...] ---
-                            # 1. Συμπίπτουν χρονικά
-                            is_overlapping = (t_pa_start_str < t_a_end_str) and (t_a_start_str < t_pa_end_str)
-                            # 2. Είναι διαφορετικό έργο ονομαστικά
-                            is_different_project = pa_name.strip().lower() != a_name.strip().lower()
-                            # 3. Ξεκινάει νωρίτερα ή την ίδια ώρα
-                            starts_earlier_or_same = t_pa_start_str <= t_a_start_str
-                            # 4. Η δεύτερη βάρδια τελειώνει πιο μετά
-                            ends_later = t_a_end_str > t_pa_end_str
+                            # --- ΑΥΣΤΗΡΗ ΛΟΓΙΚΗ ΓΙΑ [ΜΕΤΑ ΑΠΟ...] ---
+                            # 1. Είναι διαφορετικό έργο (για να μην βγάζει το ίδιο όνομα ξανά)
+                            is_diff_project = (pa_name != a_name)
                             
-                            if is_overlapping and is_different_project and starts_earlier_or_same and ends_later:
+                            # 2. Η προηγούμενη βάρδια ξεκινάει νωρίτερα ή την ίδια ώρα
+                            starts_earlier_or_same = (t_pa_start_str <= t_a_start_str)
+                            
+                            # 3. Επικάλυψη: Η προηγούμενη ΔΕΝ έχει τελειώσει πριν ξεκινήσει η δεύτερη
+                            overlaps = (t_pa_end_str > t_a_start_str)
+                            
+                            # 4. Η δεύτερη βάρδια τελειώνει ΑΥΣΤΗΡΑ αργότερα από την πρώτη
+                            ends_later = (t_a_end_str > t_pa_end_str)
+                            
+                            if is_diff_project and starts_earlier_or_same and overlaps and ends_later:
                                 prev_assigns.append(pa)
                                 
                 if prev_assigns:
                     prev_assigns.sort(key=lambda x: str(x['endTime'])[:5], reverse=True)
                     prev_proj = utils.get_project_info(prev_assigns[0]['projectId'])
                     if prev_proj:
-                        formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' ➡ {formatted_name}]"
+                        formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj['name']}' ▶ {formatted_name}]"
                         
                 groups[key]['Employees'].append(formatted_name)
                 groups[key]['EmployeeIds'].append(a['employeeId'])
