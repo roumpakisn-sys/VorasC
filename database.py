@@ -39,6 +39,18 @@ def inject_silent_refresh_css():
         unsafe_allow_html=True
     )
 
+def to_timestamp(iso_str):
+    """
+    Βοηθητική συνάρτηση που μετατρέπει ασφαλώς τα ISO strings της βάσης 
+    σε αριθμούς (timestamps) για να κάνουμε ακριβή σύγκριση.
+    """
+    if not iso_str: 
+        return 0.0
+    try:
+        return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
 def get_db_current_time():
     """
     Ανακτά την ακριβή τρέχουσα ώρα του εξυπηρετητή (Supabase server time) 
@@ -72,16 +84,15 @@ def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
 
 def track_deletion(table_name, record_id):
     """
-    Καταγράφει τη διαγραφή μιας εγγραφής στον πίνακα 'deleted_records' της Supabase,
-    ώστε οι υπόλοιποι συνδεδεμένοι χρήστες να ενημερωθούν άμεσα για το ποιο ID αφαιρέθηκε.
+    Καταγράφει τη διαγραφή μιας εγγραφής στον πίνακα 'deleted_records' της Supabase.
+    ΣΗΜΑΝΤΙΚΟ: ΔΕΝ στέλνουμε τοπική ώρα (Python). Αφήνουμε τη Supabase να προσθέσει
+    ΑΥΤΟΜΑΤΑ τη δική της ακριβή ώρα της βάσης για να μην έχουμε Clock Skew!
     """
     if not supabase:
         return
     deletion_log = {
-        "id": str(uuid.uuid4()),
         "table_name": table_name,
-        "record_id": str(record_id),
-        "deleted_at": datetime.utcnow().isoformat()
+        "record_id": str(record_id)
     }
     try:
         supabase.table("deleted_records").insert(deletion_log).execute()
@@ -144,7 +155,14 @@ def sync_data_incremental():
         res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
         if res_logs.data:
             latest_activity_ts = res_logs.data[0]['timestamp']
-            if latest_activity_ts <= last_sync:
+            
+            # Μετατροπή των ημερομηνιών σε αριθμούς (timestamps)
+            latest_ts = to_timestamp(latest_activity_ts)
+            sync_ts = to_timestamp(last_sync)
+            
+            # Βάζουμε +30s tolerance (ανοχή) στο Polling Guard.
+            # Αν η δραστηριότητα (ακόμα και με +30s) είναι παλαιότερη από το τελευταίο sync, δεν κάνουμε fetch!
+            if (latest_ts + 30.0) <= sync_ts:
                 return
 
         # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές που έγιναν μετά το τελευταίο μας sync
@@ -206,5 +224,4 @@ def sync_data_incremental():
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
         # ΔΕΝ μηδενίζουμε πλέον το last_sync_time εδώ.
-        # Έτσι αποφεύγουμε τα "Full Fetch Spinners" σε περίπτωση στιγμιαίας πτώσης δικτύου!
         pass
