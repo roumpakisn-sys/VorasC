@@ -832,6 +832,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             utils.add_transaction([{'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat_to_del)]}])
                             
                         st.session_state.rec_reset_counter += 1
+                        time.sleep(1.0)
                         st.rerun()
 
                     if save_rec:
