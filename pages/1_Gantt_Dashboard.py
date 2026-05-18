@@ -7,6 +7,15 @@ import io
 import textwrap
 import time
 
+def get_local_today():
+    """Επιστρέφει τη σωστή σημερινή ημερομηνία για Ώρα Ελλάδος"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Athens")).date()
+    except Exception:
+        # Fallback σε περίπτωση που δεν υπάρχει το zoneinfo
+        return (datetime.utcnow() + timedelta(hours=3)).date()
+
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 if "employees" not in st.session_state: st.session_state.employees = []
@@ -39,16 +48,16 @@ utils.setup_shared_ui()
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-# Μηχανισμός Κλειδώματος Εβδομάδας
+# Μηχανισμός Κλειδώματος Εβδομάδας (χρησιμοποιεί πλέον Ώρα Ελλάδος)
 if "view_week_date_val" not in st.session_state:
-    st.session_state.view_week_date_val = date.today()
+    st.session_state.view_week_date_val = get_local_today()
 
 def go_prev_week():
     st.session_state.view_week_date_val -= timedelta(days=7)
 def go_next_week():
     st.session_state.view_week_date_val += timedelta(days=7)
 def go_to_today():
-    st.session_state.view_week_date_val = date.today()
+    st.session_state.view_week_date_val = get_local_today()
 
 # --- VIEW: DASHBOARD (GANTT) ---
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
@@ -374,8 +383,8 @@ else:
             if di % 2 != 0:
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", opacity=1, layer="below", line_width=0)
             
-            # --- ΠΡΟΣΘΗΚΗ 1: Σκούρο, καθαρό χρώμα για τη σημερινή μέρα ---
-            if (start_of_week + timedelta(days=di)) == date.today():
+            # --- ΠΡΟΣΘΗΚΗ 1: Σκούρο, καθαρό χρώμα για τη σημερινή μέρα (Βασισμένο στην Ώρα Ελλάδος) ---
+            if (start_of_week + timedelta(days=di)) == get_local_today():
                 fig.add_hrect(
                     y0=mn-0.5, y1=mx+0.5, 
                     fillcolor="#4f46e5", opacity=0.15, # Πιο σκούρο μπλε (Indigo) με διαφάνεια
