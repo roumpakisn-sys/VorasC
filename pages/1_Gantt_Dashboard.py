@@ -344,26 +344,15 @@ else:
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
-    # ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ: Δεν "τεντώνει" πλέον τις μπάρες αν έχεις λίγες εγγραφές
-    row_h = 40 * zoom_factor
-    required_height = int(len(ordered_categories) * row_h) + 120
-    visible_count = 650 / row_h
+    # ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ: Απόλυτα σταθερό ύψος μπάρας!
+    row_h = 50 * zoom_factor  # Σταθερό πάχος γραμμής (όπως φαίνεται στις άδειες εβδομάδες)
+    margin_top = 50
+    margin_bottom = 10
     
-    if presentation_mode or required_height <= 750:
-        dyn_h = max(350, required_height)
-        y_range = None
-    else:
-        dyn_h = 750
-        offset = (date.today() - start_of_week).days
-        if 0 <= offset <= 6:
-            idxs = [idx for idx, val in enumerate(ordered_categories) if val.startswith(f"day_{offset}_")]
-            if idxs:
-                mid = sum(idxs) / len(idxs)
-                y_range = [max(-0.5, mid - visible_count/2), min(len(ordered_categories)-0.5, mid + visible_count/2)]
-            else:
-                y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
-        else:
-            y_range = [len(ordered_categories) - visible_count - 0.5, len(ordered_categories) - 0.5]
+    # Το γράφημα προσαρμόζεται ακριβώς στις γραμμές, καταργώντας το "στρίμωγμα" (750px limit)
+    dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
+    dyn_h = max(250, dyn_h) # Ελάχιστο ύψος για ασφάλεια
+    y_range = None
             
     fig.update_yaxes(
         categoryorder='array', categoryarray=ordered_categories,
