@@ -464,7 +464,8 @@ if not presentation_mode:
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
                     use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                    t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
+                    # Αφαίρεση του disabled=not use_arr
+                    t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
                 with c_start:
                     t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
                 with c_end:
@@ -584,20 +585,17 @@ if not presentation_mode:
                             if new_a['employeeId']:
                                 emp_name = utils.get_employee_name(new_a['employeeId'])
                                 if scheduling.is_on_leave(new_a['employeeId'], new_a['date'], st.session_state.leaves_by_emp):
-                                    st.toast(f"Ο/Η {emp_name} έχει άδεια. Η βάρδια μετατράπηκε σε 'Χωρίς Προσωπικό'.", icon="⚠️")
-                                    new_a['notes'] = f"{new_a.get('notes','')} [Άδεια: {emp_name}]".strip()
-                                    new_a['employeeId'] = ""
-                                else:
-                                    day_assigns = st.session_state.assignments_by_date.get(new_a['date'], [])
-                                    adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(new_a['employeeId'], new_a['startTime'], new_a['endTime'], day_assigns, exclude_ids=target_group['AssignmentIds'])
-                                    if is_conflict:
-                                        st.toast(f"Διπλοκράτηση για τον/την {emp_name}. Η βάρδια μετατράπηκε σε 'Χωρίς Προσωπικό'.", icon="⚠️")
-                                        new_a['notes'] = f"{new_a.get('notes','')} [Εμπλοκή: {emp_name}]".strip()
-                                        new_a['employeeId'] = ""
-                                    else:
-                                        new_a['startTime'], new_a['endTime'] = adj_start, adj_end
-                                        if msg == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
-                                        
+                                    st.toast(f"Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
+                                    has_error = True; break
+                                
+                                day_assigns = st.session_state.assignments_by_date.get(new_a['date'], [])
+                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(new_a['employeeId'], new_a['startTime'], new_a['endTime'], day_assigns, exclude_ids=target_group['AssignmentIds'])
+                                if is_conflict:
+                                    st.toast(f"Αδύνατη μετακίνηση: Διπλοκράτηση {emp_name}!", icon="⚠️")
+                                    has_error = True; break
+                                new_a['startTime'], new_a['endTime'] = adj_start, adj_end
+                                if msg == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
+                                
                             old_assigns.append(orig_a)
                             new_assigns.append(new_a)
                             
@@ -631,7 +629,8 @@ if not presentation_mode:
                         with e_arr:
                             use_arr_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr), key="edit_use_arr")
                             def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time()
-                            new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time", disabled=not use_arr_edit)
+                            # Αφαίρεση του disabled=not use_arr_edit
+                            new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
                         with e_start:
                             new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time())
                         with e_end:
