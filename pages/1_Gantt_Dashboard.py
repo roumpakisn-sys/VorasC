@@ -128,7 +128,7 @@ else:
                             is_busy_after_10 = True
                             break
                 
-                # Αν δεν είναι απασχολημένος μετά τις 10, τον βάζουμε στη λίστα
+                # Αν δεν είναι απασχολημένος μετά τις 10, τον βάζουμε στη λίστα (ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ)
                 if not is_busy_after_10:
                     emp_full = emp['name']
                     emp_parts = emp_full.split()
@@ -146,7 +146,7 @@ else:
         if available_ext_crew:
             ext_str = ", ".join(available_ext_crew)
             wrapped_ext = "<br>".join(textwrap.wrap(ext_str, width=35))
-            y_label_parts.append(f"<span style='font-size:10px; color:#0f766e;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br><b>{wrapped_ext}</b></span>")
+            y_label_parts.append(f"<span style='font-size:10px; color:#0369a1;'>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:<br><b>{wrapped_ext}</b></span>")
             
         base_y_label = "<br>".join(y_label_parts)
             
