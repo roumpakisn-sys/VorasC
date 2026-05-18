@@ -387,12 +387,7 @@ else:
     dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
     dyn_h = max(250, dyn_h)
     
-    # ---------------------------------------------------------
-    # ΜΑΓΙΚΗ ΛΥΣΗ: Κλείδωμα της κάθετης μετακίνησης (Y-axis)
-    # ---------------------------------------------------------
-    # Υπολογίζουμε ακριβώς το ύψος των δεδομένων μας για να μη
-    # γλιστράει πάνω-κάτω στο λευκό κενό, αλλά να κινείται μόνο
-    # αριστερά-δεξιά.
+    # Κλείδωμα της κάθετης μετακίνησης (Y-axis)
     y_range = [-0.5, len(ordered_categories) - 0.5]
             
     fig.update_yaxes(
@@ -412,8 +407,12 @@ else:
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
     fig.update_layout(
-        bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
-        height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
+        bargap=0.02, 
+        showlegend=False, 
+        plot_bgcolor='#dbece8', 
+        paper_bgcolor='rgba(0,0,0,0)', # ΔΙΑΦΑΝΕΣ ΦΟΝΤΟ για να φαίνεται η χρωματική διαβάθμιση από πίσω
+        height=dyn_h, 
+        margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, 
         dragmode="pan", 
         clickmode="event+select",
@@ -422,7 +421,7 @@ else:
             side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
             autorange=False, 
-            range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # Καθαρή ορατή περιοχή: 06:00 έως 16:00
+            range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # Καθαρή ορατή περιοχή
             title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
             fixedrange=False, # ΕΛΕΥΘΕΡΗ ΟΡΙΖΟΝΤΙΑ ΜΕΤΑΚΙΝΗΣΗ
@@ -436,8 +435,21 @@ else:
 
 clicked_key = None
 
+# --- ΜΑΓΙΚΟ CSS ΓΙΑ ΤΟ ΕΞΩΤΕΡΙΚΟ ΠΑΡΑΘΥΡΟ (ΚΥΛΙΟΜΕΝΟ ΔΟΧΕΙΟ) ---
+st.markdown("""
+<style>
+/* Στοχεύει το εσωτερικό παράθυρο κύλισης (container) που περιέχει το γράφημα Plotly */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) {
+    border: 3px solid #334155 !important; /* Έντονο σκούρο γκρι/μπλε περίγραμμα */
+    border-radius: 12px !important;       /* Πιο στρογγυλεμένες γωνίες */
+    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%) !important; /* Απαλή χρωματική διαβάθμιση */
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important; /* Ελαφριά σκιά 3D */
+    padding: 2px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Τοποθετούμε το διάγραμμα σε ένα κυλιόμενο δοχείο (εσωτερικό παράθυρο)
-# ώστε να μην "καταπίνει" όλο το ύψος της σελίδας όταν έχει πολλές μπάρες!
 with st.container(height=650, border=True):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
