@@ -5,6 +5,14 @@ st.set_page_config(page_title="Staff Manager Pro", layout="wide")
 
 import utils
 
+# --- ΑΡΧΙΚΟΠΟΙΗΣΗ ΒΑΣΙΚΩΝ ΜΕΤΑΒΛΗΤΩΝ (Για ασφαλή λειτουργία Εκτός Σύνδεσης) ---
+if "employees" not in st.session_state: st.session_state.employees = []
+if "projects" not in st.session_state: st.session_state.projects = []
+if "assignments" not in st.session_state: st.session_state.assignments = []
+if "leaves" not in st.session_state: st.session_state.leaves = []
+if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
+if "evaluations" not in st.session_state: st.session_state.evaluations = []
+
 # --- ΟΘΟΝΗ ΣΥΝΔΕΣΗΣ (AUTHENTICATION) ---
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
