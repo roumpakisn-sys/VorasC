@@ -25,28 +25,29 @@ if not st.session_state.authenticated:
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # ΝΕΑ ΑΣΦΑΛΗΣ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS
-                valid_passwords = {}
+                # 1. Θέτουμε αρχικά τους προεπιλεγμένους κωδικούς (Fallback)
+                valid_passwords = {
+                    "Admin": "admin123",
+                    "EXOU": "pass1",
+                    "MEMEK": "pass2",
+                    "NAK": "pass3",
+                    "PAP": "pass4",
+                    "TAN": "pass5"
+                }
+                
+                # 2. ΑΛΕΞΙΣΦΑΙΡΗ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS
                 try:
                     # Προσπαθεί να διαβάσει τα Secrets (αν υπάρχουν, π.χ. στο Streamlit Cloud)
-                    valid_passwords = {
-                        "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
-                        "EXOU": st.secrets.get("USER1_PASSWORD", "pass1"),
-                        "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
-                        "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
-                        "PAP": st.secrets.get("USER4_PASSWORD", "pass4"),
-                        "TAN": st.secrets.get("USER5_PASSWORD", "pass5")
-                    }
-                except Exception:
-                    # Αν αποτύχει (π.χ. στο τοπικό Codespaces), βάζει τους προεπιλεγμένους
-                    valid_passwords = {
-                        "Admin": "admin123",
-                        "EXOU": "pass1",
-                        "MEMEK": "pass2",
-                        "NAK": "pass3",
-                        "PAP": "pass4",
-                        "TAN": "pass5"
-                    }
+                    if hasattr(st, "secrets"):
+                        if "APP_PASSWORD" in st.secrets: valid_passwords["Admin"] = st.secrets["APP_PASSWORD"]
+                        if "USER1_PASSWORD" in st.secrets: valid_passwords["EXOU"] = st.secrets["USER1_PASSWORD"]
+                        if "USER2_PASSWORD" in st.secrets: valid_passwords["MEMEK"] = st.secrets["USER2_PASSWORD"]
+                        if "USER3_PASSWORD" in st.secrets: valid_passwords["NAK"] = st.secrets["USER3_PASSWORD"]
+                        if "USER4_PASSWORD" in st.secrets: valid_passwords["PAP"] = st.secrets["USER4_PASSWORD"]
+                        if "USER5_PASSWORD" in st.secrets: valid_passwords["TAN"] = st.secrets["USER5_PASSWORD"]
+                except BaseException:
+                    # Αν αποτύχει οτιδήποτε (π.χ. στο τοπικό Codespaces), το αγνοούμε εντελώς
+                    pass
                 
                 if password == valid_passwords.get(username):
                     st.session_state.authenticated = True
