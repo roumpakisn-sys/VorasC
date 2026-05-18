@@ -422,7 +422,7 @@ else:
             side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
             autorange=False, 
-            range=["1970-01-01 06:00:00", "1970-01-01 17:30:00"], # Καθαρή, μη συμπιεσμένη αρχική όψη
+            range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # Καθαρή ορατή περιοχή: 06:00 έως 16:00
             title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
             fixedrange=False, # ΕΛΕΥΘΕΡΗ ΟΡΙΖΟΝΤΙΑ ΜΕΤΑΚΙΝΗΣΗ
@@ -435,20 +435,24 @@ else:
     st.session_state.last_gantt_params = current_gantt_params
 
 clicked_key = None
-try:
-    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
-    if event and "selection" in event:
-        if event["selection"].get("points"):
-            cd = event["selection"]["points"][0].get("customdata", [None])[0]
-            if cd != "Empty": clicked_key = cd
-            else: clicked_key = None
-except Exception:
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+# Τοποθετούμε το διάγραμμα σε ένα κυλιόμενο δοχείο (εσωτερικό παράθυρο)
+# ώστε να μην "καταπίνει" όλο το ύψος της σελίδας όταν έχει πολλές μπάρες!
+with st.container(height=650, border=True):
+    try:
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
+        if event and "selection" in event:
+            if event["selection"].get("points"):
+                cd = event["selection"]["points"][0].get("customdata", [None])[0]
+                if cd != "Empty": clicked_key = cd
+                else: clicked_key = None
+    except Exception:
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την κύλιση δίπλα στο διάγραμμα (Scroll) για να δείτε όλες τις μέρες."
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
