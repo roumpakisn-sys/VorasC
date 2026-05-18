@@ -359,22 +359,6 @@ else:
             'ColorHex', 'GroupKey'
         ])
 
-    # Υπολογισμός μέγιστων ορίων (minallowed / maxallowed) για να μην χάνεται το διάγραμμα
-    bound_min = datetime(1970, 1, 1, 6, 0)
-    bound_max = datetime(1970, 1, 1, 17, 0)
-    if not df.empty:
-        data_min = df['Έναρξη'].min()
-        data_max = df['Λήξη'].max()
-        if data_min < bound_min: bound_min = data_min
-        if data_max > bound_max: bound_max = data_max
-    
-    # Προσθέτουμε 30 λεπτά "αέρα"
-    bound_min_str = (bound_min - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
-    bound_max_str = (bound_max + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
-
-    # Σταθερή αρχική όψη
-    initial_range = ["1970-01-01 06:00:00", "1970-01-01 17:30:00"]
-
     ordered_categories = y_category_order[::-1]
     
     fig = px.timeline(
@@ -424,13 +408,9 @@ else:
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
-            side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
+            side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0), dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            autorange=False,
-            range=initial_range,
-            minallowed=bound_min_str,
-            maxallowed=bound_max_str,
-            title="",
+            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)], title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
             fixedrange=False, rangeslider=dict(visible=False)
         ),
@@ -455,8 +435,7 @@ except Exception:
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# ΔΙΟΡΘΩΣΗ ΕΔΩ: Αλλαγή στα εισαγωγικά για να μην "σπάει" η Python
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε το διάγραμμα ελεύθερα (οι άκρες είναι 'κλειδωμένες')."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
