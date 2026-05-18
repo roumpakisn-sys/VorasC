@@ -622,31 +622,40 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             else:
                                 curr_date += timedelta(days=1)
                                 
-                        success_count, conflict_count, conflict_details = 0, 0, []
+                        success_count, conflict_count = 0, 0
                         for d in dates_to_assign:
                             emps_to_process = selected_weekdays_data.get(day_map_inv[d.weekday()], []) if r_type == "Επιλεγμένες Μέρες Εβδομάδας" else r_emps
                             emps_to_process = emps_to_process if emps_to_process else [""]
                             for eid in emps_to_process:
+                                final_eid = eid
+                                final_start = str_start
+                                final_end = str_end
+                                conflict_note = ""
                                 if eid:
                                     emp_name = utils.get_employee_name(eid)
                                     if scheduling.is_on_leave(eid, d, st.session_state.leaves_by_emp):
+                                        final_eid = ""
+                                        conflict_note = f"[Άδεια: {emp_name}]"
                                         conflict_count += 1
-                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                     else:
                                         day_assigns = st.session_state.assignments_by_date.get(d, [])
                                         adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                         if is_conflict:
+                                            final_eid = ""
+                                            conflict_note = f"[Εμπλοκή: {emp_name}]"
                                             conflict_count += 1
-                                            conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                         else:
-                                            new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end, 'colorName': r_color, 'colorHex': config.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
-                                            new_assignments_batch.append(new_assign)
-                                            success_count += 1
-                                else:
-                                    new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': "", 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': str_start, 'endTime': str_end, 'colorName': r_color, 'colorHex': config.BASIC_COLORS[r_color], 'notes': r_notes, 'is_cancelled': False, 'cancel_reason': ""}
-                                    new_assignments_batch.append(new_assign)
-                                    success_count += 1
+                                            final_start = adj_start
+                                            final_end = adj_end
+                                
+                                c_notes = r_notes
+                                if conflict_note:
+                                    c_notes = f"{r_notes} {conflict_note}".strip()
                                     
+                                new_assign = {'id': str(uuid.uuid4()), 'recurring_id': pattern_id, 'employeeId': final_eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': final_start, 'endTime': final_end, 'colorName': r_color, 'colorHex': config.BASIC_COLORS[r_color], 'notes': c_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                new_assignments_batch.append(new_assign)
+                                success_count += 1
+                                
                         final_employee_ids = selected_weekdays_data if r_type == "Επιλεγμένες Μέρες Εβδομάδας" else r_emps
                         new_pattern = {'id': pattern_id, 'projectId': final_r_proj_id, 'employeeIds': final_employee_ids, 'colorName': r_color, 'notes': r_notes, 'type': r_type, 'weekdays': selected_weekdays, 'arrivalTime': str_arrival, 'startDate': r_start_date, 'startTime': str_start, 'endTime': str_end}
                         st.session_state.recurring_patterns.append(new_pattern)
@@ -662,9 +671,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     st.session_state.rec_reset_counter += 1
                     if success_count > 0: st.success(f"Επιτυχής δημιουργία {success_count} βαρδιών! Η σελίδα ανανεώνεται..."); time.sleep(1.5); st.rerun()
                     if conflict_count > 0:
-                        st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
-                        with st.expander("Δείτε τις συγκρούσεις"):
-                            for c in conflict_details: st.write(f"⚠️ {c}")
+                        st.warning(f"Λόγω άδειας ή εμπλοκής, {conflict_count} βάρδιες καταχωρήθηκαν ως 'Χωρίς Προσωπικό'.")
 
         with tab_edit:
             if not st.session_state.recurring_patterns: 
@@ -808,31 +815,40 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     else:
                                         curr_date += timedelta(days=1)
                                         
-                                success_count, conflict_count, conflict_details = 0, 0, []
+                                success_count, conflict_count = 0, 0
                                 for d in dates_to_assign:
                                     emps_to_process = e_selected_weekdays_data.get(day_map_inv[d.weekday()], []) if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
                                     emps_to_process = emps_to_process if emps_to_process else [""]
                                     for eid in emps_to_process:
+                                        final_eid = eid
+                                        final_start = str_start
+                                        final_end = str_end
+                                        conflict_note = ""
                                         if eid:
                                             emp_name = utils.get_employee_name(eid)
                                             if scheduling.is_on_leave(eid, d, st.session_state.leaves_by_emp):
+                                                final_eid = ""
+                                                conflict_note = f"[Άδεια: {emp_name}]"
                                                 conflict_count += 1
-                                                conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                             else:
                                                 day_assigns = st.session_state.assignments_by_date.get(d, [])
                                                 adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                                 if is_conflict:
+                                                    final_eid = ""
+                                                    conflict_note = f"[Εμπλοκή: {emp_name}]"
                                                     conflict_count += 1
-                                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                                 else:
-                                                    new_assign = {'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end, 'colorName': e_r_color, 'colorHex': config.BASIC_COLORS[e_r_color], 'notes': e_r_notes, 'is_cancelled': False, 'cancel_reason': ""}
-                                                    new_assignments_batch.append(new_assign)
-                                                    success_count += 1
-                                        else:
-                                            new_assign = {'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': "", 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': str_start, 'endTime': str_end, 'colorName': e_r_color, 'colorHex': config.BASIC_COLORS[e_r_color], 'notes': e_r_notes, 'is_cancelled': False, 'cancel_reason': ""}
-                                            new_assignments_batch.append(new_assign)
-                                            success_count += 1
+                                                    final_start = adj_start
+                                                    final_end = adj_end
+                                        
+                                        c_notes = e_r_notes
+                                        if conflict_note:
+                                            c_notes = f"{e_r_notes} {conflict_note}".strip()
                                             
+                                        new_assign = {'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': final_eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': final_start, 'endTime': final_end, 'colorName': e_r_color, 'colorHex': config.BASIC_COLORS[e_r_color], 'notes': c_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                        new_assignments_batch.append(new_assign)
+                                        success_count += 1
+                                        
                                 final_employee_ids = e_selected_weekdays_data if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
                                 
                                 old_pat = dict(pat)
@@ -848,9 +864,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.session_state.rec_reset_counter += 1
                             if success_count > 0: st.success(f"Επιτυχής ενημέρωση! Δημιουργήθηκαν {success_count} νέες βάρδιες. Η σελίδα ανανεώνεται..."); time.sleep(1.5); st.rerun()
                             if conflict_count > 0:
-                                st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
-                                with st.expander("Δείτε τις συγκρούσεις"):
-                                    for c in conflict_details: st.write(f"⚠️ {c}")
+                                st.warning(f"Λόγω άδειας ή εμπλοκής, {conflict_count} βάρδιες καταχωρήθηκαν ως 'Χωρίς Προσωπικό'.")
 
 # --- VIEW: EVALUATIONS ---
 elif menu == "Αξιολόγηση Προσωπικού":
