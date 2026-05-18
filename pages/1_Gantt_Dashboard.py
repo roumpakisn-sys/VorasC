@@ -373,8 +373,14 @@ else:
             mn, mx = min(day_idxs), max(day_idxs)
             if di % 2 != 0:
                 fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", opacity=1, layer="below", line_width=0)
+            
+            # --- ΠΡΟΣΘΗΚΗ 1: Σκούρο, καθαρό χρώμα για τη σημερινή μέρα ---
             if (start_of_week + timedelta(days=di)) == date.today():
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#b2d8ce", opacity=1, layer="below", line_width=0)
+                fig.add_hrect(
+                    y0=mn-0.5, y1=mx+0.5, 
+                    fillcolor="#4f46e5", opacity=0.15, # Πιο σκούρο μπλε (Indigo) με διαφάνεια
+                    layer="below", line_width=2, line_color="#4f46e5"
+                )
                 
     for idx in range(len(ordered_categories) - 1):
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
@@ -387,7 +393,7 @@ else:
     dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
     dyn_h = max(250, dyn_h)
     
-    # Κλείδωμα της κάθετης μετακίνησης (Y-axis)
+    # Ακριβή όρια Y-άξονα για να μην γλιστράει πάνω/κάτω στο κενό
     y_range = [-0.5, len(ordered_categories) - 0.5]
             
     fig.update_yaxes(
@@ -397,7 +403,7 @@ else:
         showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1,
         automargin=True,
         range=y_range,
-        fixedrange=True  # ΚΛΕΙΔΩΜΑ ΚΑΘΕΤΗΣ ΜΕΤΑΚΙΝΗΣΗΣ!
+        fixedrange=True  # ΣΗΜΑΝΤΙΚΟ: Αποτρέπει την κάθετη μετακίνηση (φεύγει με την εσωτερική μπάρα)
     )
     fig.update_traces(
         textposition='inside', insidetextanchor='middle',
@@ -407,12 +413,8 @@ else:
         selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
     )
     fig.update_layout(
-        bargap=0.02, 
-        showlegend=False, 
-        plot_bgcolor='#dbece8', 
-        paper_bgcolor='rgba(0,0,0,0)', # ΔΙΑΦΑΝΕΣ ΦΟΝΤΟ για να φαίνεται η χρωματική διαβάθμιση από πίσω
-        height=dyn_h, 
-        margin=dict(l=10, r=10, t=50, b=10),
+        bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='rgba(0,0,0,0)',
+        height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
         annotations=empty_shift_annotations, 
         dragmode="pan", 
         clickmode="event+select",
@@ -421,11 +423,10 @@ else:
             side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
             autorange=False, 
-            range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # Καθαρή ορατή περιοχή
+            range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # ΠΡΟΣΘΗΚΗ 2: Προεπιλεγμένη όψη 06:00 - 16:00
             title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, # ΕΛΕΥΘΕΡΗ ΟΡΙΖΟΝΤΙΑ ΜΕΤΑΚΙΝΗΣΗ
-            rangeslider=dict(visible=False)
+            fixedrange=False, rangeslider=dict(visible=False)
         )
     )
     st.session_state.cached_fig = fig
@@ -435,21 +436,19 @@ else:
 
 clicked_key = None
 
-# --- ΜΑΓΙΚΟ CSS ΓΙΑ ΤΟ ΕΞΩΤΕΡΙΚΟ ΠΑΡΑΘΥΡΟ (ΚΥΛΙΟΜΕΝΟ ΔΟΧΕΙΟ) ---
+# --- ΠΡΟΣΘΗΚΗ 3: Οπτικός διαχωρισμός του εσωτερικού παραθύρου (Panel) ---
 st.markdown("""
 <style>
-/* Στοχεύει το εσωτερικό παράθυρο κύλισης (container) που περιέχει το γράφημα Plotly */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) {
-    border: 3px solid #334155 !important; /* Έντονο σκούρο γκρι/μπλε περίγραμμα */
-    border-radius: 12px !important;       /* Πιο στρογγυλεμένες γωνίες */
-    background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%) !important; /* Απαλή χρωματική διαβάθμιση */
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important; /* Ελαφριά σκιά 3D */
-    padding: 2px !important;
+    border: 2px solid #cbd5e1 !important;
+    border-radius: 10px !important;
+    background-color: #f8fafc !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# Τοποθετούμε το διάγραμμα σε ένα κυλιόμενο δοχείο (εσωτερικό παράθυρο)
+# Δημιουργία κυλιόμενου δοχείου (650px ύψος)
 with st.container(height=650, border=True):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
@@ -464,7 +463,7 @@ with st.container(height=650, border=True):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την κύλιση δίπλα στο διάγραμμα (Scroll) για να δείτε όλες τις μέρες."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
