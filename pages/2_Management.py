@@ -932,17 +932,24 @@ elif menu == "Αξιολόγηση Προσωπικού":
 # --- VIEW: AUDIT LOG ---
 elif menu == "Καταγραφή Κινήσεων":
     st.title("🛡️ Καταγραφή Κινήσεων (Audit Log)")
+    
+    # ΠΡΟΣΘΗΚΗ ΑΣΦΑΛΕΙΑΣ: Φόρτωση ιστορικού on-demand για να μην "σκάει" η εφαρμογή
+    if "activity_logs" not in st.session_state:
+        with st.spinner("Ανάκτηση ιστορικού..."):
+            st.session_state.activity_logs = utils.fetch_paginated("activity_logs")
+
     col_b1, col_b2 = st.columns([1, 4])
     with col_b1:
         if st.button("🔄 Ανανέωση Ιστορικού", use_container_width=True): 
             import database
             st.session_state.last_sync_time = None
             database.sync_data_incremental()
+            st.session_state.activity_logs = utils.fetch_paginated("activity_logs")
             st.session_state.global_db_ts = "force_refresh"
             st.rerun()
     with col_b2:
         if st.button("🗑️ Καθαρισμός Ιστορικού", type="primary"):
-            if utils.supabase and st.session_state.activity_logs:
+            if utils.supabase and st.session_state.get('activity_logs'):
                 try:
                     log_ids = [l['id'] for l in st.session_state.activity_logs]
                     for i in range(0, len(log_ids), 500): utils.supabase.table('activity_logs').delete().in_('id', log_ids[i:i+500]).execute()
@@ -951,7 +958,7 @@ elif menu == "Καταγραφή Κινήσεων":
                     st.success("Το ιστορικό καθαρίστηκε!"); time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Σφάλμα καθαρισμού: {e}")
                 
-    if not st.session_state.activity_logs: st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
+    if not st.session_state.get('activity_logs'): st.info("Δεν υπάρχουν καταγεγραμμένες κινήσεις ακόμα.")
     else:
         sorted_logs = sorted(st.session_state.activity_logs, key=lambda x: x.get('timestamp', ''), reverse=True)
         TABLE_NAMES_GR = {'employees': 'Προσωπικό', 'projects': 'Έργα', 'assignments': 'Βάρδιες', 'leaves': 'Άδειες', 'recurring_patterns': 'Επαν. Εργασίες', 'evaluations': 'Αξιολογήσεις'}
