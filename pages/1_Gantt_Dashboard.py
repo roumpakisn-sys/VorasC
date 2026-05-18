@@ -359,6 +359,18 @@ else:
             'ColorHex', 'GroupKey'
         ])
 
+    # Υπολογισμός δυναμικών ορίων (Range) για τον άξονα X
+    x_min = datetime(1970, 1, 1, 6, 0)
+    x_max = datetime(1970, 1, 1, 17, 0)
+    if not df.empty:
+        data_min = df['Έναρξη'].min()
+        data_max = df['Λήξη'].max()
+        if data_min < x_min: x_min = data_min
+        if data_max > x_max: x_max = data_max
+    
+    # Προσθέτουμε 30 λεπτά "αέρα" στα δεξιά για να μη κόβονται τα κείμενα
+    x_max += timedelta(minutes=30)
+
     ordered_categories = y_category_order[::-1]
     
     fig = px.timeline(
@@ -405,16 +417,20 @@ else:
     fig.update_layout(
         bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
         height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
-        annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
+        annotations=empty_shift_annotations, 
+        dragmode=False, # Απενεργοποίηση της ελεύθερης μετακίνησης (pan)
+        clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
             side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0), dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)], title="",
+            range=[x_min, x_max], # Εφαρμογή δυναμικών ορίων
+            title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, rangeslider=dict(visible=False)
+            fixedrange=True, # Κλείδωμα άξονα
+            rangeslider=dict(visible=False)
         ),
-        yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=False, range=y_range, automargin=True)
+        yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=True, range=y_range, automargin=True)
     )
     st.session_state.cached_fig = fig
     st.session_state.cached_wk_groups = wk_groups
@@ -435,7 +451,7 @@ except Exception:
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Το ζουμ ελέγχεται από την επάνω μπάρα."
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
