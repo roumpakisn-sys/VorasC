@@ -18,7 +18,6 @@ if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
-            # Η νέα λίστα με τους χρήστες της εφαρμογής
             users_list = ["Admin", "EXOU", "MEMEK", "NAK", "PAP", "TAN"]
             username = st.selectbox("Χρήστης", users_list)
             
@@ -26,16 +25,28 @@ if not st.session_state.authenticated:
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # Αντιστοίχιση των χρηστών με τους κωδικούς από τα Secrets. 
-                # (Αν για κάποιο λόγο δεν διαβαστούν τα secrets, χρησιμοποιούνται οι προεπιλεγμένοι κωδικοί π.χ. pass1)
-                valid_passwords = {
-                    "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
-                    "EXOU": st.secrets.get("USER1_PASSWORD", "pass1"),
-                    "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
-                    "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
-                    "PAP": st.secrets.get("USER4_PASSWORD", "pass4"),
-                    "TAN": st.secrets.get("USER5_PASSWORD", "pass5")
-                }
+                # ΝΕΑ ΑΣΦΑΛΗΣ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS
+                valid_passwords = {}
+                try:
+                    # Προσπαθεί να διαβάσει τα Secrets (αν υπάρχουν, π.χ. στο Streamlit Cloud)
+                    valid_passwords = {
+                        "Admin": st.secrets.get("APP_PASSWORD", "admin123"),
+                        "EXOU": st.secrets.get("USER1_PASSWORD", "pass1"),
+                        "MEMEK": st.secrets.get("USER2_PASSWORD", "pass2"),
+                        "NAK": st.secrets.get("USER3_PASSWORD", "pass3"),
+                        "PAP": st.secrets.get("USER4_PASSWORD", "pass4"),
+                        "TAN": st.secrets.get("USER5_PASSWORD", "pass5")
+                    }
+                except Exception:
+                    # Αν αποτύχει (π.χ. στο τοπικό Codespaces), βάζει τους προεπιλεγμένους
+                    valid_passwords = {
+                        "Admin": "admin123",
+                        "EXOU": "pass1",
+                        "MEMEK": "pass2",
+                        "NAK": "pass3",
+                        "PAP": "pass4",
+                        "TAN": "pass5"
+                    }
                 
                 if password == valid_passwords.get(username):
                     st.session_state.authenticated = True
@@ -44,5 +55,4 @@ if not st.session_state.authenticated:
                 else:
                     st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
 else:
-    # Αν ο χρήστης είναι ήδη συνδεδεμένος, τον προωθεί κατευθείαν στο Dashboard
     st.switch_page("pages/1_Gantt_Dashboard.py")
