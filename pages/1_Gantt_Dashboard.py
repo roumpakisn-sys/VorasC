@@ -108,30 +108,63 @@ else:
                 else:
                     leaves_today.append(f"{emp_n}")
         
+        # --- ΝΕΑ ΛΟΓΙΚΗ: Εξωτερικό Συνεργείο Διαθέσιμο μετά τις 10:00 ---
+        available_ext_crew = []
+        leaves_dict = st.session_state.get('leaves_by_emp', {})
+        day_assigns = st.session_state.get('assignments_by_date', {}).get(curr_date, [])
+        
+        for emp in st.session_state.employees:
+            if emp.get('status', 'Ενεργός') == 'Ενεργός' and emp.get('is_external_crew', False):
+                eid = emp['id']
+                # Αγνοούμε αν έχει άδεια
+                if scheduling.is_on_leave(eid, curr_date, leaves_dict):
+                    continue
+                
+                # Ελέγχουμε αν έχει βάρδια που τελειώνει ΜΕΤΑ τις 10:00 π.μ.
+                is_busy_after_10 = False
+                for a in day_assigns:
+                    if a.get('employeeId') == eid and not a.get('is_cancelled', False):
+                        if str(a.get('endTime', ''))[:5] > "10:00":
+                            is_busy_after_10 = True
+                            break
+                
+                # Αν δεν είναι απασχολημένος μετά τις 10, τον βάζουμε στη λίστα
+                if not is_busy_after_10:
+                    emp_full = emp['name']
+                    emp_parts = emp_full.split()
+                    emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
+                    available_ext_crew.append(emp_n)
+
         # ΕΞΥΠΝΗ ΟΡΙΖΟΝΤΙΑ ΣΤΟΙΧΙΣΗ ΓΙΑ ΝΑ ΜΗΝ ΔΙΑΛΥΕΤΑΙ ΤΟ ΔΙΑΓΡΑΜΜΑ
+        y_label_parts = [f"<b>{day_str}</b>"]
+        
         if leaves_today:
             leaves_str = ", ".join(leaves_today)
             wrapped_leaves = "<br>".join(textwrap.wrap(leaves_str, width=35))
-            base_y_label = f"<b>{day_str}</b><br><span style='font-size:10px; color:#d32f2f;'>Άδειες:<br>{wrapped_leaves}</span>"
-        else:
-            base_y_label = f"<b>{day_str}</b>"
+            y_label_parts.append(f"<span style='font-size:10px; color:#d32f2f;'>Άδειες:<br>{wrapped_leaves}</span>")
             
-        day_assignments = st.session_state.assignments_by_date.get(curr_date, [])
+        if available_ext_crew:
+            ext_str = ", ".join(available_ext_crew)
+            wrapped_ext = "<br>".join(textwrap.wrap(ext_str, width=35))
+            y_label_parts.append(f"<span style='font-size:10px; color:#0f766e;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br><b>{wrapped_ext}</b></span>")
+            
+        base_y_label = "<br>".join(y_label_parts)
+            
         day_row_ids = []
         
-        if not day_assignments:
+        if not day_assigns:
             row_id = f"day_{i}_row_0"
             day_row_ids.append(row_id)
         else:
             emp_day_assigns = {}
-            for da in day_assignments:
+            for da in day_assigns:
                 eid = da.get('employeeId')
                 if eid:
                     if eid not in emp_day_assigns: emp_day_assigns[eid] = []
                     emp_day_assigns[eid].append(da)
                     
             groups = {}
-            for a in day_assignments:
+            for a in day_assigns:
                 proj = utils.get_project_info(a['projectId'])
                 c_hex = a.get('colorHex', proj['color'] if proj else "#999999")
                 c_name = a.get('colorName', "Προεπιλογή")
@@ -313,8 +346,6 @@ else:
     df = pd.DataFrame(data)
 
     # --- ΠΡΟΣΘΗΚΗ ΑΣΦΑΛΕΙΑΣ ΓΙΑ ΑΔΕΙΕΣ ΕΒΔΟΜΑΔΕΣ ---
-    # Αν ο πίνακας είναι εντελώς άδειος (π.χ. μετά από TRUNCATE στη βάση), 
-    # δημιουργούμε τις στήλες χειροκίνητα για να μην κρασάρει το Plotly.
     if df.empty:
         df = pd.DataFrame(columns=[
             'Y_Axis', 'Έργο', 'Έναρξη', 'Λήξη', 'Προσωπικό', 
