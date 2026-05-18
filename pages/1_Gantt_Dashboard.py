@@ -386,14 +386,23 @@ else:
     
     dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
     dyn_h = max(250, dyn_h)
-    y_range = None
+    
+    # ---------------------------------------------------------
+    # ΜΑΓΙΚΗ ΛΥΣΗ: Κλείδωμα της κάθετης μετακίνησης (Y-axis)
+    # ---------------------------------------------------------
+    # Υπολογίζουμε ακριβώς το ύψος των δεδομένων μας για να μη
+    # γλιστράει πάνω-κάτω στο λευκό κενό, αλλά να κινείται μόνο
+    # αριστερά-δεξιά.
+    y_range = [-0.5, len(ordered_categories) - 0.5]
             
     fig.update_yaxes(
         categoryorder='array', categoryarray=ordered_categories,
         tickmode='array', tickvals=ordered_categories,
         ticktext=[tickvals_map[v] for v in ordered_categories],
         showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1,
-        automargin=True
+        automargin=True,
+        range=y_range,
+        fixedrange=True  # ΚΛΕΙΔΩΜΑ ΚΑΘΕΤΗΣ ΜΕΤΑΚΙΝΗΣΗΣ!
     )
     fig.update_traces(
         textposition='inside', insidetextanchor='middle',
@@ -405,18 +414,20 @@ else:
     fig.update_layout(
         bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
         height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
-        annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
+        annotations=empty_shift_annotations, 
+        dragmode="pan", 
+        clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
-            side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0), dtick=1800000,
+            side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            autorange=False, # <--- Η ΜΑΓΙΚΗ ΡΥΘΜΙΣΗ ΓΙΑ ΝΑ ΜΗΝ ΠΑΡΑΜΟΡΦΩΝΕΤΑΙ ΤΟ ΓΡΑΦΗΜΑ
-            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 30)], # <--- ΚΛΕΙΔΩΜΕΝΟ ΑΡΧΙΚΟ ΖΟΥΜ!
+            autorange=False, 
+            range=["1970-01-01 06:00:00", "1970-01-01 17:30:00"], # Καθαρή, μη συμπιεσμένη αρχική όψη
             title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, rangeslider=dict(visible=False)
-        ),
-        yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=False, range=y_range, automargin=True)
+            fixedrange=False, # ΕΛΕΥΘΕΡΗ ΟΡΙΖΟΝΤΙΑ ΜΕΤΑΚΙΝΗΣΗ
+            rangeslider=dict(visible=False)
+        )
     )
     st.session_state.cached_fig = fig
     st.session_state.cached_wk_groups = wk_groups
@@ -437,7 +448,7 @@ except Exception:
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) για να δείτε τυχόν βραδινές βάρδιες. **3)** Αν χαθείτε, κάντε Διπλό Κλικ στο διάγραμμα!"
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο."
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
