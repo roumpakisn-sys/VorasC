@@ -33,7 +33,7 @@ if not st.session_state.authenticated:
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
             
             if submit:
-                # 1. Θέτουμε αρχικά τους προεπιλεγμένους κωδικούς (Fallback)
+                # 1. Θέτουμε αρχικά τους προεπιλεγμένους κωδικούς (Fallback για τοπική χρήση)
                 valid_passwords = {
                     "Admin": "admin123",
                     "EXOU": "pass1",
@@ -43,9 +43,8 @@ if not st.session_state.authenticated:
                     "TAN": "pass5"
                 }
                 
-                # 2. ΑΛΕΞΙΣΦΑΙΡΗ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS
+                # 2. ΑΛΕΞΙΣΦΑΙΡΗ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS (Cloud)
                 try:
-                    # Προσπαθεί να διαβάσει τα Secrets (αν υπάρχουν, π.χ. στο Streamlit Cloud)
                     if hasattr(st, "secrets"):
                         if "APP_PASSWORD" in st.secrets: valid_passwords["Admin"] = st.secrets["APP_PASSWORD"]
                         if "USER1_PASSWORD" in st.secrets: valid_passwords["EXOU"] = st.secrets["USER1_PASSWORD"]
@@ -54,7 +53,6 @@ if not st.session_state.authenticated:
                         if "USER4_PASSWORD" in st.secrets: valid_passwords["PAP"] = st.secrets["USER4_PASSWORD"]
                         if "USER5_PASSWORD" in st.secrets: valid_passwords["TAN"] = st.secrets["USER5_PASSWORD"]
                 except BaseException:
-                    # Αν αποτύχει οτιδήποτε (π.χ. στο τοπικό Codespaces), το αγνοούμε εντελώς
                     pass
                 
                 if password == valid_passwords.get(username):
