@@ -630,7 +630,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 r_arr, r_start, r_end = st.columns(3)
                 with r_arr:
                     use_arr_rec = st.checkbox("Προσέλευση;", key=f"chk_arr_rec_{rc}")
-                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}", disabled=not use_arr_rec)
+                    r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"new_r_arr_{rc}")
                 with r_start: r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime("09:00", "%H:%M").time(), key=f"new_r_start_time_{rc}")
                 with r_end: r_end_time = st.time_input("Λήξη Ώρας", value=datetime.strptime("17:00", "%H:%M").time(), key=f"new_r_end_time_{rc}")
                 
@@ -809,7 +809,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         with r_arr:
                             e_use_arr_rec = st.checkbox("Προσέλευση;", value=bool(existing_arr), key=f"er_use_arr_{selected_pattern_id}_{rc}")
                             def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(str(pat['startTime'])[:5], "%H:%M").time()
-                            e_r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=def_arr, disabled=not e_use_arr_rec, key=f"er_arr_time_{selected_pattern_id}_{rc}")
+                            e_r_arrival_time = st.time_input("Ώρα Προσέλευσης", value=def_arr, key=f"er_arr_time_{selected_pattern_id}_{rc}")
                         with r_start: 
                             e_r_start_time = st.time_input("Έναρξη Ώρας", value=datetime.strptime(str(pat['startTime'])[:5], "%H:%M").time(), key=f"er_start_{selected_pattern_id}_{rc}")
                         with r_end: 
