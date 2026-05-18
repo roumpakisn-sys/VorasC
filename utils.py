@@ -871,8 +871,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         loaderDiv.id = "staff_pro_cleaner";
         doc.body.appendChild(loaderDiv);
     }
-    // Τοποθέτηση στα αριστερά του ρολογιού (επιβάλλεται πάντα η νέα θέση)
-    loaderDiv.style.cssText = "position: fixed; top: 12px; right: 580px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
+    // Τοποθέτηση στα αριστερά του ρολογιού (επιβάλλεται πάντα η νέα θέση - 680px)
+    loaderDiv.style.cssText = "position: fixed; top: 12px; right: 680px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
     let cIdx = 0;
