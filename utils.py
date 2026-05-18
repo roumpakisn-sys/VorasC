@@ -79,7 +79,6 @@ def serialize_dates(data):
     return data
 
 def safe_date_parse(d_val):
-    """Έξυπνος μεταφραστής ημερομηνιών για απόλυτη συμβατότητα με παλιά δεδομένα."""
     if isinstance(d_val, date) and not isinstance(d_val, datetime):
         return d_val
     if isinstance(d_val, datetime):
@@ -184,10 +183,26 @@ def inject_silent_refresh_css():
     st.markdown(
         """
         <style>
-        [data-testid="stStatusWidget"] { visibility: hidden !important; display: none !important; }
-        [data-testid="stAppViewBlockContainer"] { opacity: 1 !important; transition: none !important; }
-        .stApp { opacity: 1 !important; }
-        .stApp [data-testid="stDecoration"] { display: none !important; }
+        /* 1. Εξαφάνιση του προεπιλεγμένου εικονιδίου 'Running...' */
+        [data-testid="stStatusWidget"] { 
+            visibility: hidden !important; 
+            display: none !important; 
+        }
+        
+        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" (αφαίρεση του veil effect) */
+        [data-testid="stAppViewContainer"], 
+        [data-testid="stMainBlockContainer"],
+        [data-testid="stAppViewBlockContainer"],
+        .stApp, .stApp > div {
+            opacity: 1 !important;
+            filter: none !important;
+            transition: none !important;
+        }
+        
+        /* 3. Κρύβουμε την κόκκινη/πολύχρωμη γραμμή φόρτωσης στην κορυφή */
+        [data-testid="stDecoration"] { 
+            display: none !important; 
+        }
         </style>
         """,
         unsafe_allow_html=True
@@ -739,7 +754,8 @@ def init_data_and_sync():
     init_undo_stack()
     
     try:
-        sync_data_incremental()
+        import database
+        database.sync_data_incremental()
     except Exception as e:
         print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
 
@@ -830,6 +846,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     <script>
     const doc = window.parent.document;
     
+    // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
@@ -844,6 +861,33 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
     updateClock();
     setInterval(updateClock, 1000);
+
+    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας (Σκούπα, Φαράσι, Σαπούνι, Σφουγγαρίστρα)
+    let loaderDiv = doc.getElementById("staff_pro_cleaner");
+    if (!loaderDiv) {
+        loaderDiv = doc.createElement("div");
+        loaderDiv.id = "staff_pro_cleaner";
+        doc.body.appendChild(loaderDiv);
+        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
+    }
+    
+    const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
+    let cIdx = 0;
+    setInterval(() => {
+        loaderDiv.innerText = "Ανανέωση " + cleaningIcons[cIdx];
+        cIdx = (cIdx + 1) % cleaningIcons.length;
+    }, 400);
+
+    // Εντοπισμός λειτουργίας Streamlit και εμφάνιση εικονιδίων
+    setInterval(() => {
+        const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
+        if (isRunning) {
+            loaderDiv.style.display = 'block';
+        } else {
+            loaderDiv.style.display = 'none';
+        }
+    }, 150);
+
     """ + polling_js + """
     </script>
     """, height=0, width=0)
