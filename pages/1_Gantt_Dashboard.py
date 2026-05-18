@@ -7,9 +7,19 @@ import io
 import textwrap
 import time
 
-# --- INITIALIZATION ---
+# --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+if "employees" not in st.session_state: st.session_state.employees = []
+if "projects" not in st.session_state: st.session_state.projects = []
+if "assignments" not in st.session_state: st.session_state.assignments = []
+if "leaves" not in st.session_state: st.session_state.leaves = []
+if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
+if "evaluations" not in st.session_state: st.session_state.evaluations = []
+
+# ΣΗΜΑΝΤΙΚΟ: Σταματάει τον κώδικα εδώ και σε στέλνει στο Login αν δεν είσαι συνδεδεμένος!
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
+    st.stop()
 
 import config
 import utils
@@ -464,7 +474,6 @@ if not presentation_mode:
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
                     use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-                    # Αφαίρεση του disabled=not use_arr
                     t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
                 with c_start:
                     t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
@@ -629,7 +638,6 @@ if not presentation_mode:
                         with e_arr:
                             use_arr_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr), key="edit_use_arr")
                             def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time()
-                            # Αφαίρεση του disabled=not use_arr_edit
                             new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
                         with e_start:
                             new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time())
