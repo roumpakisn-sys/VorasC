@@ -17,6 +17,74 @@ import scheduling
 
 utils.init_data_and_sync()
 
+# ====== GHOST BUSTER & SAFE DELETE LOGIC ======
+def sync_safe_delete_assignments(ids_to_del):
+    """Εκτελεί σύγχρονη και απολύτως ασφαλή διαγραφή από τη Supabase για να μην σκοτώνονται τα threads."""
+    if not ids_to_del or not utils.supabase: return
+    chunk_size = 100
+    for i in range(0, len(ids_to_del), chunk_size):
+        chunk = ids_to_del[i:i+chunk_size]
+        try:
+            utils.supabase.table('assignments').delete().in_('id', chunk).execute()
+            for rec_id in chunk:
+                utils.track_deletion('assignments', rec_id)
+        except Exception as e:
+            print(f"Σφάλμα διαγραφής: {e}")
+
+def safe_delete_recurring_assignments(pattern_id):
+    """Ασφαλής διαγραφή: Καθαρίζει τη μνήμη ΠΡΙΝ γίνουν οι νέοι υπολογισμοί και σβήνει ΣΥΓΧΡΟΝΑ από τη βάση."""
+    if not pattern_id: return
+    
+    old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == pattern_id]
+    if not old_assigns: return
+    
+    ids_to_del = [a['id'] for a in old_assigns]
+    
+    # 1. Καθαρισμός από τοπική μνήμη
+    st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != pattern_id]
+    
+    # 2. ΑΜΕΣΗ αναδόμηση του ημερολογίου (για να μην βλέπει "φαντάσματα" ο ελεγκτής εμπλοκών)
+    temp_date_map = {}
+    for a in st.session_state.assignments:
+        d_val = a.get('date')
+        if d_val:
+            if d_val not in temp_date_map: temp_date_map[d_val] = []
+            temp_date_map[d_val].append(a)
+    st.session_state.assignments_by_date = temp_date_map
+    st.session_state.data_dirty = True
+    
+    # 3. ΣΥΓΧΡΟΝΗ διαγραφή από Supabase
+    sync_safe_delete_assignments(ids_to_del)
+
+def cleanup_orphaned_recurring_assignments():
+    """Ο Αυτόματος Καθαριστής: Βρίσκει και σβήνει ΣΥΓΧΡΟΝΑ τις 'ορφανές' βάρδιες από σειρές που διεγράφησαν."""
+    if not st.session_state.get('recurring_patterns'):
+        valid_pattern_ids = set()
+    else:
+        valid_pattern_ids = {p['id'] for p in st.session_state.recurring_patterns}
+        
+    orphans = [a for a in st.session_state.get('assignments', []) if a.get('recurring_id') and a.get('recurring_id') not in valid_pattern_ids]
+    
+    if orphans:
+        with st.spinner("Εκκαθάριση 'φαντασμάτων' από τη βάση... Παρακαλώ περιμένετε..."):
+            ids_to_del = [a['id'] for a in orphans]
+            st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in ids_to_del]
+            
+            temp_date_map = {}
+            for a in st.session_state.assignments:
+                d_val = a.get('date')
+                if d_val:
+                    if d_val not in temp_date_map: temp_date_map[d_val] = []
+                    temp_date_map[d_val].append(a)
+            st.session_state.assignments_by_date = temp_date_map
+            st.session_state.data_dirty = True
+            
+            sync_safe_delete_assignments(ids_to_del)
+
+# Τρέχουμε τον καθαριστή για να σβήσει τις παλιές "εμπλοκές" που σου ξέμειναν!
+cleanup_orphaned_recurring_assignments()
+# ===============================================
+
 # Βοηθητική συνάρτηση για ασφαλή ανάγνωση λιστών από τη βάση
 def safe_eval(val, default):
     if isinstance(val, str):
@@ -754,14 +822,16 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     
                     if del_rec:
                         st.success("Η σειρά διαγράφεται οριστικά. Παρακαλώ περιμένετε...")
-                        old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                        st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
+                        safe_delete_recurring_assignments(selected_pattern_id)
+                        
+                        pat_to_del = next((p for p in st.session_state.recurring_patterns if p['id'] == selected_pattern_id), None)
                         st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
-                        utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
-                        utils.db_delete('recurring_patterns', 'id', selected_pattern_id, deleted_records=[pat], track=False)
-                        utils.add_transaction([{'type': 'delete', 'table': 'assignments', 'records': old_assigns}, {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}])
+                        
+                        if pat_to_del:
+                            utils.db_delete('recurring_patterns', 'id', selected_pattern_id, deleted_records=[pat_to_del], track=False)
+                            utils.add_transaction([{'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat_to_del)]}])
+                            
                         st.session_state.rec_reset_counter += 1
-                        time.sleep(1.0)
                         st.rerun()
 
                     if save_rec:
@@ -785,9 +855,10 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
                             else: final_r_proj_id = e_r_proj
                             
-                            old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                            st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                            utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
+                            # ===== ΣΩΣΤΟΣ ΚΑΙ ΑΣΦΑΛΗΣ ΚΑΘΑΡΙΣΜΟΣ ΠΡΙΝ ΤΟΝ ΥΠΟΛΟΓΙΣΜΟ ======
+                            with st.spinner('Καθαρισμός παλιών βαρδιών...'):
+                                safe_delete_recurring_assignments(selected_pattern_id)
+                            # ==============================================================
                             
                             r_end_date = e_r_start_date + timedelta(days=365)
                             dates_to_assign = []
