@@ -359,7 +359,7 @@ else:
             'ColorHex', 'GroupKey'
         ])
 
-    # Υπολογισμός μέγιστων ορίων (Bounds) για να μην χάνεται το διάγραμμα στο κενό κατά το σύρσιμο (panning)
+    # Υπολογισμός μέγιστων ορίων (minallowed / maxallowed) για να μην χάνεται το διάγραμμα
     bound_min = datetime(1970, 1, 1, 6, 0)
     bound_max = datetime(1970, 1, 1, 17, 0)
     if not df.empty:
@@ -368,11 +368,11 @@ else:
         if data_min < bound_min: bound_min = data_min
         if data_max > bound_max: bound_max = data_max
     
-    # Προσθέτουμε 30 λεπτά "αέρα" αριστερά και δεξιά για να μην κολλάνε οι μπάρες
+    # Προσθέτουμε 30 λεπτά "αέρα"
     bound_min_str = (bound_min - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
     bound_max_str = (bound_max + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Σταθερή αρχική όψη για να ΜΗΝ συμπιέζεται το διάγραμμα!
+    # Σταθερή αρχική όψη
     initial_range = ["1970-01-01 06:00:00", "1970-01-01 17:30:00"]
 
     ordered_categories = y_category_order[::-1]
@@ -421,20 +421,18 @@ else:
     fig.update_layout(
         bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='#ffffff',
         height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
-        annotations=empty_shift_annotations, 
-        dragmode="pan", 
-        clickmode="event+select",
+        annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
             side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            autorange=False, # <--- ΑΥΤΟ ΑΠΟΤΡΕΠΕΙ ΤΗΝ ΠΑΡΑΜΟΡΦΩΣΗ/ΣΥΜΠΙΕΣΗ!
-            range=initial_range, 
-            bounds=[bound_min_str, bound_max_str], # Τοίχοι μετακίνησης
+            autorange=False,
+            range=initial_range,
+            minallowed=bound_min_str,
+            maxallowed=bound_max_str,
             title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, 
-            rangeslider=dict(visible=False)
+            fixedrange=False, rangeslider=dict(visible=False)
         ),
         yaxis=dict(title="", tickfont=dict(size=max(8, int(12*zoom_factor)), color="black"), fixedrange=False, range=y_range, automargin=True)
     )
