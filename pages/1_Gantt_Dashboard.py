@@ -108,7 +108,7 @@ else:
                 else:
                     leaves_today.append(f"{emp_n}")
         
-        # --- ΝΕΑ ΛΟΓΙΚΗ: Εξωτερικό Συνεργείο Διαθέσιμο μετά τις 10:00 ---
+        # --- ΛΟΓΙΚΗ: Εξωτερικό Συνεργείο Διαθέσιμο μετά τις 10:00 ---
         available_ext_crew = []
         leaves_dict = st.session_state.get('leaves_by_emp', {})
         day_assigns = st.session_state.get('assignments_by_date', {}).get(curr_date, [])
@@ -116,11 +116,9 @@ else:
         for emp in st.session_state.employees:
             if emp.get('status', 'Ενεργός') == 'Ενεργός' and emp.get('is_external_crew', False):
                 eid = emp['id']
-                # Αγνοούμε αν έχει άδεια
                 if scheduling.is_on_leave(eid, curr_date, leaves_dict):
                     continue
                 
-                # Ελέγχουμε αν έχει βάρδια που τελειώνει ΜΕΤΑ τις 10:00 π.μ.
                 is_busy_after_10 = False
                 for a in day_assigns:
                     if a.get('employeeId') == eid and not a.get('is_cancelled', False):
@@ -128,7 +126,6 @@ else:
                             is_busy_after_10 = True
                             break
                 
-                # Αν δεν είναι απασχολημένος μετά τις 10, τον βάζουμε στη λίστα (ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ)
                 if not is_busy_after_10:
                     emp_full = emp['name']
                     emp_parts = emp_full.split()
@@ -345,14 +342,12 @@ else:
             
     df = pd.DataFrame(data)
 
-    # --- ΠΡΟΣΘΗΚΗ ΑΣΦΑΛΕΙΑΣ ΓΙΑ ΑΔΕΙΕΣ ΕΒΔΟΜΑΔΕΣ ---
     if df.empty:
         df = pd.DataFrame(columns=[
             'Y_Axis', 'Έργο', 'Έναρξη', 'Λήξη', 'Προσωπικό', 
             'Προσέλευση', 'Παρατηρήσεις', 'Ετικέτα', 'LegendGroup', 
             'ColorHex', 'GroupKey'
         ])
-    # -----------------------------------------------
 
     ordered_categories = y_category_order[::-1]
     
@@ -375,14 +370,12 @@ else:
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
             fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
             
-    # ΕΞΥΠΝΟΣ ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ: Απόλυτα σταθερό ύψος μπάρας!
-    row_h = 50 * zoom_factor  # Σταθερό πάχος γραμμής (όπως φαίνεται στις άδειες εβδομάδες)
+    row_h = 50 * zoom_factor
     margin_top = 50
     margin_bottom = 10
     
-    # Το γράφημα προσαρμόζεται ακριβώς στις γραμμές, καταργώντας το "στρίμωγμα" (750px limit)
     dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
-    dyn_h = max(250, dyn_h) # Ελάχιστο ύψος για ασφάλεια
+    dyn_h = max(250, dyn_h)
     y_range = None
             
     fig.update_yaxes(
@@ -429,7 +422,6 @@ try:
 except Exception:
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-# Εάν έχουμε επιλέξει κάτι, ΔΙΑΚΟΠΤΟΥΜΕ ΤΟ ΑΥΤΟΜΑΤΟ POLLING!
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
@@ -484,61 +476,60 @@ if not presentation_mode:
                     str_end = t_end.strftime("%H:%M")
                     if str_start >= str_end:
                         st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                    elif not custom_proj_name.strip() and not proj_choice:
-                        st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                     else:
                         emps_to_process = emp_choices if emp_choices else [""]
-                        errors = []
                         valid_assignments = []
                         for eid in emps_to_process:
                             if eid:
                                 emp_name = utils.get_employee_name(eid)
                                 if scheduling.is_on_leave(eid, add_date, st.session_state.leaves_by_emp):
-                                    errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {add_date.strftime('%d/%m')}.")
-                                    st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
+                                    valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': f"[Άδεια: {emp_name}]", 'emp_name': emp_name})
+                                    st.toast(f"Ο/Η {emp_name} έχει άδεια. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
                                 else:
                                     day_assigns = st.session_state.assignments_by_date.get(add_date, [])
                                     adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                     if is_conflict:
-                                        errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει ({str_start} - {str_end}).")
-                                        st.toast(f"Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="⚠️")
+                                        valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': f"[Εμπλοκή: {emp_name}]", 'emp_name': emp_name})
+                                        st.toast(f"Διπλοκράτηση {emp_name}. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
                                     else:
                                         valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
                             else:
                                 valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': "", 'emp_name': ""})
                                 
-                        if errors:
-                            for err in errors: st.error(err)
-                        else:
-                            if custom_proj_name.strip():
-                                c_name = custom_proj_name.strip()
-                                existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
-                                if existing_p:
-                                    final_proj_id = existing_p['id']
-                                else:
-                                    final_proj_id = str(uuid.uuid4())
-                                    new_p = {'id': final_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[color_choice]}
-                                    st.session_state.projects.append(new_p)
-                                    utils.db_insert('projects', new_p, track=False)
+                        if custom_proj_name.strip():
+                            c_name = custom_proj_name.strip()
+                            existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                            if existing_p:
+                                final_proj_id = existing_p['id']
                             else:
-                                final_proj_id = proj_choice
+                                final_proj_id = str(uuid.uuid4())
+                                new_p = {'id': final_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[color_choice]}
+                                st.session_state.projects.append(new_p)
+                                utils.db_insert('projects', new_p, track=False)
+                        else:
+                            final_proj_id = proj_choice
+                            
+                        new_assigns = []
+                        for va in valid_assignments:
+                            if va['msg'] == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου για τον/την {va['emp_name']}.", icon="ℹ️")
+                            
+                            c_notes = add_notes
+                            if va['msg'] and va['msg'] != "Allowed Overlap":
+                                c_notes = f"{add_notes} {va['msg']}".strip()
                                 
-                            new_assigns = []
-                            for va in valid_assignments:
-                                if va['msg'] == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου για τον/την {va['emp_name']}.", icon="ℹ️")
-                                new_assign = {
-                                    'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_proj_id,
-                                    'date': add_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
-                                    'colorName': color_choice, 'colorHex': config.BASIC_COLORS[color_choice],
-                                    'notes': add_notes, 'is_cancelled': False, 'cancel_reason': "", 'recurring_id': None
-                                }
-                                new_assigns.append(new_assign)
-                                st.session_state.assignments.append(new_assign)
-                            utils.db_insert("assignments", new_assigns, track=False)
-                            st.success("Η ανάθεση ολοκληρώθηκε!")
-                            time.sleep(0.5)
-                            st.session_state.qa_rc += 1
-                            st.rerun()
+                            new_assign = {
+                                'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_proj_id,
+                                'date': add_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
+                                'colorName': color_choice, 'colorHex': config.BASIC_COLORS[color_choice],
+                                'notes': c_notes, 'is_cancelled': False, 'cancel_reason': "", 'recurring_id': None
+                            }
+                            new_assigns.append(new_assign)
+                            st.session_state.assignments.append(new_assign)
+                        utils.db_insert("assignments", new_assigns, track=False)
+                        st.success("Η ανάθεση ολοκληρώθηκε!")
+                        time.sleep(0.5)
+                        st.session_state.qa_rc += 1
+                        st.rerun()
 
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
@@ -593,17 +584,20 @@ if not presentation_mode:
                             if new_a['employeeId']:
                                 emp_name = utils.get_employee_name(new_a['employeeId'])
                                 if scheduling.is_on_leave(new_a['employeeId'], new_a['date'], st.session_state.leaves_by_emp):
-                                    st.toast(f"Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
-                                    has_error = True; break
-                                
-                                day_assigns = st.session_state.assignments_by_date.get(new_a['date'], [])
-                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(new_a['employeeId'], new_a['startTime'], new_a['endTime'], day_assigns, exclude_ids=target_group['AssignmentIds'])
-                                if is_conflict:
-                                    st.toast(f"Αδύνατη μετακίνηση: Διπλοκράτηση {emp_name}!", icon="⚠️")
-                                    has_error = True; break
-                                new_a['startTime'], new_a['endTime'] = adj_start, adj_end
-                                if msg == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
-                                
+                                    st.toast(f"Ο/Η {emp_name} έχει άδεια. Η βάρδια μετατράπηκε σε 'Χωρίς Προσωπικό'.", icon="⚠️")
+                                    new_a['notes'] = f"{new_a.get('notes','')} [Άδεια: {emp_name}]".strip()
+                                    new_a['employeeId'] = ""
+                                else:
+                                    day_assigns = st.session_state.assignments_by_date.get(new_a['date'], [])
+                                    adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(new_a['employeeId'], new_a['startTime'], new_a['endTime'], day_assigns, exclude_ids=target_group['AssignmentIds'])
+                                    if is_conflict:
+                                        st.toast(f"Διπλοκράτηση για τον/την {emp_name}. Η βάρδια μετατράπηκε σε 'Χωρίς Προσωπικό'.", icon="⚠️")
+                                        new_a['notes'] = f"{new_a.get('notes','')} [Εμπλοκή: {emp_name}]".strip()
+                                        new_a['employeeId'] = ""
+                                    else:
+                                        new_a['startTime'], new_a['endTime'] = adj_start, adj_end
+                                        if msg == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
+                                        
                             old_assigns.append(orig_a)
                             new_assigns.append(new_a)
                             
@@ -670,58 +664,58 @@ if not presentation_mode:
                             str_end = new_t_end.strftime("%H:%M")
                             if str_start >= str_end:
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                            elif not edit_custom_proj_name.strip() and not edit_proj:
-                                st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                             else:
                                 emps_to_process = edit_emps if edit_emps else [""]
-                                errors, valid_assignments = [], []
+                                valid_assignments = []
                                 for eid in emps_to_process:
                                     if eid:
                                         emp_name = utils.get_employee_name(eid)
                                         if scheduling.is_on_leave(eid, edit_date, st.session_state.leaves_by_emp):
-                                            errors.append(f"O/H {emp_name} βρίσκεται σε άδεια στις {edit_date.strftime('%d/%m')}.")
-                                            st.toast(f"Αδύνατη ανάθεση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
+                                            valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': f"[Άδεια: {emp_name}]", 'emp_name': emp_name})
+                                            st.toast(f"Ο/Η {emp_name} έχει άδεια. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
                                         else:
                                             day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
                                             adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns, exclude_ids=target_group['AssignmentIds'])
                                             if is_conflict:
-                                                errors.append(f"⚠️ ΔΙΠΛΟΚΡΑΤΗΣΗ: Ο/Η {emp_name} έχει ήδη άλλη βάρδια που συμπίπτει.")
-                                                st.toast(f"Προσοχή: Διπλοκράτηση για τον/την {emp_name}!", icon="⚠️")
+                                                valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': f"[Εμπλοκή: {emp_name}]", 'emp_name': emp_name})
+                                                st.toast(f"Διπλοκράτηση {emp_name}. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
                                             else:
                                                 valid_assignments.append({'eid': eid, 'start': adj_start, 'end': adj_end, 'msg': msg, 'emp_name': emp_name})
                                     else:
                                         valid_assignments.append({'eid': "", 'start': str_start, 'end': str_end, 'msg': "", 'emp_name': ""})
                                         
-                                if errors:
-                                    for err in errors: st.error(err)
-                                else:
-                                    if edit_custom_proj_name.strip():
-                                        c_name = edit_custom_proj_name.strip()
-                                        existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
-                                        if existing_p:
-                                            final_edit_proj_id = existing_p['id']
-                                        else:
-                                            final_edit_proj_id = str(uuid.uuid4())
-                                            new_p = {'id': final_edit_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[edit_color]}
-                                            st.session_state.projects.append(new_p)
-                                            utils.db_insert('projects', new_p, track=False)
+                                if edit_custom_proj_name.strip():
+                                    c_name = edit_custom_proj_name.strip()
+                                    existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                                    if existing_p:
+                                        final_edit_proj_id = existing_p['id']
                                     else:
-                                        final_edit_proj_id = edit_proj
-                                        
-                                    old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
-                                    st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
-                                    utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns, track=False)
+                                        final_edit_proj_id = str(uuid.uuid4())
+                                        new_p = {'id': final_edit_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[edit_color]}
+                                        st.session_state.projects.append(new_p)
+                                        utils.db_insert('projects', new_p, track=False)
+                                else:
+                                    final_edit_proj_id = edit_proj
                                     
-                                    new_assigns = []
-                                    for va in valid_assignments:
-                                        if va['msg'] == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
-                                        new_a = {
-                                            'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_edit_proj_id,
-                                            'date': edit_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
-                                            'colorName': edit_color, 'colorHex': config.BASIC_COLORS[edit_color], 'notes': edit_notes,
-                                            'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 'recurring_id': None
-                                        }
-                                        new_assigns.append(new_a)
-                                        st.session_state.assignments.append(new_a)
-                                    utils.db_insert('assignments', new_assigns, track=False)
-                                    st.rerun()
+                                old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
+                                st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
+                                utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns, track=False)
+                                
+                                new_assigns = []
+                                for va in valid_assignments:
+                                    if va['msg'] == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
+                                    
+                                    c_notes = edit_notes
+                                    if va['msg'] and va['msg'] != "Allowed Overlap":
+                                        c_notes = f"{edit_notes} {va['msg']}".strip()
+                                        
+                                    new_a = {
+                                        'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_edit_proj_id,
+                                        'date': edit_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
+                                        'colorName': edit_color, 'colorHex': config.BASIC_COLORS[edit_color], 'notes': c_notes,
+                                        'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 'recurring_id': None
+                                    }
+                                    new_assigns.append(new_a)
+                                    st.session_state.assignments.append(new_a)
+                                utils.db_insert('assignments', new_assigns, track=False)
+                                st.rerun()
