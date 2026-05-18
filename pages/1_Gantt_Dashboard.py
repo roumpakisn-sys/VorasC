@@ -410,7 +410,9 @@ else:
         xaxis=dict(
             side='top', tickmode='linear', tick0=datetime(1970, 1, 1, 0, 0), dtick=1800000,
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 0)], title="",
+            autorange=False, # <--- Η ΜΑΓΙΚΗ ΡΥΘΜΙΣΗ ΓΙΑ ΝΑ ΜΗΝ ΠΑΡΑΜΟΡΦΩΝΕΤΑΙ ΤΟ ΓΡΑΦΗΜΑ
+            range=[datetime(1970, 1, 1, 6, 0), datetime(1970, 1, 1, 17, 30)], # <--- ΚΛΕΙΔΩΜΕΝΟ ΑΡΧΙΚΟ ΖΟΥΜ!
+            title="",
             tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
             fixedrange=False, rangeslider=dict(visible=False)
         ),
@@ -435,7 +437,7 @@ except Exception:
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) για να δείτε τυχόν βραδινές βάρδιες. **3)** Αν χαθείτε, κάντε Διπλό Κλικ στο διάγραμμα!"
 
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
