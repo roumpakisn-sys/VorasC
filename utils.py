@@ -862,19 +862,20 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     updateClock();
     setInterval(updateClock, 1000);
 
-    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας (Σκούπα, Φαράσι, Σαπούνι, Σφουγγαρίστρα)
+    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας στα αριστερά του ρολογιού
     let loaderDiv = doc.getElementById("staff_pro_cleaner");
     if (!loaderDiv) {
         loaderDiv = doc.createElement("div");
         loaderDiv.id = "staff_pro_cleaner";
         doc.body.appendChild(loaderDiv);
-        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
+        // Τοποθέτηση στα αριστερά του ρολογιού (αυξάνοντας το right)
+        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 560px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     }
     
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
     let cIdx = 0;
     setInterval(() => {
-        loaderDiv.innerText = "Ανανέωση " + cleaningIcons[cIdx];
+        loaderDiv.innerText = "καθαρίζω... " + cleaningIcons[cIdx];
         cIdx = (cIdx + 1) % cleaningIcons.length;
     }, 400);
 
