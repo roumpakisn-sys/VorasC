@@ -175,10 +175,6 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
-# ==========================================
-# ΕΝΣΩΜΑΤΩΣΗ ΛΟΓΙΚΗΣ ΣΥΓΧΡΟΝΙΣΜΟΥ (ΑΠΟΦΥΓΗ CIRCULAR IMPORTS)
-# ==========================================
-
 def inject_silent_refresh_css():
     st.markdown(
         """
@@ -189,7 +185,7 @@ def inject_silent_refresh_css():
             display: none !important; 
         }
         
-        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" (αφαίρεση του veil effect) */
+        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" */
         [data-testid="stAppViewContainer"], 
         [data-testid="stMainBlockContainer"],
         [data-testid="stAppViewBlockContainer"],
@@ -234,100 +230,6 @@ def track_deletion(table_name, record_id):
     deletion_log = {"table_name": table_name, "record_id": str(record_id)}
     try: supabase.table("deleted_records").insert(deletion_log).execute()
     except Exception: pass
-
-def sync_data_incremental():
-    inject_silent_refresh_css()
-    if not supabase: return
-
-    last_sync = st.session_state.get("last_sync_time", None)
-    current_db_time = get_db_current_time()
-
-    if not last_sync:
-        with st.spinner("Φόρτωση δεδομένων..."):
-            st.session_state.employees = fetch_paginated("employees")
-            st.session_state.projects = fetch_paginated("projects")
-            
-            assigns = fetch_paginated("assignments")
-            for a in assigns:
-                d = safe_date_parse(a.get('date'))
-                if d: a['date'] = d
-            st.session_state.assignments = assigns
-            
-            leaves = fetch_paginated("leaves")
-            for l in leaves:
-                sd = safe_date_parse(l.get('startDate'))
-                if sd: l['startDate'] = sd
-                ed = safe_date_parse(l.get('endDate'))
-                if ed: l['endDate'] = ed
-            st.session_state.leaves = leaves
-            
-            patterns = fetch_paginated("recurring_patterns")
-            for p in patterns:
-                sd = safe_date_parse(p.get('startDate'))
-                if sd: p['startDate'] = sd
-            st.session_state.recurring_patterns = patterns
-            
-            try: st.session_state.evaluations = fetch_paginated("evaluations")
-            except Exception: st.session_state.evaluations = []
-                
-            st.session_state.last_sync_time = current_db_time
-            mark_data_changed()
-            return
-
-    try:
-        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
-        if res_logs.data:
-            latest_ts = to_timestamp(res_logs.data[0]['timestamp'])
-            sync_ts = to_timestamp(last_sync)
-            if (latest_ts + 30.0) <= sync_ts: return
-
-        deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
-        deletions = deleted_res.data or []
-        
-        deleted_by_table = {}
-        for d in deletions:
-            t = d['table_name']
-            if t not in deleted_by_table: deleted_by_table[t] = []
-            deleted_by_table[t].append(str(d['record_id']))
-
-        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
-        changes_detected = False
-
-        for table in tables_to_sync:
-            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
-            delta_records = delta_res.data or []
-            table_deleted_ids = deleted_by_table.get(table, [])
-            
-            if delta_records or table_deleted_ids:
-                changes_detected = True
-                if table == "assignments":
-                    for r in delta_records:
-                        d = safe_date_parse(r.get('date'))
-                        if d: r['date'] = d
-                elif table == "leaves":
-                    for r in delta_records:
-                        sd = safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
-                        ed = safe_date_parse(r.get('endDate'))
-                        if ed: r['endDate'] = ed
-                elif table == "recurring_patterns":
-                    for r in delta_records:
-                        sd = safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
-
-                st.session_state[table] = apply_delta_updates(
-                    table, st.session_state.get(table, []), delta_records, table_deleted_ids
-                )
-
-        if changes_detected: mark_data_changed()
-        st.session_state.last_sync_time = current_db_time
-
-    except Exception as e:
-        print(f"Incremental Sync Error: {e}")
-
-# ==========================================
-# ΣΥΝΕΧΕΙΑ ΛΕΙΤΟΥΡΓΙΩΝ ΒΑΣΗΣ
-# ==========================================
 
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
@@ -616,7 +518,6 @@ def auto_extend_recurring_patterns():
         db_insert_bulk_background('assignments', new_assignments_batch, "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ", f"Επεκτάθηκαν {len(new_assignments_batch)} βάρδιες στο παρασκήνιο")
 
 def cleanup_duplicates():
-    """Ο Σιωπηλός Καθαριστής: Εξολοθρεύει τα 'Φαντάσματα' με 100% ασφάλεια τύπων (TypeError Proof)."""
     if not st.session_state.get('assignments'): return
     
     seen_signatures = set()
@@ -654,7 +555,6 @@ def cleanup_duplicates():
                         for rec_id in chunk:
                             track_deletion('assignments', rec_id)
                     except: pass
-                
                 try:
                     now_utc = datetime.utcnow().isoformat() + "Z"
                     log_entry = {
@@ -670,7 +570,6 @@ def cleanup_duplicates():
             threading.Thread(target=delete_ghosts, daemon=True).start()
 
 def cleanup_projects():
-    """Συγχωνεύει τα διπλά έργα με 100% προστασία από None (AttributeError Proof)."""
     if not st.session_state.get('projects'): return
     
     name_map = {}
@@ -735,7 +634,6 @@ def cleanup_projects():
                         for rec_id in chunk:
                             track_deletion('projects', rec_id)
                     except: pass
-                
                 try:
                     now_utc = datetime.utcnow().isoformat() + "Z"
                     log_entry = {
@@ -752,6 +650,14 @@ def cleanup_projects():
 
 def init_data_and_sync():
     init_undo_stack()
+    
+    # --- ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ΠΑΝΤΟΥ (Prevent AttributeError on Refresh) ---
+    if "employees" not in st.session_state: st.session_state.employees = []
+    if "projects" not in st.session_state: st.session_state.projects = []
+    if "assignments" not in st.session_state: st.session_state.assignments = []
+    if "leaves" not in st.session_state: st.session_state.leaves = []
+    if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
+    if "evaluations" not in st.session_state: st.session_state.evaluations = []
     
     try:
         import database
@@ -846,14 +752,12 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     <script>
     const doc = window.parent.document;
     
-    // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
         clockDiv.id = "staff_pro_clock";
         doc.body.appendChild(clockDiv);
     }
-    // Εφαρμόζουμε το στυλ ΠΑΝΤΑ για να "πιάνει" τις αλλαγές θέσης
     clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
     
     function updateClock() {
@@ -864,14 +768,12 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     updateClock();
     setInterval(updateClock, 1000);
 
-    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας στα αριστερά του ρολογιού
     let loaderDiv = doc.getElementById("staff_pro_cleaner");
     if (!loaderDiv) {
         loaderDiv = doc.createElement("div");
         loaderDiv.id = "staff_pro_cleaner";
         doc.body.appendChild(loaderDiv);
     }
-    // Τοποθέτηση στα αριστερά του ρολογιού (επιβάλλεται πάντα η νέα θέση - 680px)
     loaderDiv.style.cssText = "position: fixed; top: 12px; right: 680px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
@@ -881,7 +783,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         cIdx = (cIdx + 1) % cleaningIcons.length;
     }, 400);
 
-    // Εντοπισμός λειτουργίας Streamlit και εμφάνιση εικονιδίων
     setInterval(() => {
         const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
         if (isRunning) {
