@@ -408,7 +408,7 @@ else:
     )
     fig.update_layout(
         bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='rgba(0,0,0,0)',
-        height=dyn_h, margin=dict(l=0, r=0, t=50, b=10), # Μείωση του l & r margin για επέκταση στα άκρα
+        height=dyn_h, margin=dict(l=0, r=0, t=50, b=10),
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
@@ -429,19 +429,28 @@ clicked_key = None
 # --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
 st.markdown("""
 <style>
-/* Το κεντρικό κουτί που περικλείει το γράφημα (έντονο border και σκιές) */
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) {
-    border: 3px solid #64748b !important; 
+/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο */
+[data-testid="block-container"] {
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    max-width: 98% !important; /* Να πιάνει σχεδόν όλη την οθόνη */
+}
+
+/* 2. Δυναμικό CSS που εφαρμόζεται κατευθείαν στο container του διαγράμματος */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 3px solid #334155 !important; /* Παχιά, σκούρα μπλε/γκρι γραμμή */
     border-radius: 12px !important;
     background-color: #ffffff !important;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.05) !important;
-    margin-left: -15px !important; /* Επέκταση προς τα αριστερά */
-    margin-right: -10px !important; /* Ελαφριά επέκταση δεξιά */
+    box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.3) !important; /* Πολύ πιο έντονη 3D σκιά */
+    margin-left: -40px !important; /* Δυνατό τράβηγμα προς τα αριστερά */
+    margin-right: -20px !important; /* Τράβηγμα προς τα δεξιά */
+    padding: 0 !important;
 }
-/* Μείωση του εσωτερικού κενού για να απλώσει κι άλλο το γράφημα */
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) > div {
-    padding-left: 0.2rem !important;
-    padding-right: 0.2rem !important;
+
+/* Αφαίρεση περιθωρίων από το ίδιο το γράφημα για να μην αφήνει κενά */
+.stPlotlyChart {
+    margin: 0 !important;
+    padding: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
