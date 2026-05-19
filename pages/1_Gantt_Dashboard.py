@@ -157,6 +157,16 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     margin: 0 !important;
     padding: 0 !important;
 }
+
+/* 4. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ (ΑΛΛΑ ΔΙΑΤΗΡΗΣΗ ΤΟΥ "RUNNING...") */
+[data-testid="stAppViewContainer"], 
+[data-testid="stMainBlockContainer"],
+[data-testid="stAppViewBlockContainer"],
+.stApp, .stApp > div {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
