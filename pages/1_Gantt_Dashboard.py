@@ -71,32 +71,23 @@ def go_to_today():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
 
-st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
+# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ ---
+st.markdown("<h3 style='margin-top: -30px; margin-bottom: 10px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
 
-col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
-with col_nav1:
-    st.write("")
-    st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
+col_date, col_nav1, col_nav2, col_today, col_zoom, col_pres = st.columns([1.5, 0.8, 0.8, 0.8, 1.5, 1.5])
 with col_date:
-    selected_date = st.date_input(
-        "Επιλογή Εβδομάδας", 
-        value=st.session_state.view_week_date,
-        key="date_picker", 
-        on_change=sync_from_widget
-    )
+    selected_date = st.date_input("Εβδομάδα", value=st.session_state.view_week_date, key="date_picker", on_change=sync_from_widget, label_visibility="collapsed")
     start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
+with col_nav1:
+    st.button("⬅️ Πριν", on_click=go_prev_week, use_container_width=True)
 with col_nav2:
-    st.write("")
-    st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
+    st.button("Μετά ➡️", on_click=go_next_week, use_container_width=True)
 with col_today:
-    st.write("")
     st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 with col_zoom:
-    zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
+    zoom_level = st.slider("Ζουμ", min_value=50, max_value=200, value=100, step=5, label_visibility="collapsed")
 with col_pres:
-    st.write("")
-    st.write("")
-    presentation_mode = st.checkbox("📺 Λειτουργία Πλήρους Προβολής")
+    presentation_mode = st.checkbox("📺 Πλήρης Προβολή")
 
 zoom_factor = zoom_level / 100.0
 
@@ -135,14 +126,22 @@ clicked_key = None
 # --- ΑΠΟΛΥΤΟ ΚΑΙ ΕΠΙΘΕΤΙΚΟ STYLING ΓΙΑ ΤΟ CONTAINER ΚΑΙ ΤΟ ΓΚΡΙΖΑΡΙΣΜΑ ---
 st.markdown("""
 <style>
-/* 1. Απλώνουμε την οθόνη του Streamlit στο 96% για να αφήσουμε λίγο κενό δεξιά-αριστερά */
+/* 1. Απλώνουμε την οθόνη του Streamlit στο 98% για να αφήσουμε ελάχιστο κενό δεξιά-αριστερά και μειώνουμε τα κάθετα κενά! */
 .block-container, [data-testid="block-container"] {
-    max-width: 96% !important; 
+    max-width: 98% !important; 
+    padding-top: 1.5rem !important;
+    padding-bottom: 1rem !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
 
-/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit για να μην φαίνονται "διπλά" κουτιά */
+/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες) */
+.stAlert {
+    padding: 0.5rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     border: none !important;
     box-shadow: none !important;
@@ -178,7 +177,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 """, unsafe_allow_html=True)
 
 # Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit
-# ΕΠΑΝΑΦΕΡΑΜΕ ΤΟ "height=650" ΓΙΑ ΝΑ ΕΝΕΡΓΟΠΟΙΗΘΕΙ Η ΕΣΩΤΕΡΙΚΗ ΚΥΛΙΣΗ
+# Έχει προκαθορισμένο ύψος για να ενεργοποιείται το scrolling ΜΕΣΑ στο κουτί.
 with st.container(height=650):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
@@ -193,6 +192,71 @@ with st.container(height=650):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
+# --- JAVASCRIPT: STICKY HEADER ΓΙΑ ΤΙΣ ΩΡΕΣ ---
+st.components.v1.html("""
+<script>
+const doc = window.parent.document;
+
+const setupGanttContainer = () => {
+    const charts = doc.querySelectorAll('.stPlotlyChart');
+    charts.forEach(chart => {
+        const wrapper = chart.closest('div[data-testid="stVerticalBlockBorderWrapper"]') || chart.closest('div[data-testid="stContainer"]');
+        
+        if (wrapper && wrapper.dataset.styledByScript !== "true") {
+            wrapper.dataset.styledByScript = "true";
+            
+            // Το scrollDiv είναι το στοιχείο που ελέγχει την κύλιση (scroll)
+            const scrollDiv = wrapper.children[0]; 
+            if (scrollDiv && !scrollDiv.dataset.grabScrollAttached) {
+                scrollDiv.dataset.grabScrollAttached = "true";
+                
+                // --- ΛΟΓΙΚΗ: STICKY X-AXIS (Ώρες στην κορυφή) κατά το scroll ---
+                scrollDiv.addEventListener('scroll', () => {
+                    try {
+                        const iframe = scrollDiv.querySelector('iframe');
+                        const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : scrollDiv;
+                        
+                        // Βρίσκουμε το layer του άξονα Χ (ώρες)
+                        const xAxis = plotDoc.querySelector('.xaxislayer-above');
+                        if (xAxis) {
+                            // Δημιουργία λευκού φόντου κάτω από τις ώρες για να κρύβει τις γραμμές που κυλούν από κάτω
+                            if (!xAxis.querySelector('.sticky-bg')) {
+                                const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                                bg.setAttribute('class', 'sticky-bg');
+                                bg.setAttribute('width', '5000');
+                                bg.setAttribute('height', '50');
+                                bg.setAttribute('x', '-2000');
+                                bg.setAttribute('y', '-20');
+                                bg.setAttribute('fill', '#ffffff');
+                                xAxis.insertBefore(bg, xAxis.firstChild);
+                                
+                                // Προσθήκη μιας οριζόντιας γραμμής για καθαρό διαχωρισμό (Border bottom)
+                                const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                                line.setAttribute('class', 'sticky-line');
+                                line.setAttribute('x1', '-2000');
+                                line.setAttribute('x2', '3000');
+                                line.setAttribute('y1', '25');
+                                line.setAttribute('y2', '25');
+                                line.setAttribute('stroke', '#1e293b');
+                                line.setAttribute('stroke-width', '2');
+                                xAxis.appendChild(line);
+                            }
+                            // Μετακινεί τον άξονα Χ κατακόρυφα ώστε να παραμένει στην κορυφή. 
+                            // Η οριζόντια μετακίνηση (drag) γίνεται κανονικά από το ίδιο το Plotly!
+                            xAxis.style.transform = `translateY(${scrollDiv.scrollTop}px)`;
+                        }
+                    } catch (err) {}
+                });
+            }
+        }
+    });
+};
+
+// Εκτέλεση άμεσα και επαναληπτικά κάθε 500ms για να πιάνει τα refreshes
+setupGanttContainer();
+setInterval(setupGanttContainer, 500);
+</script>
+""", height=0, width=0)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
@@ -240,7 +304,7 @@ if not presentation_mode:
                 with c_color: 
                     color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
                 with c_notes: 
-                    add_notes = st.text_input("Παρατηρηση (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                     
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
