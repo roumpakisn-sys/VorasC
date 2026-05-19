@@ -283,19 +283,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
             bg_color = g['ColorHex']
             
-            # --- ΣΗΜΑΝΤΙΚΟ: ΑΣΦΑΛΗΣ ΠΛΟΗΓΗΣΗ ΓΙΑ ΚΛΙΚ ---
-            # Κωδικοποιούμε το URL για να μην κόβεται από το σύμβολο '#' του χρώματος
-            safe_key = urllib.parse.quote(g['Key'])
-            
+            # --- Η ΜΑΓΕΙΑ ΤΟΥ ΚΛΙΚ: Αποστολή postMessage στο Γονικό Παράθυρο (Streamlit) ---
+            safe_key = g['Key'].replace("'", "\\'")
             html.append(f"""
-            <a href="?edit_key={safe_key}" target="_parent" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
+            <a href="javascript:void(0);" onclick="window.parent.postMessage({{type: 'set_edit_key', key: '{safe_key}'}}, '*');" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
                 <div class="mygantt-bar-text">{base_text}</div>
             </a>
             """)
 
         html.append('</div></div>')
 
-    # Το JavaScript script αναλαμβάνει 2 πράγματα:
+    # Το JavaScript script αναλαμβάνει:
     # 1. Το Drag and scroll (δεξιά - αριστερά)
     # 2. Κάνει αυτόματα scroll στο 06:00 (που είναι 2 ώρες μετά τις 04:00 -> 2/20 = 10% του πλάτους)
     html.append("""
@@ -326,6 +324,13 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 # --- ΕΜΦΑΝΙΣΗ ΜΕΣΩ IFRAME ΓΙΑ ΑΣΦΑΛΕΙΑ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 st.components.v1.html(html_chart, height=660, scrolling=False)
+
+
+# --- Ο ΑΟΡΑΤΟΣ "ΑΚΡΟΑΤΗΣ" (LISTENER) ΓΙΑ ΤΑ ΚΛΙΚ ΣΤΟ ΚΥΡΙΩΣ STREAMLIT DOM ---
+# Όταν η HTML Μπάρα (παραπάνω) στέλνει postMessage, αυτός ο κώδικας το πιάνει,
+# ενημερώνει δυναμικά το URL του Streamlit και κάνει αυτόματο reload της σελίδας!
+click_js = "if(!window.ganttClk){window.ganttClk=true;window.addEventListener('message',e=>{if(e.data&&e.data.type==='set_edit_key'){let u=new URL(window.location.href);u.searchParams.set('edit_key',e.data.key);window.history.pushState({},'',u);window.location.reload();}})}"
+st.markdown(f'<img src="dummy.png" style="display:none;" onerror="{click_js}">', unsafe_allow_html=True)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
