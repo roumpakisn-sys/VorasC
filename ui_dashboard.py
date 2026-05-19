@@ -6,28 +6,22 @@ import config
 import utils
 import uuid
 
-# --- ΝΕΟΣ ΜΗΧΑΝΙΣΜΟΣ: Κλειδώνει την αλλαγή ημερομηνίας ---
-def update_week_from_picker():
-    st.session_state.view_week_date = st.session_state.week_date_picker
-
 def render_top_nav(go_prev_week, go_next_week, go_to_today):
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
     with col_nav1:
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        # Απόλυτος συγχρονισμός: Αν η 'κεντρική' εβδομάδα άλλαξε (π.χ. από τα κουμπιά Προηγούμενη/Επόμενη),
-        # ενημερώνουμε το widget του ημερολογίου ΠΡΙΝ αυτό ζωγραφιστεί στην οθόνη.
-        if st.session_state.get("week_date_picker") != st.session_state.view_week_date:
-            st.session_state.week_date_picker = st.session_state.view_week_date
-            
+        # --- ΑΠΛΟΠΟΙΗΜΕΝΟΣ & ΑΛΕΞΙΣΦΑΙΡΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ---
+        # Χρησιμοποιούμε απευθείας το "view_week_date" ως key. Έτσι το Streamlit
+        # το διαχειρίζεται αυτόματα, αποτρέποντας τα reset σε κάθε εσωτερικό rerun 
+        # (είτε από auto-refresh, είτε από υποβολή φόρμας)!
         selected_date = st.date_input(
             "Επιλογή Εβδομάδας", 
-            key="week_date_picker",
-            on_change=update_week_from_picker
+            key="view_week_date"
         )
         
-        start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
+        start_of_week = selected_date - timedelta(days=selected_date.weekday())
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
