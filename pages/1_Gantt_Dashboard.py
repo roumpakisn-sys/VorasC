@@ -48,29 +48,18 @@ is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Απόλυτα Αλεξίσφαιρος) ---
-# Η view_week_date είναι η ΜΟΝΙΜΗ μνήμη που δεν διαγράφεται από το Streamlit
-if "view_week_date" not in st.session_state:
-    st.session_state.view_week_date = get_local_today()
+# Φτιάχνουμε μια μεταβλητή "εκτός" ελέγχου Streamlit Widgets (χωρίς key)
+if "gantt_active_date" not in st.session_state:
+    st.session_state.gantt_active_date = get_local_today()
 
-# Συγχρονίζει τη μόνιμη μνήμη με ό,τι επιλέγει ο χρήστης στο ημερολόγιο
-def sync_from_widget():
-    st.session_state.view_week_date = st.session_state.date_picker
-
-# ΣΗΜΑΝΤΙΚΟ: Τα callbacks ενημερώνουν ΚΑΙ τη μόνιμη μνήμη ΚΑΙ το widget!
 def go_prev_week():
-    new_date = st.session_state.view_week_date - timedelta(days=7)
-    st.session_state.view_week_date = new_date
-    st.session_state.date_picker = new_date
+    st.session_state.gantt_active_date -= timedelta(days=7)
 
 def go_next_week():
-    new_date = st.session_state.view_week_date + timedelta(days=7)
-    st.session_state.view_week_date = new_date
-    st.session_state.date_picker = new_date
+    st.session_state.gantt_active_date += timedelta(days=7)
 
 def go_to_today():
-    new_date = get_local_today()
-    st.session_state.view_week_date = new_date
-    st.session_state.date_picker = new_date
+    st.session_state.gantt_active_date = get_local_today()
 
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
 
@@ -79,14 +68,19 @@ with col_nav1:
     st.write("")
     st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
 with col_date:
-    # Το ημερολόγιο παίρνει "value" από τη μόνιμη μνήμη. Έτσι επιβιώνει από κάθε rerun ή αλλαγή σελίδας!
+    # Καταργούμε το key. Χρησιμοποιούμε μόνο το value.
+    # Αυτό λύνει οριστικά το πρόβλημα του "μηδενισμού" της εβδομάδας!
     selected_date = st.date_input(
         "Επιλογή Εβδομάδας", 
-        value=st.session_state.view_week_date,
-        key="date_picker", 
-        on_change=sync_from_widget
+        value=st.session_state.gantt_active_date
     )
-    start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
+    
+    # Χειροκίνητος συγχρονισμός: Αν ο χρήστης αλλάξει μέρα από το ημερολόγιο
+    if selected_date != st.session_state.gantt_active_date:
+        st.session_state.gantt_active_date = selected_date
+        st.rerun()
+        
+    start_of_week = st.session_state.gantt_active_date - timedelta(days=st.session_state.gantt_active_date.weekday())
 with col_nav2:
     st.write("")
     st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -516,7 +510,7 @@ if not presentation_mode:
             with st.form("quick_add", clear_on_submit=True):
                 c_date, c_dur = st.columns(2)
                 with c_date:
-                    add_date = st.date_input("Ημερομηνία", value=st.session_state.view_week_date, key=f"qa_date_{qa_rc}")
+                    add_date = st.date_input("Ημερομηνία", value=st.session_state.gantt_active_date, key=f"qa_date_{qa_rc}")
                 with c_dur:
                     duration_days = st.number_input("Διάρκεια (Συνεχόμενες Ημέρες)", min_value=1, max_value=365, value=1, step=1, key=f"qa_dur_{qa_rc}")
                     
