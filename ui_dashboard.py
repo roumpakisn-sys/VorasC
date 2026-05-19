@@ -52,7 +52,12 @@ def render_quick_add_form(selected_date, active_employee_ids):
     qa_rc = st.session_state.qa_rc
     
     with st.form("quick_add", clear_on_submit=True):
-        add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
+        c_date, c_dur = st.columns(2)
+        with c_date:
+            add_date = st.date_input("Ημερομηνία", value=selected_date, key=f"qa_date_{qa_rc}")
+        with c_dur:
+            duration_days = st.number_input("Διάρκεια (Συνεχόμενες Ημέρες)", min_value=1, max_value=365, value=1, step=1, key=f"qa_dur_{qa_rc}")
+            
         proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], format_func=utils.get_project_name, key=f"qa_proj_{qa_rc}")
         custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
         emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids, format_func=utils.get_employee_name, key=f"qa_emps_{qa_rc}")
@@ -70,7 +75,7 @@ def render_quick_add_form(selected_date, active_employee_ids):
         
         if st.form_submit_button("Καταχώρηση"):
             return {
-                "add_date": add_date, "proj_choice": proj_choice, "custom_proj_name": custom_proj_name,
+                "add_date": add_date, "duration_days": duration_days, "proj_choice": proj_choice, "custom_proj_name": custom_proj_name,
                 "emp_choices": emp_choices, "color_choice": color_choice, "add_notes": add_notes,
                 "use_arr": use_arr, "t_arrival": t_arrival, "t_start": t_start, "t_end": t_end
             }
