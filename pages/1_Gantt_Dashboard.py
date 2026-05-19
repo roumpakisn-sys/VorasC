@@ -429,22 +429,14 @@ clicked_key = None
 # --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
 st.markdown("""
 <style>
-/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο τραβώντας τον στα αριστερά */
-[data-testid="block-container"] {
+/* Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο τραβώντας τον στα αριστερά */
+.block-container, [data-testid="block-container"] {
     padding-left: 1rem !important;
     padding-right: 1rem !important;
-    max-width: 100% !important; 
+    max-width: 99% !important; 
 }
 
-/* 2. Στοχεύουμε ΟΛΑ τα container με border στη σελίδα για να είμαστε 100% σίγουροι */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 4px solid #1e293b !important; /* Έντονο, σκούρο περίγραμμα */
-    border-radius: 12px !important;
-    background-color: #ffffff !important;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important; /* Ξεκάθαρη και δυνατή εξωτερική σκιά */
-}
-
-/* Μειώνουμε τα κενά μέσα στο γράφημα για να απλώσει καλύτερα */
+/* Αφαίρεση περιθωρίων από το ίδιο το γράφημα για να μην αφήνει κενά */
 .stPlotlyChart {
     margin: 0 !important;
     padding: 0 !important;
@@ -466,43 +458,58 @@ with st.container(height=650, border=True):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# Javascript για κάθετο scroll
+# Javascript για δυναμικό Styling και κάθετο scroll
 st.components.v1.html("""
 <script>
 const doc = window.parent.document;
-const wrappers = doc.querySelectorAll('div[data-testid="stVerticalBlockBorderWrapper"]');
 
-wrappers.forEach(wrapper => {
-    if (wrapper.querySelector('.stPlotlyChart')) {
-        const scrollDiv = wrapper.children[0]; 
+const setupGanttContainer = () => {
+    const charts = doc.querySelectorAll('.stPlotlyChart');
+    charts.forEach(chart => {
+        // Βρίσκουμε το γονικό στοιχείο (το container wrapper του Streamlit)
+        const wrapper = chart.closest('div[data-testid="stVerticalBlockBorderWrapper"]') || chart.closest('div[data-testid="stContainer"]');
         
-        if (scrollDiv.dataset.grabScrollAttached) return;
-        scrollDiv.dataset.grabScrollAttached = "true";
-        
-        let isDown = false;
-        let startY;
-        let scrollTop;
-        
-        scrollDiv.addEventListener('mousedown', (e) => {
-            isDown = true;
-            startY = e.pageY - scrollDiv.offsetTop;
-            scrollTop = scrollDiv.scrollTop;
-        }, {capture: true});
-        
-        doc.addEventListener('mouseup', () => {
-            isDown = false;
-        }, {capture: true});
-        
-        doc.addEventListener('mousemove', (e) => {
-            if (!isDown) return;
-            const y = e.pageY - scrollDiv.offsetTop;
-            const walk = (startY - y) * 1.5; 
-            if (Math.abs(walk) > 2) {
-                scrollDiv.scrollTop = scrollTop + walk;
+        if (wrapper && wrapper.dataset.styledByScript !== "true") {
+            // Βάζουμε flag για να μην εκτελείται συνεχώς η αλλαγή
+            wrapper.dataset.styledByScript = "true";
+            
+            // Δυναμική επιβολή στυλ με !important για να παρακάμψουμε κάθε ενσωματωμένο στυλ του Streamlit
+            let currentStyle = wrapper.getAttribute("style") || "";
+            wrapper.setAttribute("style", currentStyle + " border: 4px solid #1e293b !important; border-radius: 12px !important; box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.4) !important; margin-left: -35px !important; margin-right: -10px !important; background-color: #ffffff !important;");
+            
+            // Εφαρμογή λογικής Drag to Scroll
+            const scrollDiv = wrapper.children[0]; 
+            if (scrollDiv && !scrollDiv.dataset.grabScrollAttached) {
+                scrollDiv.dataset.grabScrollAttached = "true";
+                
+                let isDown = false;
+                let startY;
+                let scrollTop;
+                
+                scrollDiv.addEventListener('mousedown', (e) => {
+                    isDown = true;
+                    startY = e.pageY - scrollDiv.offsetTop;
+                    scrollTop = scrollDiv.scrollTop;
+                }, {capture: true});
+                
+                doc.addEventListener('mouseup', () => { isDown = false; }, {capture: true});
+                
+                doc.addEventListener('mousemove', (e) => {
+                    if (!isDown) return;
+                    const y = e.pageY - scrollDiv.offsetTop;
+                    const walk = (startY - y) * 1.5; 
+                    if (Math.abs(walk) > 2) {
+                        scrollDiv.scrollTop = scrollTop + walk;
+                    }
+                }, {capture: true});
             }
-        }, {capture: true});
-    }
-});
+        }
+    });
+};
+
+// Εκτέλεση άμεσα και επαναληπτικά κάθε 500ms για να πιάνει τα refreshes
+setupGanttContainer();
+setInterval(setupGanttContainer, 500);
 </script>
 """, height=0, width=0)
 
