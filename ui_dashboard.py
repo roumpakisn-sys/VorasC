@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import config
 import utils
 import uuid
+import re
 
 def render_top_nav(go_prev_week, go_next_week, go_to_today):
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
@@ -137,6 +138,17 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
             
             valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
+            
+            for note in target_group.get('Notes_List', []):
+                matches = re.findall(r'\[(?:Άδεια|Εμπλοκή):\s*(.*?)\]', note)
+                for match in matches:
+                    name_to_find = match.strip()
+                    for emp in st.session_state.employees:
+                        if emp['name'].strip() == name_to_find:
+                            if emp['id'] not in valid_emp_ids:
+                                valid_emp_ids.append(emp['id'])
+                            break
+
             edit_options = list(set(active_employee_ids + valid_emp_ids))
             edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options, default=valid_emp_ids, format_func=utils.get_employee_name)
             
@@ -145,7 +157,9 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
                 default_color_idx = list(config.BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in config.BASIC_COLORS else 0
                 edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(config.BASIC_COLORS.keys()), index=default_color_idx)
             with e_notes_col:
-                edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'])
+                clean_note = re.sub(r'\[(?:Άδεια|Εμπλοκή):.*?\]', '', target_group.get('Notes', ''))
+                clean_note = re.sub(r'\s*\|\s*', ' ', clean_note).strip()
+                edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=clean_note)
                 
             e_arr, e_start, e_end = st.columns(3)
             existing_arr = target_group.get('ArrivalTime', '')
