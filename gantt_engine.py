@@ -91,7 +91,7 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
             if not is_busy_after_10:
                 available_ext_crew.append(emp_short_names.get(eid, emp['name']))
 
-        y_label_parts = [f"<b>{day_str}</b>"]
+        y_label_parts = [f"<b>🗓️ {day_str}</b>"]
         
         if leaves_today:
             leaves_str = ", ".join(leaves_today)
@@ -291,20 +291,22 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         if day_idxs:
             mn, mx = min(day_idxs), max(day_idxs)
             if di % 2 != 0:
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="rgba(0,0,0,0.05)", opacity=1, layer="below", line_width=0)
+                # Επέκταση της σκίασης φόντου προς τα αριστερά (x0=-0.4) για να περικλείει τις άδειες/ονόματα!
+                fig.add_shape(type="rect", x0=-0.4, x1=1, xref="paper", y0=mn-0.5, y1=mx+0.5, yref="y", fillcolor="rgba(0,0,0,0.05)", layer="below", line_width=0)
             if (start_of_week + timedelta(days=di)) == get_local_today():
-                fig.add_hrect(y0=mn-0.5, y1=mx+0.5, fillcolor="#4f46e5", opacity=0.15, layer="below", line_width=2, line_color="#4f46e5")
+                # Επέκταση της σκίασης "Σήμερα"
+                fig.add_shape(type="rect", x0=-0.4, x1=1, xref="paper", y0=mn-0.5, y1=mx+0.5, yref="y", fillcolor="#4f46e5", opacity=0.15, layer="below", line_width=2, line_color="#4f46e5")
                 
     for idx in range(len(ordered_categories) - 1):
         if ordered_categories[idx].split('_')[1] != ordered_categories[idx+1].split('_')[1]:
-            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#000000", width=4))
+            # Επέκταση των διαχωριστικών γραμμών προς τα αριστερά για σαφή οπτικό διαχωρισμό
+            fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=idx+0.5, y1=idx+0.5, yref="y", line=dict(color="#1e293b", width=3))
+
+    # Προσθήκη γραμμής στο πάνω και κάτω όριο του γραφήματος για να "κλείνουν" όλα τα κουτιά ημερών
+    fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=-0.5, y1=-0.5, yref="y", line=dict(color="#1e293b", width=3))
+    fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=len(ordered_categories)-0.5, y1=len(ordered_categories)-0.5, yref="y", line=dict(color="#1e293b", width=3))
             
     row_h = 50 * zoom_factor
-    margin_top = 50
-    margin_bottom = 10
-    
-    dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
-    dyn_h = max(250, dyn_h)
     
     y_range = [-0.5, len(ordered_categories) - 0.5]
             
