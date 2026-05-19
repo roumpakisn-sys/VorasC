@@ -14,7 +14,7 @@ utils.init_data_and_sync()
 utils.setup_shared_ui(show_menu=False)
 
 # --- VIEW: VIBER EXPORT ---
-st.title("📱 Ημερήσιο Πρόγραμμα (Viber & AI)")
+st.title("📱 Ημερήσιο Πρόγραμμα (Viber)")
 st.write("Δημιουργήστε το πρόγραμμα της ημέρας έτοιμο για αποστολή στο Viber.")
 
 target_date = st.date_input("Επιλέξτε Ημερομηνία", value=date.today())
@@ -67,28 +67,8 @@ if day_leaves:
             viber_msg += f"🔸 {emp_name} (Αντικαταστάτης: {sub})\n"
         else:
             viber_msg += f"🔸 {emp_name}\n"
-            
-# 3. Χτίσιμο Αιτήματος (Prompt) για το AI
-ai_prompt = f"Φτιάξε ένα όμορφο, φιλικό και επαγγελματικό μήνυμα για το Viber, με το ημερήσιο πρόγραμμα εργασιών για τις {target_date.strftime('%d/%m/%Y')}. Χρησιμοποίησε emojis. Βάλε τις εργασίες με χρονολογική σειρά.\n\nΔεδομένα εργασιών:\n"
-for (start, end, proj, arr, notes), emps in groups.items():
-    emp_str = ", ".join(emps) if emps else "Κανένας"
-    ai_prompt += f"- Ώρα: {start}-{end}, Έργο: {proj}, Άτομα: {emp_str}"
-    if arr: ai_prompt += f", Προσέλευση: {arr}"
-    if notes: ai_prompt += f", Σημειώσεις: {notes}"
-    ai_prompt += "\n"
-if day_leaves:
-    ai_prompt += "\nΆδειες:\n"
-    for l in day_leaves:
-        ai_prompt += f"- {utils.get_employee_name(l['employeeId'])}\n"
 
-# Εμφάνιση Καρτελών
-tab_auto, tab_ai = st.tabs(["🚀 Αυτόματο Μήνυμα (Γρήγορο)", "🤖 Δημιουργία με AI (ChatGPT)"])
-
-with tab_auto:
-    st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και είναι έτοιμο για αντιγραφή. Κάντε κλικ στο εικονίδιο αντιγραφής επάνω δεξιά στο πλαίσιο.")
-    st.code(viber_msg, language="markdown")
-    
-with tab_ai:
-    st.subheader("📝 Χειροκίνητη Αντιγραφή (Prompt)")
-    st.info("Αν προτιμάτε να χρησιμοποιήσετε το **δικό σας ChatGPT** για ένα πιο προσαρμοσμένο κείμενο, αντιγράψτε το παρακάτω κείμενο (με το εικονίδιο επάνω δεξιά) και κάντε το επικόλληση εκεί.")
-    st.code(ai_prompt, language="text")
+# Εμφάνιση Αποτελέσματος
+st.subheader("🚀 Αυτόματο Μήνυμα (Γρήγορο)")
+st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και είναι έτοιμο για αντιγραφή. Κάντε κλικ στο εικονίδιο αντιγραφής επάνω δεξιά στο πλαίσιο.")
+st.code(viber_msg, language="markdown")
