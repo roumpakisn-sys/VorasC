@@ -110,8 +110,8 @@ current_gantt_params = {
 
 # --- ΚΛΗΣΗ ΤΟΥ GANTT CHART ΜΕΣΩ ΤΟΥ ΝΕΟΥ ENGINE ---
 @st.cache_data(show_spinner=False, max_entries=5)
-def get_cached_gantt(start_of_week, zoom_factor, presentation_mode, data_version, assignments_by_date, leaves, employees, projects, emp_map, proj_map):
-    return gantt_engine.generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_version, assignments_by_date, leaves, employees, projects, emp_map, proj_map)
+def get_cached_gantt(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map):
+    return gantt_engine.generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map)
 
 if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state and not st.session_state.get('data_dirty', False):
     fig = st.session_state.cached_fig
