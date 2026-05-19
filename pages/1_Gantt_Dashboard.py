@@ -205,7 +205,7 @@ else:
                 arrival_time = a.get('arrivalTime', "")
                 if arrival_time: arrival_time = arrival_time[:5]
                 
-                # Αφαιρέθηκε το `notes` από το κλειδί ομαδοποίησης για να ενώνονται όλες οι εγγραφές της βάρδιας (ακόμα και οι άδειες)
+                # Αφαιρέθηκε το `notes` από το κλειδί ομαδοποίησης
                 key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{is_canc}_{c_reason}_{arrival_time}"
                 if key not in groups:
                     legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
@@ -216,7 +216,7 @@ else:
                         'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
                         'Employees': [], 'EmployeeIds': [], 'AssignmentIds': [], 'ColorHex': c_hex, 'ColorName': c_name,
                         'Notes_List': [], 'is_cancelled': is_canc, 'cancel_reason': c_reason, 'LegendGroup': legend_val,
-                        'RecurringId': a.get('recurring_id') # ΣΗΜΑΝΤΙΚΟ: Αποθηκεύουμε τον κωδικό του μοτίβου (αν υπάρχει)
+                        'RecurringId': a.get('recurring_id') 
                     }
                 
                 if notes and notes not in groups[key]['Notes_List']:
@@ -408,7 +408,7 @@ else:
     )
     fig.update_layout(
         bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='rgba(0,0,0,0)',
-        height=dyn_h, margin=dict(l=10, r=10, t=50, b=10),
+        height=dyn_h, margin=dict(l=0, r=0, t=50, b=10), # Μείωση του l & r margin για επέκταση στα άκρα
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
@@ -426,13 +426,22 @@ else:
 
 clicked_key = None
 
+# --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
 st.markdown("""
 <style>
+/* Το κεντρικό κουτί που περικλείει το γράφημα (έντονο border και σκιές) */
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) {
-    border: 2px solid #cbd5e1 !important;
-    border-radius: 10px !important;
-    background-color: #f8fafc !important;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+    border: 3px solid #64748b !important; 
+    border-radius: 12px !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.05) !important;
+    margin-left: -15px !important; /* Επέκταση προς τα αριστερά */
+    margin-right: -10px !important; /* Ελαφριά επέκταση δεξιά */
+}
+/* Μείωση του εσωτερικού κενού για να απλώσει κι άλλο το γράφημα */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.stPlotlyChart) > div {
+    padding-left: 0.2rem !important;
+    padding-right: 0.2rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -698,7 +707,6 @@ if not presentation_mode:
                         
                         valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
                         
-                        # Ανάκτηση υπαλλήλων που βρίσκονται σε άδεια ή εμπλοκή από τις σημειώσεις (για να μην χαθούν απ' τη φόρμα)
                         for note in target_group.get('Notes_List', []):
                             matches = re.findall(r'\[(?:Άδεια|Εμπλοκή):\s*(.*?)\]', note)
                             for match in matches:
@@ -708,7 +716,7 @@ if not presentation_mode:
                                         if emp['id'] not in valid_emp_ids:
                                             valid_emp_ids.append(emp['id'])
                                         break
-                                        
+
                         edit_options = list(set(active_employee_ids + valid_emp_ids))
                         edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options, default=valid_emp_ids, format_func=utils.get_employee_name)
                         
