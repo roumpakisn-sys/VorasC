@@ -7,9 +7,10 @@ import time
 import threading
 import ast
 
-# --- INITIALIZATION ---
+# --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
+    st.stop()
 
 import config
 import utils
@@ -43,6 +44,11 @@ else:
 
 # Ενσωμάτωση του μενού ψηλά στο Sidebar
 menu = utils.setup_shared_ui(show_menu=True, menu_options=menu_options)
+
+# --- ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ AUTO-POLLING ΣΤΗ ΔΙΑΧΕΙΡΙΣΗ ---
+# Η παρακάτω "κρυφή" σημαία λέει στη Javascript να ΜΗΝ 
+# κάνει αυτόματη ανανέωση όσο είμαστε σε αυτή τη σελίδα.
+st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 
 # --- VIEW: PROJECTS ---
@@ -276,7 +282,7 @@ elif menu == "Προσωπικό":
             st.divider()
             for e in filtered_emps:
                 col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1.5, 1])
-                col1.write(e['name']); col2.write(f"*{e['position']}*"); col3.write(e.get('id_number') or '-'); col4.write(e.get('phone') or '-')
+                col1.write(e['name']); col2.write(f"*{e.get('position', '')}*"); col3.write(e.get('id_number') or '-'); col4.write(e.get('phone') or '-')
                 status_val = e.get('status', 'Ενεργός')
                 status_color = "#16a34a" if status_val == 'Ενεργός' else "#dc2626"
                 col5.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{status_val}</span>", unsafe_allow_html=True)
@@ -482,7 +488,7 @@ elif menu == "Σύνολο Αδειών":
             if l['employeeId'] in leave_days:
                 leave_days[l['employeeId']] += (actual_end - actual_start).days + 1
                 
-    table_data = [{"Ονοματεπώνυμο": emp['name'], "Θέση": emp['position'], "Κατάσταση": emp.get('status', 'Ενεργός'), "Ημέρες Άδειας": leave_days[emp['id']]} for emp in st.session_state.employees]
+    table_data = [{"Ονοματεπώνυμο": emp['name'], "Θέση": emp.get('position', ''), "Κατάσταση": emp.get('status', 'Ενεργός'), "Ημέρες Άδειας": leave_days[emp['id']]} for emp in st.session_state.employees]
     st.write(f"### Συνολικές Ημέρες Άδειας για το έτος: {selected_year}")
     st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
 
@@ -507,7 +513,7 @@ elif menu == "Ώρες Εργασιών":
                 if a['employeeId'] in employee_hours: employee_hours[a['employeeId']] += delta_hours
             except: pass
             
-    table_data = [{"Ονοματεπώνυμο": emp['name'], "Θέση": emp['position'], "Κατάσταση": emp.get('status', 'Ενεργός'), "Συνολικές Ώρες": round(employee_hours[emp['id']], 2)} for emp in st.session_state.employees]
+    table_data = [{"Ονοματεπώνυμο": emp['name'], "Θέση": emp.get('position', ''), "Κατάσταση": emp.get('status', 'Ενεργός'), "Συνολικές Ώρες": round(employee_hours[emp['id']], 2)} for emp in st.session_state.employees]
     st.write(f"### Σύνολο Ωρών για: {selected_month_name} {selected_year}")
     st.dataframe(pd.DataFrame(table_data).style.format({"Συνολικές Ώρες": "{:.2f}"}), use_container_width=True, hide_index=True)
 
