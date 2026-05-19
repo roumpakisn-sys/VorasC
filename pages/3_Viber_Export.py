@@ -25,8 +25,42 @@ day_assigns = [a for a in st.session_state.assignments if a.get('date') == targe
 # Ταξινόμηση βάσει ώρας έναρξης
 day_assigns.sort(key=lambda x: str(x.get('startTime', '23:59')))
 
-groups = {}
+# Εντοπισμός μοναδικών έργων της ημέρας
+unique_projects = {}
 for a in day_assigns:
+    proj_id = a.get('projectId')
+    if proj_id not in unique_projects:
+        proj = utils.get_project_info(proj_id)
+        unique_projects[proj_id] = proj.get('name', "Άγνωστο") if proj else "Άγνωστο"
+
+selected_project_ids = []
+
+# --- ΔΥΝΑΜΙΚΑ CHECKBOXES ΕΡΓΩΝ ---
+if unique_projects:
+    st.markdown("#### ✅ Επιλογή Έργων προς Εξαγωγή")
+    st.caption("Επιλέξτε ποια έργα θέλετε να συμπεριληφθούν στο τελικό μήνυμα.")
+    
+    # Δημιουργία στηλών για ωραία εμφάνιση (μέχρι 4 στήλες)
+    cols = st.columns(min(len(unique_projects), 4))
+    
+    for i, (pid, pname) in enumerate(unique_projects.items()):
+        with cols[i % len(cols)]:
+            # Τα Checkboxes είναι προεπιλεγμένα (True)
+            if st.checkbox(pname, value=True, key=f"chk_proj_{pid}"):
+                selected_project_ids.append(pid)
+                
+    st.write("")
+    include_leaves = st.checkbox("🌴 Εμφάνιση Αδειών / Απουσιών στο τέλος", value=True)
+else:
+    include_leaves = True
+
+st.divider()
+
+# Φιλτράρισμα των βαρδιών βάσει των επιλεγμένων έργων
+filtered_assigns = [a for a in day_assigns if a.get('projectId') in selected_project_ids]
+
+groups = {}
+for a in filtered_assigns:
     proj = utils.get_project_info(a.get('projectId'))
     proj_name = proj.get('name', "Άγνωστο") if proj else "Άγνωστο"
     emp_name = utils.get_employee_name(a.get('employeeId'))
@@ -47,9 +81,12 @@ day_leaves = [l for l in st.session_state.leaves if l.get('startDate') <= target
 # 2. Χτίσιμο Αυτόματου Μηνύματος (Έτοιμο για Copy-Paste)
 viber_msg = f"📅 *Πρόγραμμα Εργασιών - {target_date.strftime('%d/%m/%Y')}* 📅\n\n"
 
-if not groups:
-    viber_msg += "Δεν υπάρχουν προγραμματισμένες βάρδιες για αυτή την ημέρα.\n"
+if not groups and not (day_leaves and include_leaves):
+    viber_msg += "Δεν υπάρχουν προγραμματισμένες βάρδιες/άδειες (ή δεν έχει επιλεγεί κανένα έργο).\n"
 else:
+    if not groups and (day_leaves and include_leaves):
+        viber_msg += "Δεν έχουν επιλεγεί/βρεθεί βάρδιες έργων.\n\n"
+        
     for (start, end, proj, arr, notes), emps in groups.items():
         viber_msg += f"⏰ *{start} - {end}* | 🏗️ *{proj}*\n"
         emp_str = ", ".join(emps) if emps else "Χωρίς Προσωπικό"
@@ -58,7 +95,7 @@ else:
         if notes: viber_msg += f"📝 Σημείωση: {notes}\n"
         viber_msg += "\n"
         
-if day_leaves:
+if day_leaves and include_leaves:
     viber_msg += "🌴 *Άδειες / Απουσίες*\n"
     for l in day_leaves:
         emp_name = utils.get_employee_name(l.get('employeeId'))
@@ -70,5 +107,5 @@ if day_leaves:
 
 # Εμφάνιση Αποτελέσματος
 st.subheader("🚀 Αυτόματο Μήνυμα (Γρήγορο)")
-st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και είναι έτοιμο για αντιγραφή. Κάντε κλικ στο εικονίδιο αντιγραφής επάνω δεξιά στο πλαίσιο.")
+st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και ανανεώνεται μόλις ξε-τικάρεις ένα έργο. Είναι έτοιμο για αντιγραφή.")
 st.code(viber_msg, language="markdown")
