@@ -71,8 +71,8 @@ def go_to_today():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
 
-# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (ΕΠΑΝΑΦΟΡΑ) ---
-st.markdown("<h3 style='margin-top: -35px; margin-bottom: 5px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
+# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ ---
+st.markdown("<h3 style='margin-top: -30px; margin-bottom: 5px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
 
 col_date, col_nav1, col_nav2, col_today, col_zoom, col_pres = st.columns([1.5, 0.8, 0.8, 0.8, 1.5, 1.5])
 with col_date:
@@ -126,27 +126,27 @@ clicked_key = None
 # --- ΑΠΟΛΥΤΟ ΚΑΙ ΕΠΙΘΕΤΙΚΟ STYLING ΓΙΑ ΤΟ CONTAINER ΚΑΙ ΤΟ ΓΚΡΙΖΑΡΙΣΜΑ ---
 st.markdown("""
 <style>
-/* 1. Απλώνουμε την οθόνη του Streamlit στο 96% για να αφήσουμε λίγο κενό δεξιά-αριστερά */
+/* 1. Απλώνουμε την οθόνη του Streamlit στο 96% και ΜΕΙΩΝΟΥΜΕ ΣΤΟ ΜΕΓΙΣΤΟ ΤΑ ΠΑΝΩ ΚΕΝΑ (Compact UI) */
 .block-container, [data-testid="block-container"] {
     max-width: 96% !important; 
-    padding-top: 1.0rem !important;
+    padding-top: 0.5rem !important;
     padding-bottom: 0.5rem !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
 
-/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες) */
-div[data-testid="stNotification"], .stAlert {
-    padding: 6px 12px !important;
+/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες & Αναλυτικά) στο ελάχιστο δυνατό! */
+div[data-testid="stNotification"], .stAlert, div[data-testid="stExpander"] {
+    padding: 2px 10px !important;
     margin-top: 0px !important;
-    margin-bottom: 4px !important;
+    margin-bottom: 2px !important;
 }
-div[data-testid="stNotification"] p {
+div[data-testid="stNotification"] p, .stAlert p, div[data-testid="stExpander"] p {
     margin: 0 !important;
-    font-size: 14px !important;
+    font-size: 13px !important;
 }
 
-/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit για να μην φαίνονται "διπλά" κουτιά */
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     border: none !important;
     box-shadow: none !important;
@@ -197,103 +197,70 @@ with st.container(height=650):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# --- JAVASCRIPT: STICKY HEADER ΓΙΑ ΤΙΣ ΩΡΕΣ ΚΑΙ DRAG TO SCROLL ---
-st.components.v1.html("""
-<script>
-const doc = window.parent.document;
+# --- JAVASCRIPT: STICKY HEADER ΧΩΡΙΣ IFRAME SANDBOX (ΛΥΣΗ ΜΕ ONERROR) ---
+# Αυτός ο κώδικας εκτελείται απευθείας στο κεντρικό παράθυρο, αποφεύγοντας τους περιορισμούς του Streamlit.
+st.markdown("""
+<img src="dummy.png" style="display:none;" onerror="
+    if (window.ganttStickyFixApplied) return;
+    window.ganttStickyFixApplied = true;
 
-// Αναδρομική εύρεση του πραγματικού κυλιόμενου parent container
-const findScrollParent = (el) => {
-    let curr = el.parentElement;
-    while (curr && curr !== doc.body && curr !== doc.documentElement) {
-        if (curr.scrollHeight > curr.clientHeight) {
-            const style = window.parent.getComputedStyle(curr);
-            if (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto') {
-                return curr;
-            }
-        }
-        curr = curr.parentElement;
-    }
-    // Fallback αν δεν βρεθεί ξεκάθαρα, συνήθως το st.container επιστρέφει το πρώτο div μέσα στο wrapper
-    return el.closest('div[data-testid="stVerticalBlockBorderWrapper"] > div') || el.closest('div[data-testid="stContainer"]') || el.parentElement;
-};
+    const makeSticky = () => {
+        const iframes = document.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+            try {
+                const plotDoc = iframe.contentDocument;
+                if (!plotDoc) return;
+                
+                const xAxis = plotDoc.querySelector('.xaxislayer-above');
+                if (!xAxis) return;
 
-// Η συνάρτηση που κρατάει τις ώρες "καρφωμένες" στην κορυφή (Sticky)
-const alignAxis = () => {
-    const charts = doc.querySelectorAll('.stPlotlyChart');
-    charts.forEach(chart => {
-        const scrollDiv = findScrollParent(chart);
-        if (!scrollDiv) return;
+                let scrollDiv = iframe.parentElement;
+                while (scrollDiv && scrollDiv !== document.body) {
+                    if (scrollDiv.scrollHeight > scrollDiv.clientHeight) {
+                        const style = window.getComputedStyle(scrollDiv);
+                        if (style.overflowY === 'auto' || style.overflow === 'auto' || style.overflowY === 'scroll') {
+                            break;
+                        }
+                    }
+                    scrollDiv = scrollDiv.parentElement;
+                }
+                if (!scrollDiv || scrollDiv === document.body) return;
 
-        try {
-            const iframe = chart.querySelector('iframe');
-            const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : chart;
-            const xAxis = plotDoc.querySelector('.xaxislayer-above');
-            
-            if (xAxis) {
-                // 1. Δημιουργία λευκού φόντου (μάσκας) κάτω από τις ώρες
-                if (!xAxis.querySelector('.sticky-bg')) {
-                    const svgDoc = xAxis.ownerDocument || plotDoc;
-                    
-                    const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    bg.setAttribute('class', 'sticky-bg');
-                    bg.setAttribute('width', '20000');
+                if (!xAxis.querySelector('.st-sticky-mask')) {
+                    const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    bg.setAttribute('class', 'st-sticky-mask');
+                    bg.setAttribute('width', '50000');
                     bg.setAttribute('height', '50');
-                    bg.setAttribute('x', '-10000');
+                    bg.setAttribute('x', '-25000');
                     bg.setAttribute('y', '-25');
                     bg.setAttribute('fill', '#ffffff');
                     xAxis.insertBefore(bg, xAxis.firstChild);
 
-                    const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('class', 'sticky-line');
-                    line.setAttribute('x1', '-10000');
-                    line.setAttribute('x2', '10000');
+                    const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('class', 'st-sticky-mask');
+                    line.setAttribute('x1', '-25000');
+                    line.setAttribute('x2', '25000');
                     line.setAttribute('y1', '25');
                     line.setAttribute('y2', '25');
                     line.setAttribute('stroke', '#1e293b');
                     line.setAttribute('stroke-width', '2');
                     xAxis.appendChild(line);
                 }
-                
-                // 2. ΥΠΟΛΟΓΙΣΜΟΣ OFFSET - Το μυστικό για τέλειο Sticky effect!
-                // Παίρνουμε τις ακριβείς γεωμετρικές θέσεις του Container και του Γραφήματος
+
                 const scrollRect = scrollDiv.getBoundingClientRect();
-                const chartRect = (iframe || chart).getBoundingClientRect();
-                
-                // Υπολογίζουμε ακριβώς πόσα pixel έχει κρυφτεί το πάνω μέρος του γραφήματος
-                // λόγω του κάθετου scroll.
+                const chartRect = iframe.getBoundingClientRect();
                 let hiddenTop = scrollRect.top - chartRect.top;
+                if (hiddenTop < 0) hiddenTop = 0;
                 
-                // Αν δεν έχει κρυφτεί ακόμα (είμαστε στην κορυφή), δεν το κουνάμε
-                if (hiddenTop < 0) hiddenTop = 0; 
-                
-                // Μετατοπίζουμε ΤΟΝ ΑΞΟΝΑ κατακόρυφα προς τα κάτω για να παραμένει εμφανής!
-                xAxis.style.transform = `translateY(${hiddenTop}px)`;
-                xAxis.setAttribute('transform', `translate(0, ${hiddenTop})`);
-            }
-        } catch (err) {}
-    });
-};
+                xAxis.style.transform = 'translateY(' + hiddenTop + 'px)';
+            } catch(e) {}
+        });
+    };
 
-const attachListeners = () => {
-    const charts = doc.querySelectorAll('.stPlotlyChart');
-    charts.forEach(chart => {
-        const scrollDiv = findScrollParent(chart);
-        if (scrollDiv && scrollDiv.dataset.hasStickyListener !== "true") {
-            scrollDiv.dataset.hasStickyListener = "true";
-            // Κάθε φορά που γίνεται scroll, τρέχει η ευθυγράμμιση
-            scrollDiv.addEventListener('scroll', alignAxis);
-        }
-    });
-};
-
-// Εκτέλεση άμεσα και επαναληπτικά (κάθε 100ms) για να αντέχει σε refreshes και αλλαγές ζουμ
-setInterval(() => {
-    attachListeners();
-    alignAxis();
-}, 100);
-</script>
-""", height=0, width=0)
+    window.addEventListener('scroll', makeSticky, true);
+    setInterval(makeSticky, 50);
+">
+""", unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
