@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
 import io
+import time
 import ast
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
@@ -95,42 +96,111 @@ with tab1:
 with tab2:
     st.header("Ομάδα Προσωπικού")
     if is_full_admin:
-        with st.expander("➕ Προσθήκη / Επεξεργασία Προσωπικού", expanded=False):
+        
+        # 1. ΠΡΟΣΘΗΚΗ ΝΕΟΥ ΥΠΑΛΛΗΛΟΥ
+        with st.expander("➕ Προσθήκη Νέου Υπαλλήλου", expanded=False):
             with st.form("add_employee_form", clear_on_submit=True):
-                st.subheader("Νέος Υπάλληλος")
+                st.subheader("Στοιχεία Νέου Υπαλλήλου")
+                
                 c1, c2 = st.columns(2)
-                with c1: new_emp_name = st.text_input("Ονοματεπώνυμο")
-                with c2: new_emp_specialty = st.text_input("Ειδικότητα")
+                with c1: new_emp_name = st.text_input("Ονοματεπώνυμο *")
+                with c2: new_emp_role = st.selectbox("Ρόλος *", ["Εργάτης", "Επόπτης", "Οδηγός"])
                 
                 c3, c4 = st.columns(2)
-                with c3: new_emp_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"])
-                with c4: is_external = st.checkbox("Εξωτερικό Συνεργείο;")
+                with c3: new_emp_phone = st.text_input("Τηλέφωνο")
+                with c4: new_emp_id_num = st.text_input("Αρ. Ταυτότητας")
                 
-                if st.form_submit_button("Προσθήκη / Ενημέρωση"):
+                new_emp_specialty = st.text_input("Ειδικότητα (Προαιρετικό)")
+                
+                c5, c6 = st.columns(2)
+                with c5: new_emp_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"])
+                with c6: is_external = st.checkbox("Εξωτερικό Συνεργείο;")
+                
+                if st.form_submit_button("Προσθήκη Υπαλλήλου"):
                     if new_emp_name.strip():
                         existing = next((e for e in st.session_state.employees if e['name'].strip().lower() == new_emp_name.strip().lower()), None)
                         if existing:
-                            updated_emp = dict(existing)
-                            updated_emp.update({'specialty': new_emp_specialty.strip(), 'status': new_emp_status, 'is_external_crew': is_external})
-                            utils.db_update('employees', existing['id'], updated_emp)
-                            st.session_state.employees = [updated_emp if e['id'] == existing['id'] else e for e in st.session_state.employees]
-                            st.success("Τα στοιχεία ενημερώθηκαν!")
+                            st.warning("⚠️ Υπάρχει ήδη υπάλληλος με αυτό το όνομα. Παρακαλώ χρησιμοποιήστε την Επεξεργασία.")
                         else:
-                            new_emp = {'id': str(uuid.uuid4()), 'name': new_emp_name.strip(), 'specialty': new_emp_specialty.strip(), 'status': new_emp_status, 'is_external_crew': is_external}
+                            new_emp = {
+                                'id': str(uuid.uuid4()), 
+                                'name': new_emp_name.strip(),
+                                'role': new_emp_role,
+                                'phone': new_emp_phone.strip(),
+                                'id_number': new_emp_id_num.strip(),
+                                'specialty': new_emp_specialty.strip(), 
+                                'status': new_emp_status, 
+                                'is_external_crew': is_external
+                            }
                             st.session_state.employees.append(new_emp)
                             utils.db_insert('employees', new_emp)
-                            st.success("Ο υπάλληλος προστέθηκε!")
-                        st.rerun()
+                            st.success("Ο υπάλληλος προστέθηκε επιτυχώς!")
+                            time.sleep(0.5)
+                            st.rerun()
                     else:
-                        st.error("Το όνομα δεν μπορεί να είναι κενό.")
+                        st.error("Το πεδίο Ονοματεπώνυμο είναι υποχρεωτικό.")
+        
+        # 2. ΕΠΕΞΕΡΓΑΣΙΑ ΥΠΑΡΧΟΝΤΩΝ
+        with st.expander("✏️ Επεξεργασία Εργαζομένων", expanded=False):
+            if not st.session_state.employees:
+                st.info("Δεν υπάρχουν υπάλληλοι προς επεξεργασία.")
+            else:
+                edit_emp_id = st.selectbox("Επιλογή Υπαλλήλου για Επεξεργασία", options=[e['id'] for e in st.session_state.employees], format_func=utils.get_employee_name)
+                
+                if edit_emp_id:
+                    target_emp = next((e for e in st.session_state.employees if e['id'] == edit_emp_id), None)
+                    if target_emp:
+                        with st.form("edit_employee_form"):
+                            st.subheader(f"Επεξεργασία: {target_emp.get('name')}")
+                            
+                            ec1, ec2 = st.columns(2)
+                            with ec1: e_name = st.text_input("Ονοματεπώνυμο", value=target_emp.get('name', ''))
+                            
+                            roles = ["Εργάτης", "Επόπτης", "Οδηγός"]
+                            current_role = target_emp.get('role', 'Εργάτης')
+                            if current_role not in roles and current_role: roles.append(current_role)
+                            with ec2: e_role = st.selectbox("Ρόλος", roles, index=roles.index(current_role) if current_role in roles else 0)
+                            
+                            ec3, ec4 = st.columns(2)
+                            with ec3: e_phone = st.text_input("Τηλέφωνο", value=target_emp.get('phone', ''))
+                            with ec4: e_id_num = st.text_input("Αρ. Ταυτότητας", value=target_emp.get('id_number', ''))
+                            
+                            e_spec = st.text_input("Ειδικότητα", value=target_emp.get('specialty', ''))
+                            
+                            ec5, ec6 = st.columns(2)
+                            statuses = ["Ενεργός", "Ανενεργός"]
+                            curr_status = target_emp.get('status', 'Ενεργός')
+                            with ec5: e_status = st.selectbox("Κατάσταση", statuses, index=statuses.index(curr_status) if curr_status in statuses else 0)
+                            with ec6: e_ext = st.checkbox("Εξωτερικό Συνεργείο;", value=bool(target_emp.get('is_external_crew', False)))
+                            
+                            if st.form_submit_button("Αποθήκευση Αλλαγών"):
+                                if e_name.strip():
+                                    updated_emp = dict(target_emp)
+                                    updated_emp.update({
+                                        'name': e_name.strip(),
+                                        'role': e_role,
+                                        'phone': e_phone.strip(),
+                                        'id_number': e_id_num.strip(),
+                                        'specialty': e_spec.strip(),
+                                        'status': e_status,
+                                        'is_external_crew': e_ext
+                                    })
+                                    utils.db_update('employees', target_emp['id'], updated_emp)
+                                    st.session_state.employees = [updated_emp if e['id'] == target_emp['id'] else e for e in st.session_state.employees]
+                                    st.success("Τα στοιχεία του υπαλλήλου ενημερώθηκαν!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error("Το όνομα δεν μπορεί να είναι κενό.")
                         
+        # 3. ΜΑΖΙΚΗ ΕΙΣΑΓΩΓΗ EXCEL
         with st.expander("📁 Μαζική Εισαγωγή από Excel", expanded=False):
             uploaded_file = st.file_uploader("Ανεβάστε αρχείο Excel", type=["xlsx"])
             if uploaded_file is not None:
                 try:
                     df_emps = pd.read_excel(uploaded_file)
-                    required_cols = ['Ονοματεπώνυμο', 'Ειδικότητα', 'Κατάσταση', 'Εξωτερικό Συνεργείο']
-                    if all(col in df_emps.columns for col in required_cols):
+                    # Οι μόνες 100% υποχρεωτικές στήλες είναι το Ονοματεπώνυμο
+                    if 'Ονοματεπώνυμο' in df_emps.columns:
                         new_records = []
                         for _, row in df_emps.iterrows():
                             name = str(row['Ονοματεπώνυμο']).strip()
@@ -140,9 +210,12 @@ with tab2:
                                 new_records.append({
                                     'id': str(uuid.uuid4()),
                                     'name': name,
-                                    'specialty': str(row['Ειδικότητα']).strip() if pd.notna(row['Ειδικότητα']) else "",
-                                    'status': str(row['Κατάσταση']).strip() if pd.notna(row['Κατάσταση']) else "Ενεργός",
-                                    'is_external_crew': bool(row['Εξωτερικό Συνεργείο']) if pd.notna(row['Εξωτερικό Συνεργείο']) else False
+                                    'role': str(row.get('Ρόλος', 'Εργάτης')).strip() if pd.notna(row.get('Ρόλος')) else "Εργάτης",
+                                    'phone': str(row.get('Τηλέφωνο', '')).strip() if pd.notna(row.get('Τηλέφωνο')) else "",
+                                    'id_number': str(row.get('Αρ. Ταυτότητας', '')).strip() if pd.notna(row.get('Αρ. Ταυτότητας')) else "",
+                                    'specialty': str(row.get('Ειδικότητα', '')).strip() if pd.notna(row.get('Ειδικότητα')) else "",
+                                    'status': str(row.get('Κατάσταση', 'Ενεργός')).strip() if pd.notna(row.get('Κατάσταση')) else "Ενεργός",
+                                    'is_external_crew': bool(row.get('Εξωτερικό Συνεργείο', False)) if pd.notna(row.get('Εξωτερικό Συνεργείο')) else False
                                 })
                         if new_records:
                             st.session_state.employees.extend(new_records)
@@ -154,10 +227,13 @@ with tab2:
                         else:
                             st.info("Δεν βρέθηκαν νέοι υπάλληλοι προς εισαγωγή (υπάρχουν ήδη).")
                     else:
-                        st.error(f"Το Excel πρέπει να περιέχει τις στήλες: {', '.join(required_cols)}")
+                        st.error("Το Excel πρέπει να περιέχει τουλάχιστον τη στήλη 'Ονοματεπώνυμο'.")
                 except Exception as e:
                     st.error(f"Σφάλμα κατά την ανάγνωση: {e}")
 
+    # ==================================
+    # ΠΙΝΑΚΑΣ - ΛΙΣΤΑ ΠΡΟΣΩΠΙΚΟΥ
+    # ==================================
     st.subheader("Λίστα Προσωπικού")
     if not st.session_state.employees:
         st.info("Δεν υπάρχει καταχωρημένο προσωπικό.")
@@ -165,19 +241,21 @@ with tab2:
         df_display = pd.DataFrame(st.session_state.employees)
         
         # --- ΑΣΠΙΔΑ ΓΙΑ ΤΟ KEYERROR ---
-        # Αν κάποια στήλη λείπει (π.χ. από παλιές εγγραφές), τη δημιουργούμε δυναμικά
-        for col in ['name', 'specialty', 'status', 'id']:
+        # Δημιουργούμε δυναμικά όποια στήλη λείπει από παλιές εγγραφές της βάσης
+        required_columns = ['name', 'role', 'phone', 'id_number', 'specialty', 'status', 'id']
+        for col in required_columns:
             if col not in df_display.columns:
                 df_display[col] = ""
+                
         if 'is_external_crew' not in df_display.columns:
             df_display['is_external_crew'] = False
             
         # Μετατροπή της boolean στήλης σε Ναι/Όχι με ασφάλεια
         df_display['Εξωτερικό Συνεργείο'] = df_display['is_external_crew'].apply(lambda x: "Ναι" if str(x).lower() in ['true', '1'] or x is True else "Όχι")
         
-        # Επιλογή των τελικών στηλών
-        df_display = df_display[['name', 'specialty', 'status', 'Εξωτερικό Συνεργείο', 'id']]
-        df_display.columns = ['Ονοματεπώνυμο', 'Ειδικότητα', 'Κατάσταση', 'Εξωτερικό Συνεργείο', 'ID']
+        # Επιλογή και μετονομασία των τελικών στηλών για την εμφάνιση
+        df_display = df_display[['name', 'role', 'phone', 'id_number', 'specialty', 'status', 'Εξωτερικό Συνεργείο', 'id']]
+        df_display.columns = ['Ονοματεπώνυμο', 'Ρόλος', 'Τηλέφωνο', 'Αρ. Ταυτότητας', 'Ειδικότητα', 'Κατάσταση', 'Εξωτερικό Συνεργείο', 'ID']
         
         st.dataframe(df_display.drop(columns=['ID']), use_container_width=True)
         
@@ -198,6 +276,7 @@ with tab2:
                 utils.db_delete_in('evaluations', 'employeeId', [emp_to_del], track=False)
                 
                 st.success("Διαγράφηκε επιτυχώς!")
+                time.sleep(0.5)
                 st.rerun()
 
 # ==========================================
