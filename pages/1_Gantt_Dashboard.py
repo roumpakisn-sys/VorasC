@@ -125,7 +125,8 @@ clicked_key = st.query_params.get("edit_key", None)
 
 # --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    min_width_px = int(1800 * zoom_factor) # 18 Ώρες (06:00 έως 24:00)
+    # Επέκταση σε 20 ώρες (04:00 - 24:00) για να φαίνεται η βάρδια των 04:45
+    min_width_px = int(2400 * zoom_factor) 
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_short_names = {}
@@ -151,7 +152,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     <style>
     body {{ margin: 0; padding: 0; background: transparent; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }}
     
-    .mygantt-container {{ width: 100%; height: 640px; overflow: auto; border: 4px solid #1e293b; border-radius: 12px; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); position: relative; background: #ffffff; box-sizing: border-box; user-select: none; }}
+    .mygantt-container {{ width: 100%; height: 640px; overflow: auto; border: 4px solid #1e293b; border-radius: 12px; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); position: relative; background: #ffffff; box-sizing: border-box; user-select: none; scroll-behavior: smooth; }}
     
     .mygantt-container::-webkit-scrollbar {{ width: 12px; height: 12px; }}
     .mygantt-container::-webkit-scrollbar-track {{ background: #f1f5f9; border-radius: 8px; }}
@@ -173,7 +174,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     .mygantt-row-even .mygantt-left {{ background-color: #f8fafc; }}
     .mygantt-row-today .mygantt-left {{ background-color: #eef2ff; border-right: 3px solid #4f46e5; }}
 
-    .mygantt-lanes {{ position: relative; width: {min_width_px}px; flex-grow: 1; background-size: calc(100% / 18) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}
+    /* Προσαρμογή του πλέγματος για 20 ώρες (04:00 - 24:00) */
+    .mygantt-lanes {{ position: relative; width: {min_width_px}px; flex-grow: 1; background-size: calc(100% / 20) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}
     
     .mygantt-bar {{ position: absolute; height: 38px; border: 1px solid black; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black !important; text-decoration: none !important; cursor: pointer; transition: transform 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; }}
     .mygantt-bar:hover {{ transform: scale(1.02); z-index: 30; box-shadow: 0 6px 12px rgba(0,0,0,0.3); outline: 2px solid #1e293b; }}
@@ -185,8 +187,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     """]
 
     html.append('<div class="mygantt-header"><div class="mygantt-header-corner"></div><div class="mygantt-header-timeline">')
-    for h in range(6, 25):
-        pct = ((h - 6) / 18) * 100
+    # Ώρες 04:00 έως 24:00 (20 ώρες σύνολο)
+    for h in range(4, 25):
+        pct = ((h - 4) / 20) * 100
         lbl = f"{h:02d}:00" if h < 24 else "00:00"
         html.append(f'<div class="mygantt-tick" style="left: {pct}%;">{lbl}</div>')
     html.append('</div></div>')
@@ -253,9 +256,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         for g, lane_idx in group_lanes:
             def t2p(t_str):
                 h, m = map(int, t_str.split(':'))
-                if h <= 5: h += 24
-                mins = (h - 6) * 60 + m
-                return max(0, min(100, (mins / 1080.0) * 100))
+                if h < 4: h += 24 # Χειρισμός για βάρδιες που περνάνε τα μεσάνυχτα
+                mins = (h - 4) * 60 + m # Η βάση είναι 04:00
+                return max(0, min(100, (mins / 1200.0) * 100)) # 1200 mins = 20 ώρες
 
             left_pct = t2p(g['StartTime'])
             right_pct = t2p(g['EndTime'])
@@ -280,22 +283,34 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
             bg_color = g['ColorHex']
             
-            # Link που ενημερώνει το parent URL
+            # --- ΣΗΜΑΝΤΙΚΟ: ΑΣΦΑΛΗΣ ΠΛΟΗΓΗΣΗ ΓΙΑ ΚΛΙΚ ---
+            # Κωδικοποιούμε το URL για να μην κόβεται από το σύμβολο '#' του χρώματος
             safe_key = urllib.parse.quote(g['Key'])
+            
             html.append(f"""
-            <a href="javascript:void(0);" onclick="window.parent.postMessage({{type: 'set_edit_key', key: '{g['Key']}'}}, '*');" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
+            <a href="?edit_key={safe_key}" target="_parent" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
                 <div class="mygantt-bar-text">{base_text}</div>
             </a>
             """)
 
         html.append('</div></div>')
 
+    # Το JavaScript script αναλαμβάνει 2 πράγματα:
+    # 1. Το Drag and scroll (δεξιά - αριστερά)
+    # 2. Κάνει αυτόματα scroll στο 06:00 (που είναι 2 ώρες μετά τις 04:00 -> 2/20 = 10% του πλάτους)
     html.append("""
     </div>
     <script>
     var s=document.getElementById('mygantt');
     if(s&&!s.dataset.d){
         s.dataset.d='1';
+        
+        // Αυτόματο scroll για να δείχνει από τις 06:00 (αποκρύπτει αρχικά 04:00-06:00)
+        var lanes = s.querySelector('.mygantt-lanes');
+        if(lanes) { 
+            setTimeout(() => { s.scrollLeft = lanes.offsetWidth * (2/20); }, 50);
+        }
+        
         let d=false,x,l;
         s.addEventListener('mousedown',e=>{d=true;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});
         s.addEventListener('mouseleave',()=>{d=false;s.style.cursor='auto';});
@@ -311,20 +326,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 # --- ΕΜΦΑΝΙΣΗ ΜΕΣΩ IFRAME ΓΙΑ ΑΣΦΑΛΕΙΑ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 st.components.v1.html(html_chart, height=660, scrolling=False)
-
-# Πιάνουμε το μήνυμα από το iframe και ενημερώνουμε το query_params του Streamlit
-st.components.v1.html("""
-<script>
-window.addEventListener('message', function(event) {
-    if (event.data.type === 'set_edit_key') {
-        const url = new URL(window.parent.location.href);
-        url.searchParams.set('edit_key', event.data.key);
-        window.parent.history.pushState({}, '', url);
-        window.parent.location.reload(); // Αναγκαστικό reload για να το δει η Python
-    }
-});
-</script>
-""", height=0, width=0)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
