@@ -6,29 +6,27 @@ import config
 import utils
 import uuid
 
+# --- ΝΕΟΣ ΜΗΧΑΝΙΣΜΟΣ: Κλειδώνει την αλλαγή ημερομηνίας ---
+def update_week_from_picker():
+    st.session_state.view_week_date = st.session_state.week_date_picker
+
 def render_top_nav(go_prev_week, go_next_week, go_to_today):
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
     with col_nav1:
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        # --- ΔΙΟΡΘΩΣΗ: Απόλυτο κλείδωμα της ημερομηνίας ---
-        # 1. Δημιουργούμε το key αν δεν υπάρχει
-        if "week_date_picker" not in st.session_state:
+        # Απόλυτος συγχρονισμός: Αν η 'κεντρική' εβδομάδα άλλαξε (π.χ. από τα κουμπιά Προηγούμενη/Επόμενη),
+        # ενημερώνουμε το widget του ημερολογίου ΠΡΙΝ αυτό ζωγραφιστεί στην οθόνη.
+        if st.session_state.get("week_date_picker") != st.session_state.view_week_date:
             st.session_state.week_date_picker = st.session_state.view_week_date
             
-        # 2. Συγχρονίζουμε το widget αν πατήθηκε κουμπί (πχ. Επόμενη/Προηγούμενη)
-        if st.session_state.week_date_picker != st.session_state.view_week_date:
-            st.session_state.week_date_picker = st.session_state.view_week_date
-
-        # 3. Το date_input τώρα ελέγχεται ΑΥΣΤΗΡΑ από το key
-        selected_date = st.date_input("Επιλογή Εβδομάδας", key="week_date_picker")
+        selected_date = st.date_input(
+            "Επιλογή Εβδομάδας", 
+            key="week_date_picker",
+            on_change=update_week_from_picker
+        )
         
-        # 4. Αν ο χρήστης επιλέξει άλλη ημερομηνία από το ημερολόγιο, ενημερώνουμε το σύστημα
-        if selected_date != st.session_state.view_week_date:
-            st.session_state.view_week_date = selected_date
-            st.rerun()
-            
         start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
     with col_nav2:
         st.write("")
