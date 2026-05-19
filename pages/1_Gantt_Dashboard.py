@@ -7,6 +7,7 @@ import textwrap
 import time
 import re
 import base64
+import urllib.parse
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -44,28 +45,6 @@ utils.setup_shared_ui()
 
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
-
-# --- ΓΕΦΥΡΑ ΕΠΙΚΟΙΝΩΝΙΑΣ JS -> PYTHON ΓΙΑ ΤΑ ΚΛΙΚ ---
-if "clicked_key" not in st.session_state:
-    st.session_state.clicked_key = None
-
-st.markdown("""
-<style>
-/* Κρύβουμε το input που χρησιμοποιείται ως γέφυρα */
-div[data-testid="stTextInput"]:has(input[aria-label="bridge_input"]) { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
-
-bridge_val = st.text_input("bridge_input", key="bridge_input", label_visibility="collapsed")
-bridge_btn = st.button("BridgeBtn", key="bridge_btn")
-
-if bridge_btn and bridge_val:
-    try:
-        st.session_state.clicked_key = base64.b64decode(bridge_val.encode('utf-8')).decode('utf-8')
-    except:
-        pass
-
-clicked_key = st.session_state.clicked_key
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ---
 if "view_week_date" not in st.session_state:
@@ -141,9 +120,13 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
+# --- ΔΙΑΒΑΣΜΑ ΤΟΥ ΚΛΙΚ ΑΠΟ ΤΟ URL (st.query_params) ---
+clicked_key = st.query_params.get("edit_key", None)
+
 # --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    # Πλάτος γραμμής: 200% = 20 ώρες, άρα το 100% (οθόνη) ισούται ακριβώς με 10 ώρες!
+    # Το εσωτερικό πλάτος ορίζεται στο 200%. Εφόσον συνολικά έχουμε 20 ώρες (04:00 - 24:00), 
+    # το ορατό κομμάτι στην οθόνη θα είναι ακριβώς 10 ώρες (100%)!
     timeline_width_pct = int(200 * zoom_factor)
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -296,49 +279,60 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
     html_parts.append('</div>')
     
-    # KΑΘΑΡΗ JAVASCRIPT: Χωρίς διπλά εισαγωγικά, ασφαλής για το onerror HTML tag!
+    # -------------------------------------------------------------------------
+    # ΑΠΟΛΥΤΩΣ ΑΣΦΑΛΗΣ JAVASCRIPT: (Base64 Encoded για να μην σπάει το Streamlit)
+    # - scrollLeft = 10% (Εμφανίζει από 06:00)
+    # - Ξεχωρίζει το Drag από το Click!
+    # - Ενημερώνει δυναμικά το URL ?edit_key=... για να ανοίξει η φόρμα αμέσως.
+    # -------------------------------------------------------------------------
     drag_js = """
     var s=document.getElementById('mygantt');
-    if(s&&!s.dataset.d){
-        s.dataset.d='1';
-        setTimeout(()=>{s.scrollLeft=s.scrollWidth*0.10;},50);
-        let d=false, isDrg=false, x, l;
-        s.addEventListener('mousedown', e=>{d=true;isDrg=false;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});
-        s.addEventListener('mouseleave', ()=>{d=false;s.style.cursor='auto';});
-        s.addEventListener('mouseup', ()=>{d=false;s.style.cursor='auto';});
-        s.addEventListener('mousemove', e=>{if(!d)return;isDrg=true;e.preventDefault();s.scrollLeft=l-(e.pageX-s.offsetLeft-x)*1.5;});
-        s.addEventListener('click', e=>{
-            if(isDrg) return;
+    if(s && !s.dataset.init){
+        s.dataset.init='1';
+        setTimeout(()=>{ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+        let isDown=false, isDragging=false, startX, scrollLeft;
+        s.addEventListener('mousedown', e => {
+            isDown = true;
+            isDragging = false;
+            s.style.cursor = 'grabbing';
+            startX = e.pageX - s.offsetLeft;
+            scrollLeft = s.scrollLeft;
+        });
+        s.addEventListener('mouseleave', () => {
+            isDown = false;
+            s.style.cursor = 'auto';
+        });
+        s.addEventListener('mouseup', () => {
+            isDown = false;
+            s.style.cursor = 'auto';
+        });
+        s.addEventListener('mousemove', e => {
+            if(!isDown) return;
+            isDragging = true;
+            e.preventDefault();
+            const x = e.pageX - s.offsetLeft;
+            const walk = (x - startX) * 1.5;
+            s.scrollLeft = scrollLeft - walk;
+        });
+        s.addEventListener('click', e => {
+            if(isDragging) return;
             var bar = e.target.closest('.mygantt-bar');
             if(bar){
-                var key = bar.getAttribute('data-key');
-                var inp = document.querySelector('input[aria-label=bridge_input]');
-                if(inp){
-                    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                    setter.call(inp, key);
-                    inp.dispatchEvent(new Event('input',{bubbles:true}));
-                    setTimeout(()=>{
-                        var btns = Array.from(document.querySelectorAll('button'));
-                        var btn = btns.find(b=>b.innerText.includes('BridgeBtn'));
-                        if(btn) btn.click();
-                    }, 50);
+                var b64key = bar.getAttribute('data-key');
+                if(b64key){
+                    var key = decodeURIComponent(escape(window.atob(b64key)));
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('edit_key', key);
+                    window.location.href = url.href;
                 }
             }
         });
-        setTimeout(()=>{
-            var btns = Array.from(document.querySelectorAll('button'));
-            var btn = btns.find(b=>b.innerText.includes('BridgeBtn'));
-            if(btn){
-                var p=btn.parentElement.parentElement;
-                if(p) p.style.display='none';
-            }
-        }, 10);
     }
     """
     
-    # Καθαρισμός αλλαγών γραμμής για να μην μπερδεύεται το Streamlit Markdown
-    clean_drag_js = drag_js.replace('\n', ' ').strip()
-    html_parts.append(f"<img src='dummy.png' style='display:none;' onerror='{clean_drag_js}'>")
+    # Μετατροπή της JS σε Base64 για να είναι 100% αόρατη στον parser του Streamlit (χωρίς single/double quotes issues)
+    b64_js = base64.b64encode(drag_js.encode('utf-8')).decode('utf-8')
+    html_parts.append(f'<img src="dummy.png" style="display:none;" onerror="eval(atob(\'{b64_js}\'))">')
     
     return "".join(html_parts)
 
@@ -478,7 +472,7 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ (ΜΕΣΩ ΤΗΣ JS ΓΕΦΥΡΑΣ) ---
+                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ (ΜΕΣΩ URL PARAMETER) ---
                 default_idx = 0
                 if clicked_key and clicked_key in group_keys:
                     default_idx = group_keys.index(clicked_key) + 1
@@ -544,7 +538,7 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
-                            st.session_state.clicked_key = None
+                            st.query_params.clear()
                             st.rerun()
 
                     with st.form("quick_edit"):
@@ -608,7 +602,7 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
-                            st.session_state.clicked_key = None
+                            st.query_params.clear()
                             st.rerun()
                             
                         if save_edit:
@@ -672,5 +666,5 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
-                                st.session_state.clicked_key = None
+                                st.query_params.clear()
                                 st.rerun()
