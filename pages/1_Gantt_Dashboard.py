@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
@@ -71,34 +71,23 @@ def go_to_today():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
 
-# --- ΕΠΑΝΑΦΟΡΑ ΑΡΧΙΚΟΥ, ΑΓΑΠΗΜΕΝΟΥ ΣΟΥ LAYOUT ---
-st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
+# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (ΕΠΑΝΑΦΟΡΑ) ---
+st.markdown("<h3 style='margin-top: -35px; margin-bottom: 5px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
 
-col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
-with col_nav1:
-    st.write("")
-    st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
+col_date, col_nav1, col_nav2, col_today, col_zoom, col_pres = st.columns([1.5, 0.8, 0.8, 0.8, 1.5, 1.5])
 with col_date:
-    # Το ημερολόγιο παίρνει "value" από τη μόνιμη μνήμη.
-    selected_date = st.date_input(
-        "Επιλογή Εβδομάδας", 
-        value=st.session_state.view_week_date,
-        key="date_picker", 
-        on_change=sync_from_widget
-    )
+    selected_date = st.date_input("Εβδομάδα", value=st.session_state.view_week_date, key="date_picker", on_change=sync_from_widget, label_visibility="collapsed")
     start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
+with col_nav1:
+    st.button("⬅️ Πριν", on_click=go_prev_week, use_container_width=True)
 with col_nav2:
-    st.write("")
-    st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
+    st.button("Μετά ➡️", on_click=go_next_week, use_container_width=True)
 with col_today:
-    st.write("")
     st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 with col_zoom:
-    zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
+    zoom_level = st.slider("Ζουμ", min_value=50, max_value=200, value=100, step=5, label_visibility="collapsed")
 with col_pres:
-    st.write("")
-    st.write("")
-    presentation_mode = st.checkbox("📺 Λειτουργία Πλήρους Προβολής")
+    presentation_mode = st.checkbox("📺 Πλήρης Προβολή")
 
 zoom_factor = zoom_level / 100.0
 
@@ -140,8 +129,21 @@ st.markdown("""
 /* 1. Απλώνουμε την οθόνη του Streamlit στο 96% για να αφήσουμε λίγο κενό δεξιά-αριστερά */
 .block-container, [data-testid="block-container"] {
     max-width: 96% !important; 
+    padding-top: 1.0rem !important;
+    padding-bottom: 0.5rem !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
+}
+
+/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες) */
+div[data-testid="stNotification"], .stAlert {
+    padding: 6px 12px !important;
+    margin-top: 0px !important;
+    margin-bottom: 4px !important;
+}
+div[data-testid="stNotification"] p {
+    margin: 0 !important;
+    font-size: 14px !important;
 }
 
 /* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit για να μην φαίνονται "διπλά" κουτιά */
@@ -200,70 +202,79 @@ st.components.v1.html("""
 <script>
 const doc = window.parent.document;
 
+// Αναδρομική εύρεση του πραγματικού κυλιόμενου parent container
+const findScrollParent = (el) => {
+    let curr = el.parentElement;
+    while (curr && curr !== doc.body && curr !== doc.documentElement) {
+        const style = window.parent.getComputedStyle(curr);
+        const overflowY = style.overflowY || style.overflow || "";
+        if ((overflowY.includes('auto') || overflowY.includes('scroll')) && curr.scrollHeight > curr.clientHeight) {
+            return curr;
+        }
+        curr = curr.parentElement;
+    }
+    return el.closest('div[data-testid="stContainer"]') || el.closest('div[style*="overflow"]') || el.parentElement;
+};
+
+// Ευθυγράμμιση του άξονα των ωρών
+const alignAxis = (chart, scrollDiv) => {
+    try {
+        const iframe = chart.querySelector('iframe');
+        const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : chart;
+        const xAxis = plotDoc.querySelector('.xaxislayer-above');
+        if (xAxis) {
+            // Δημιουργία λευκού φόντου (μάσκας) κάτω από τις ώρες
+            if (!xAxis.querySelector('.sticky-bg')) {
+                const svgDoc = xAxis.ownerDocument || plotDoc;
+                const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bg.setAttribute('class', 'sticky-bg');
+                bg.setAttribute('width', '20000');
+                bg.setAttribute('height', '50');
+                bg.setAttribute('x', '-10000');
+                bg.setAttribute('y', '-25');
+                bg.setAttribute('fill', '#ffffff');
+                xAxis.insertBefore(bg, xAxis.firstChild);
+
+                // Οριζόντια διαχωριστική γραμμή
+                const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('class', 'sticky-line');
+                line.setAttribute('x1', '-10000');
+                line.setAttribute('x2', '10000');
+                line.setAttribute('y1', '25');
+                line.setAttribute('y2', '25');
+                line.setAttribute('stroke', '#1e293b');
+                line.setAttribute('stroke-width', '2');
+                xAxis.appendChild(line);
+            }
+            
+            // Μετακίνηση του άξονα Χ ακριβώς στο ύψος του scroll
+            const topScroll = scrollDiv.scrollTop;
+            xAxis.style.transform = `translateY(${topScroll}px)`;
+            xAxis.setAttribute('transform', `translate(0, ${topScroll})`);
+        }
+    } catch (err) {}
+};
+
 const setupGanttContainer = () => {
     const charts = doc.querySelectorAll('.stPlotlyChart');
     charts.forEach(chart => {
-        const wrapper = chart.closest('div[data-testid="stVerticalBlockBorderWrapper"]') || chart.closest('div[data-testid="stContainer"]');
-        
-        if (wrapper && wrapper.dataset.styledByScript !== "true") {
-            wrapper.dataset.styledByScript = "true";
-            
-            // Το scrollDiv είναι το στοιχείο που ελέγχει την κύλιση (scroll)
-            // Βρίσκουμε το πραγματικό εσωτερικό κυλιόμενο div που δημιουργεί το st.container(height=650)
-            let scrollDiv = wrapper.querySelector('div[style*="overflow: auto"]') || 
-                            wrapper.querySelector('div[style*="overflow-y"]') || 
-                            wrapper.children[0];
-            if (!scrollDiv) scrollDiv = wrapper;
-            
-            if (scrollDiv) {
-                // --- ΛΟΓΙΚΗ: STICKY X-AXIS (Ώρες στην κορυφή) κατά το scroll ---
-                const handleScroll = () => {
-                    try {
-                        const iframe = scrollDiv.querySelector('iframe');
-                        const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : scrollDiv;
-                        
-                        // Βρίσκουμε το layer του άξονα Χ (ώρες)
-                        const xAxis = plotDoc.querySelector('.xaxislayer-above');
-                        if (xAxis) {
-                            // Δημιουργία λευκού φόντου κάτω από τις ώρες για να κρύβει τις γραμμές που κυλούν από κάτω
-                            if (!xAxis.querySelector('.sticky-bg')) {
-                                const svgDoc = xAxis.ownerDocument || plotDoc;
-                                const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                                bg.setAttribute('class', 'sticky-bg');
-                                bg.setAttribute('width', '10000');
-                                bg.setAttribute('height', '50');
-                                bg.setAttribute('x', '-5000');
-                                bg.setAttribute('y', '-20');
-                                bg.setAttribute('fill', '#ffffff');
-                                xAxis.insertBefore(bg, xAxis.firstChild);
-                                
-                                // Προσθήκη μιας οριζόντιας γραμμής για καθαρό διαχωρισμό (Border bottom)
-                                const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
-                                line.setAttribute('class', 'sticky-line');
-                                line.setAttribute('x1', '-5000');
-                                line.setAttribute('x2', '5000');
-                                line.setAttribute('y1', '25');
-                                line.setAttribute('y2', '25');
-                                line.setAttribute('stroke', '#1e293b');
-                                line.setAttribute('stroke-width', '2');
-                                xAxis.appendChild(line);
-                            }
-                            // Μετακινεί τον άξονα Χ κατακόρυφα ώστε να παραμένει στην κορυφή. 
-                            // Η οριζόντια μετακίνηση (drag) γίνεται κανονικά από το ίδιο το Plotly!
-                            xAxis.style.transform = `translateY(${scrollDiv.scrollTop}px)`;
-                        }
-                    } catch (err) {}
-                };
-                
-                scrollDiv.addEventListener('scroll', handleScroll);
-                // Εκτέλεση άμεσα για σωστό αρχικό render
-                handleScroll();
+        const scrollDiv = findScrollParent(chart);
+        if (scrollDiv) {
+            // Προσθήκη event listener μόνο μία φορά ανά κυλιόμενο div
+            if (scrollDiv.dataset.hasScrollListener !== "true") {
+                scrollDiv.dataset.hasScrollListener = "true";
+                scrollDiv.addEventListener('scroll', () => {
+                    const childCharts = scrollDiv.querySelectorAll('.stPlotlyChart');
+                    childCharts.forEach(c => alignAxis(c, scrollDiv));
+                });
             }
+            // Εκτέλεση ευθυγράμμισης άμεσα (για lazy-loads ή refreshes)
+            alignAxis(chart, scrollDiv);
         }
     });
 };
 
-// Εκτέλεση άμεσα και επαναληπτικά κάθε 200ms για να πιάνει τα refreshes ακαριαία
+// Εκτέλεση άμεσα και επαναληπτικά κάθε 200ms για απόλυτη συνέπεια
 setupGanttContainer();
 setInterval(setupGanttContainer, 200);
 </script>
