@@ -72,7 +72,7 @@ def go_to_today():
     st.session_state.date_picker = new_date
 
 # --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ ---
-st.markdown("<h3 style='margin-top: -30px; margin-bottom: 10px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='margin-top: -30px; margin-bottom: 5px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
 
 col_date, col_nav1, col_nav2, col_today, col_zoom, col_pres = st.columns([1.5, 0.8, 0.8, 0.8, 1.5, 1.5])
 with col_date:
@@ -129,36 +129,35 @@ st.markdown("""
 /* 1. Απλώνουμε την οθόνη του Streamlit στο 98% για να αφήσουμε ελάχιστο κενό δεξιά-αριστερά και μειώνουμε τα κάθετα κενά! */
 .block-container, [data-testid="block-container"] {
     max-width: 98% !important; 
-    padding-top: 1.5rem !important;
-    padding-bottom: 1rem !important;
+    padding-top: 1.0rem !important;
+    padding-bottom: 0.5rem !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
 
 /* Συμπίεση των Alert Messages (Ορφανές Βάρδιες) */
-.stAlert {
-    padding: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
+div[data-testid="stNotification"], .stAlert {
+    padding: 6px 12px !important;
+    margin-top: 0px !important;
+    margin-bottom: 4px !important;
+}
+div[data-testid="stNotification"] p {
+    margin: 0 !important;
+    font-size: 14px !important;
 }
 
-/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit */
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit και εφαρμόζουμε το περίγραμμα και τη σκιά */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-}
-
-/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
-.stPlotlyChart > div, .stPlotlyChart iframe {
     border: 4px solid #1e293b !important;
     border-radius: 12px !important;
     box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.4) !important;
     background-color: #ffffff !important;
-    margin: 0 !important;
+    margin-left: 10px !important;
+    margin-right: 10px !important;
     padding: 0 !important;
 }
 
-/* 4. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
+/* 3. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
 [data-testid="stAppViewContainer"], 
 [data-testid="stMainBlockContainer"],
 [data-testid="stAppViewBlockContainer"],
@@ -192,7 +191,7 @@ with st.container(height=650):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# --- JAVASCRIPT: STICKY HEADER ΓΙΑ ΤΙΣ ΩΡΕΣ ---
+# --- JAVASCRIPT: STICKY HEADER ΓΙΑ ΤΙΣ ΩΡΕΣ ΚΑΙ DRAG TO SCROLL ---
 st.components.v1.html("""
 <script>
 const doc = window.parent.document;
@@ -206,12 +205,10 @@ const setupGanttContainer = () => {
             wrapper.dataset.styledByScript = "true";
             
             // Το scrollDiv είναι το στοιχείο που ελέγχει την κύλιση (scroll)
-            const scrollDiv = wrapper.children[0]; 
-            if (scrollDiv && !scrollDiv.dataset.grabScrollAttached) {
-                scrollDiv.dataset.grabScrollAttached = "true";
-                
+            const scrollDiv = wrapper; 
+            if (scrollDiv) {
                 // --- ΛΟΓΙΚΗ: STICKY X-AXIS (Ώρες στην κορυφή) κατά το scroll ---
-                scrollDiv.addEventListener('scroll', () => {
+                const handleScroll = () => {
                     try {
                         const iframe = scrollDiv.querySelector('iframe');
                         const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : scrollDiv;
@@ -246,15 +243,19 @@ const setupGanttContainer = () => {
                             xAxis.style.transform = `translateY(${scrollDiv.scrollTop}px)`;
                         }
                     } catch (err) {}
-                });
+                };
+                
+                scrollDiv.addEventListener('scroll', handleScroll);
+                // Εκτέλεση άμεσα για σωστό αρχικό render
+                handleScroll();
             }
         }
     });
 };
 
-// Εκτέλεση άμεσα και επαναληπτικά κάθε 500ms για να πιάνει τα refreshes
+// Εκτέλεση άμεσα και επαναληπτικά κάθε 200ms για να πιάνει τα refreshes ακαριαία
 setupGanttContainer();
-setInterval(setupGanttContainer, 500);
+setInterval(setupGanttContainer, 200);
 </script>
 """, height=0, width=0)
 
