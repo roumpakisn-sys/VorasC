@@ -111,7 +111,7 @@ current_gantt_params = {
 # --- ΚΛΗΣΗ ΤΟΥ GANTT CHART ΜΕΣΩ ΤΟΥ ΝΕΟΥ ENGINE ---
 @st.cache_data(show_spinner=False, max_entries=5)
 def get_cached_gantt(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map):
-    # Οι κάτω παύλες (_) λένε στο Streamlit να μην χάνει χρόνο ελέγχοντας αν άλλαξαν οι λίστες
+    # Οι κάτω παύλες (_) λένε στο Streamlit να μην χάνει χρόνο ελέγχοντας αν άλλαξαν οι λίστες (Ταχύτητα!)
     return gantt_engine.generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map)
 
 if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state and not st.session_state.get('data_dirty', False):
@@ -149,7 +149,17 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     background: transparent !important;
 }
 
-/* 3. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ (ΑΛΛΑ ΔΙΑΤΗΡΗΣΗ ΤΟΥ "RUNNING...") */
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
+.stPlotlyChart > div, .stPlotlyChart iframe {
+    border: 4px solid #1e293b !important;
+    border-radius: 12px !important;
+    box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.4) !important;
+    background-color: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 4. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
 [data-testid="stAppViewContainer"], 
 [data-testid="stMainBlockContainer"],
 [data-testid="stAppViewBlockContainer"],
@@ -168,8 +178,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 """, unsafe_allow_html=True)
 
 # Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit
-# Έχει προκαθορισμένο ύψος για να ενεργοποιείται το scrolling ΜΕΣΑ στο κουτί.
-with st.container(height=650):
+# ΑΦΑΙΡΕΘΗΚΕ ΤΟ "height=650" ΩΣΤΕ ΤΟ ΓΡΑΦΗΜΑ ΝΑ ΑΠΛΩΝΕΙ ΠΡΟΣ ΤΑ ΚΑΤΩ ΚΑΙ ΝΑ ΔΟΥΛΕΥΕΙ Η ΡΟΔΕΛΑ.
+with st.container():
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event:
@@ -183,98 +193,6 @@ with st.container(height=650):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# --- JAVASCRIPT: STYLING, DRAG TO SCROLL ΚΑΙ STICKY HEADER ---
-st.components.v1.html("""
-<script>
-const doc = window.parent.document;
-
-const setupGanttContainer = () => {
-    const charts = doc.querySelectorAll('.stPlotlyChart');
-    charts.forEach(chart => {
-        // Βρίσκουμε το γονικό στοιχείο (το container wrapper του Streamlit)
-        const wrapper = chart.closest('div[data-testid="stVerticalBlockBorderWrapper"]') || chart.closest('div[data-testid="stContainer"]');
-        
-        if (wrapper && wrapper.dataset.styledByScript !== "true") {
-            // Βάζουμε flag για να μην εκτελείται συνεχώς η αλλαγή
-            wrapper.dataset.styledByScript = "true";
-            
-            // Δυναμική επιβολή στυλ στο εξωτερικό κουτί (Border, Margin, Drop Shadow)
-            let currentStyle = wrapper.getAttribute("style") || "";
-            wrapper.setAttribute("style", currentStyle + " border: 3px solid #1e293b !important; border-radius: 12px !important; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25), 0 5px 15px rgba(0, 0, 0, 0.15) !important; margin-left: 10px !important; margin-right: 10px !important; background-color: #ffffff !important; overflow: hidden !important;");
-            
-            // Το scrollDiv είναι το στοιχείο που ελέγχει την κύλιση (scroll)
-            const scrollDiv = wrapper.children[0]; 
-            if (scrollDiv && !scrollDiv.dataset.grabScrollAttached) {
-                scrollDiv.dataset.grabScrollAttached = "true";
-                
-                let isDown = false;
-                let startY;
-                let scrollTop;
-                
-                // --- ΛΟΓΙΚΗ: DRAG ΓΙΑ ΟΡΙΖΟΝΤΙΑ/ΚΑΘΕΤΗ ΚΥΛΙΣΗ ---
-                scrollDiv.addEventListener('mousedown', (e) => {
-                    isDown = true;
-                    startY = e.pageY - scrollDiv.offsetTop;
-                    scrollTop = scrollDiv.scrollTop;
-                }, {capture: true});
-                
-                doc.addEventListener('mouseup', () => { isDown = false; }, {capture: true});
-                
-                doc.addEventListener('mousemove', (e) => {
-                    if (!isDown) return;
-                    const y = e.pageY - scrollDiv.offsetTop;
-                    const walk = (startY - y) * 1.5; 
-                    if (Math.abs(walk) > 2) {
-                        scrollDiv.scrollTop = scrollTop + walk;
-                    }
-                }, {capture: true});
-
-                // --- ΛΟΓΙΚΗ: STICKY X-AXIS (Ώρες στην κορυφή) ---
-                scrollDiv.addEventListener('scroll', () => {
-                    try {
-                        const iframe = scrollDiv.querySelector('iframe');
-                        const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : scrollDiv;
-                        
-                        // Βρίσκουμε το layer του άξονα Χ (ώρες)
-                        const xAxis = plotDoc.querySelector('.xaxislayer-above');
-                        if (xAxis) {
-                            // Δημιουργία λευκού φόντου κάτω από τις ώρες για να κρύβει τις γραμμές που κυλούν από κάτω
-                            if (!xAxis.querySelector('.sticky-bg')) {
-                                const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                                bg.setAttribute('class', 'sticky-bg');
-                                bg.setAttribute('width', '5000');
-                                bg.setAttribute('height', '50');
-                                bg.setAttribute('x', '-2000');
-                                bg.setAttribute('y', '-50');
-                                bg.setAttribute('fill', '#ffffff');
-                                xAxis.insertBefore(bg, xAxis.firstChild);
-                                
-                                // Προσθήκη μιας οριζόντιας γραμμής για διαχωρισμό
-                                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                                line.setAttribute('class', 'sticky-line');
-                                line.setAttribute('x1', '-2000');
-                                line.setAttribute('x2', '3000');
-                                line.setAttribute('y1', '0');
-                                line.setAttribute('y2', '0');
-                                line.setAttribute('stroke', '#1e293b');
-                                line.setAttribute('stroke-width', '3');
-                                xAxis.appendChild(line);
-                            }
-                            // Μετακινεί τον άξονα προς τα κάτω ακριβώς όσο σκρολάρει ο χρήστης
-                            xAxis.style.transform = `translateY(${scrollDiv.scrollTop}px)`;
-                        }
-                    } catch (err) {}
-                });
-            }
-        }
-    });
-};
-
-// Εκτέλεση άμεσα και επαναληπτικά κάθε 500ms για να πιάνει τα refreshes
-setupGanttContainer();
-setInterval(setupGanttContainer, 500);
-</script>
-""", height=0, width=0)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
@@ -322,7 +240,7 @@ if not presentation_mode:
                 with c_color: 
                     color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
                 with c_notes: 
-                    add_notes = st.text_input("Παρατηρηση (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                     
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
