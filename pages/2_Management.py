@@ -153,10 +153,10 @@ with tab2:
                             st.rerun()
                         else:
                             st.info("Δεν βρέθηκαν νέοι υπάλληλοι προς εισαγωγή (υπάρχουν ήδη).")
-                else:
-                    st.error(f"Το Excel πρέπει να περιέχει τις στήλες: {', '.join(required_cols)}")
-            except Exception as e:
-                st.error(f"Σφάλμα κατά την ανάγνωση: {e}")
+                    else:
+                        st.error(f"Το Excel πρέπει να περιέχει τις στήλες: {', '.join(required_cols)}")
+                except Exception as e:
+                    st.error(f"Σφάλμα κατά την ανάγνωση: {e}")
 
     st.subheader("Λίστα Προσωπικού")
     if not st.session_state.employees:
