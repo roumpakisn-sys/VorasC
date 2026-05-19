@@ -307,6 +307,12 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=len(ordered_categories)-0.5, y1=len(ordered_categories)-0.5, yref="y", line=dict(color="#1e293b", width=3))
             
     row_h = 50 * zoom_factor
+    margin_top = 50
+    margin_bottom = 10
+    
+    # Η μεταβλητή dyn_h είχε χαθεί. Την επαναφέραμε!
+    dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
+    dyn_h = max(250, dyn_h)
     
     y_range = [-0.5, len(ordered_categories) - 0.5]
             
