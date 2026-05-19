@@ -306,22 +306,24 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=-0.5, y1=-0.5, yref="y", line=dict(color="#1e293b", width=3))
     fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=len(ordered_categories)-0.5, y1=len(ordered_categories)-0.5, yref="y", line=dict(color="#1e293b", width=3))
             
+    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & "ΚΛΕΙΔΩΜΑ" ΑΞΟΝΑ Χ (Sticky Header) ---
     row_h = 50 * zoom_factor
     margin_top = 50
     margin_bottom = 10
     
-    # Η μεταβλητή dyn_h είχε χαθεί. Την επαναφέραμε!
-    dyn_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
-    dyn_h = max(250, dyn_h)
+    full_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
     
+    # Επαναφέρουμε το πλήρες ύψος για να λειτουργεί φυσιολογικά η ροδέλα του ποντικιού!
+    dyn_h = max(250, full_h)
     y_range = [-0.5, len(ordered_categories) - 0.5]
+    y_fixed = True
             
     fig.update_yaxes(
         categoryorder='array', categoryarray=ordered_categories,
         tickmode='array', tickvals=ordered_categories,
         ticktext=[tickvals_map[v] for v in ordered_categories],
         showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1,
-        automargin=True, range=y_range, fixedrange=True
+        automargin=True, range=y_range, fixedrange=y_fixed
     )
     fig.update_traces(
         textposition='inside', insidetextanchor='middle',
