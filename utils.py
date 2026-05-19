@@ -668,6 +668,19 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
+    # --- ΝΕΟ: ΕΞΥΠΝΟΣ ΦΥΛΑΚΑΣ ΕΠΙΤΑΧΥΝΣΗΣ (CACHE GUARD) ---
+    # Αποτρέπει το βαρύ χτίσιμο ευρετηρίων σε κάθε κλικ αν δεν υπάρχουν αλλαγές!
+    current_version = st.session_state.get('local_gantt_version', 0)
+    last_processed = st.session_state.get('last_processed_version', -1)
+    
+    if current_version == last_processed and 'emp_map' in st.session_state:
+        # Αν δεν άλλαξε η βάση, εκτελούμε μόνο τον ελαφρύ έλεγχο επεκτάσεων (1 φορά την ώρα)
+        if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+            auto_extend_recurring_patterns()
+            st.session_state.last_auto_extend_check = time.time()
+        return
+
+    # --- ΒΑΡΥΣ ΥΠΟΛΟΓΙΣΜΟΣ & ΕΚΚΑΘΑΡΙΣΗ (Εκτελείται ΜΟΝΟ όταν υπάρχουν αλλαγές) ---
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         if isinstance(a, dict):
@@ -710,6 +723,9 @@ def init_data_and_sync():
     st.session_state.leaves_by_emp = leaves_by_emp
     
     st.session_state.data_dirty = False
+    
+    # Ενημερώνουμε την έκδοση που μόλις επεξεργαστήκαμε!
+    st.session_state.last_processed_version = st.session_state.get('local_gantt_version', 0)
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
