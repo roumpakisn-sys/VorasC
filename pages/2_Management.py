@@ -153,19 +153,32 @@ with tab2:
                             st.rerun()
                         else:
                             st.info("Δεν βρέθηκαν νέοι υπάλληλοι προς εισαγωγή (υπάρχουν ήδη).")
-                    else:
-                        st.error(f"Το Excel πρέπει να περιέχει τις στήλες: {', '.join(required_cols)}")
-                except Exception as e:
-                    st.error(f"Σφάλμα κατά την ανάγνωση: {e}")
+                else:
+                    st.error(f"Το Excel πρέπει να περιέχει τις στήλες: {', '.join(required_cols)}")
+            except Exception as e:
+                st.error(f"Σφάλμα κατά την ανάγνωση: {e}")
 
     st.subheader("Λίστα Προσωπικού")
     if not st.session_state.employees:
         st.info("Δεν υπάρχει καταχωρημένο προσωπικό.")
     else:
         df_display = pd.DataFrame(st.session_state.employees)
-        df_display['Εξωτερικό Συνεργείο'] = df_display.get('is_external_crew', False).apply(lambda x: "Ναι" if x else "Όχι")
+        
+        # --- ΑΣΠΙΔΑ ΓΙΑ ΤΟ KEYERROR ---
+        # Αν κάποια στήλη λείπει (π.χ. από παλιές εγγραφές), τη δημιουργούμε δυναμικά
+        for col in ['name', 'specialty', 'status', 'id']:
+            if col not in df_display.columns:
+                df_display[col] = ""
+        if 'is_external_crew' not in df_display.columns:
+            df_display['is_external_crew'] = False
+            
+        # Μετατροπή της boolean στήλης σε Ναι/Όχι με ασφάλεια
+        df_display['Εξωτερικό Συνεργείο'] = df_display['is_external_crew'].apply(lambda x: "Ναι" if str(x).lower() in ['true', '1'] or x is True else "Όχι")
+        
+        # Επιλογή των τελικών στηλών
         df_display = df_display[['name', 'specialty', 'status', 'Εξωτερικό Συνεργείο', 'id']]
         df_display.columns = ['Ονοματεπώνυμο', 'Ειδικότητα', 'Κατάσταση', 'Εξωτερικό Συνεργείο', 'ID']
+        
         st.dataframe(df_display.drop(columns=['ID']), use_container_width=True)
         
         if is_full_admin:
