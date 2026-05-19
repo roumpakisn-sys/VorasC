@@ -1,8 +1,10 @@
 import streamlit as st
-from datetime import datetime, timedelta
 import pandas as pd
 import io
+from datetime import datetime, timedelta
+import config
 import utils
+import uuid
 
 def render_top_nav(go_prev_week, go_next_week, go_to_today):
     col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
@@ -10,8 +12,11 @@ def render_top_nav(go_prev_week, go_next_week, go_to_today):
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
-        start_of_week = selected_date - timedelta(days=selected_date.weekday())
+        selected_date = st.date_input("Επιλογή Εβδομάδας", value=st.session_state.view_week_date)
+        if selected_date != st.session_state.view_week_date:
+            st.session_state.view_week_date = selected_date
+            st.rerun()
+        start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -24,11 +29,10 @@ def render_top_nav(go_prev_week, go_next_week, go_to_today):
         st.write("")
         st.write("")
         presentation_mode = st.checkbox("📺 Λειτουργία Πλήρους Προβολής")
-        
     return selected_date, start_of_week, zoom_level, presentation_mode
 
 def render_export_section(export_data, start_of_week):
-    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μια μπάρα για επεξεργασία. **2)** Κλικ στο κενό (ή σε άλλη μέρα) για αποεπιλογή. **3)** Σύρετε πάνω-κάτω. **4)** Ζουμ από τη μπάρα."
+    hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
     if export_data:
         col_hint, col_btn = st.columns([3, 1])
         with col_hint: st.caption(hint_text)
@@ -38,7 +42,7 @@ def render_export_section(export_data, start_of_week):
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_export.to_excel(writer, index=False, sheet_name='Πρόγραμμα')
             st.download_button(
-                label="📥 Εξαγωγή Προγράμματος (Excel)", data=buffer.getvalue(),
+                label="📥 Εξαγωγή (Excel)", data=buffer.getvalue(),
                 file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -61,13 +65,18 @@ def render_quick_add_form(selected_date, active_employee_ids):
         proj_choice = st.selectbox("Επιλογή Έργου (Από Λίστα)", options=[p['id'] for p in st.session_state.projects], format_func=utils.get_project_name, key=f"qa_proj_{qa_rc}")
         custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (Αν συμπληρωθεί, αγνοεί την παραπάνω λίστα)", key=f"qa_cproj_{qa_rc}")
         emp_choices = st.multiselect("Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)", options=active_employee_ids, format_func=utils.get_employee_name, key=f"qa_emps_{qa_rc}")
+        
         c_color, c_notes = st.columns(2)
-        with c_color: color_choice = st.selectbox("Χρώμα Μπάρας", options=list(utils.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
-        with c_notes: add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+        with c_color: 
+            # ΔΙΟΡΘΩΣΗ: Αλλαγή από utils.BASIC_COLORS σε config.BASIC_COLORS
+            color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
+        with c_notes: 
+            add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+            
         c_arr, c_start, c_end = st.columns(3)
         with c_arr:
             use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
-            t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}", disabled=not use_arr)
+            t_arrival = st.time_input("Ώρα Προσέλευσης", value=datetime.strptime("08:00", "%H:%M").time(), key=f"qa_arrival_{qa_rc}")
         with c_start:
             t_start = st.time_input("Έναρξη", value=datetime.strptime("09:00", "%H:%M").time(), key=f"qa_start_{qa_rc}")
         with c_end:
@@ -125,8 +134,8 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
             
             e_color_col, e_notes_col = st.columns(2)
             with e_color_col:
-                default_color_idx = list(utils.BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in utils.BASIC_COLORS else 0
-                edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(utils.BASIC_COLORS.keys()), index=default_color_idx)
+                default_color_idx = list(config.BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in config.BASIC_COLORS else 0
+                edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(config.BASIC_COLORS.keys()), index=default_color_idx)
             with e_notes_col:
                 edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'])
                 
@@ -135,7 +144,7 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
             with e_arr:
                 use_arr_edit = st.checkbox("Με Προσέλευση", value=bool(existing_arr), key="edit_use_arr")
                 def_arr = datetime.strptime(existing_arr, "%H:%M").time() if existing_arr else datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time()
-                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time", disabled=not use_arr_edit)
+                new_t_arrival = st.time_input("Ώρα Προσ.", value=def_arr, key="edit_arrival_time")
             with e_start:
                 new_t_start = st.time_input("Νέα Έναρξη", value=datetime.strptime(str(target_group['StartTime'])[:5], "%H:%M").time())
             with e_end:
@@ -158,13 +167,13 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
                 
             if del_edit:
                 return {"action": "delete", "target_group": target_group}
+                
             if save_edit:
                 return {
-                    "action": "edit", "target_group": target_group, "edit_date": edit_date,
-                    "edit_proj": edit_proj, "edit_custom_proj_name": edit_custom_proj_name,
-                    "edit_emps": edit_emps, "edit_color": edit_color, "edit_notes": edit_notes,
-                    "use_arr_edit": use_arr_edit, "new_t_arrival": new_t_arrival,
-                    "new_t_start": new_t_start, "new_t_end": new_t_end,
-                    "e_is_cancelled": e_is_cancelled, "e_cancel_reason": e_cancel_reason
+                    "action": "edit", "target_group": target_group, "edit_date": edit_date, "edit_proj": edit_proj,
+                    "edit_custom_proj_name": edit_custom_proj_name, "edit_emps": edit_emps, "edit_color": edit_color,
+                    "edit_notes": edit_notes, "use_arr_edit": use_arr_edit, "new_t_arrival": new_t_arrival,
+                    "new_t_start": new_t_start, "new_t_end": new_t_end, "e_is_cancelled": e_is_cancelled,
+                    "e_cancel_reason": e_cancel_reason
                 }
     return None
