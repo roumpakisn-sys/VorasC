@@ -12,10 +12,23 @@ def render_top_nav(go_prev_week, go_next_week, go_to_today):
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        selected_date = st.date_input("Επιλογή Εβδομάδας", value=st.session_state.view_week_date)
+        # --- ΔΙΟΡΘΩΣΗ: Απόλυτο κλείδωμα της ημερομηνίας ---
+        # 1. Δημιουργούμε το key αν δεν υπάρχει
+        if "week_date_picker" not in st.session_state:
+            st.session_state.week_date_picker = st.session_state.view_week_date
+            
+        # 2. Συγχρονίζουμε το widget αν πατήθηκε κουμπί (πχ. Επόμενη/Προηγούμενη)
+        if st.session_state.week_date_picker != st.session_state.view_week_date:
+            st.session_state.week_date_picker = st.session_state.view_week_date
+
+        # 3. Το date_input τώρα ελέγχεται ΑΥΣΤΗΡΑ από το key
+        selected_date = st.date_input("Επιλογή Εβδομάδας", key="week_date_picker")
+        
+        # 4. Αν ο χρήστης επιλέξει άλλη ημερομηνία από το ημερολόγιο, ενημερώνουμε το σύστημα
         if selected_date != st.session_state.view_week_date:
             st.session_state.view_week_date = selected_date
             st.rerun()
+            
         start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
     with col_nav2:
         st.write("")
@@ -68,7 +81,6 @@ def render_quick_add_form(selected_date, active_employee_ids):
         
         c_color, c_notes = st.columns(2)
         with c_color: 
-            # ΔΙΟΡΘΩΣΗ: Αλλαγή από utils.BASIC_COLORS σε config.BASIC_COLORS
             color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
         with c_notes: 
             add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
