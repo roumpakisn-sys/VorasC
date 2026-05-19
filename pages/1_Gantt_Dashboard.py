@@ -6,6 +6,7 @@ import uuid
 import io
 import textwrap
 import time
+import re
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -204,7 +205,8 @@ else:
                 arrival_time = a.get('arrivalTime', "")
                 if arrival_time: arrival_time = arrival_time[:5]
                 
-                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{notes}_{is_canc}_{c_reason}_{arrival_time}"
+                # Αφαιρέθηκε το `notes` από το κλειδί ομαδοποίησης για να ενώνονται όλες οι εγγραφές της βάρδιας (ακόμα και οι άδειες)
+                key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{is_canc}_{c_reason}_{arrival_time}"
                 if key not in groups:
                     legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
                     groups[key] = {
@@ -213,9 +215,12 @@ else:
                         'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['startTime'])[:5], "%H:%M").time()),
                         'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
                         'Employees': [], 'EmployeeIds': [], 'AssignmentIds': [], 'ColorHex': c_hex, 'ColorName': c_name,
-                        'Notes': notes, 'is_cancelled': is_canc, 'cancel_reason': c_reason, 'LegendGroup': legend_val,
+                        'Notes_List': [], 'is_cancelled': is_canc, 'cancel_reason': c_reason, 'LegendGroup': legend_val,
                         'RecurringId': a.get('recurring_id') # ΣΗΜΑΝΤΙΚΟ: Αποθηκεύουμε τον κωδικό του μοτίβου (αν υπάρχει)
                     }
+                
+                if notes and notes not in groups[key]['Notes_List']:
+                    groups[key]['Notes_List'].append(notes)
                 
                 if not a.get('employeeId'):
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
@@ -255,6 +260,9 @@ else:
                 groups[key]['Employees'].append(formatted_name)
                 groups[key]['EmployeeIds'].append(a['employeeId'])
                 groups[key]['AssignmentIds'].append(a['id'])
+                
+            for g in groups.values():
+                g['Notes'] = " | ".join(g['Notes_List'])
                 
             wk_groups.update(groups)
             
@@ -517,7 +525,7 @@ if not presentation_mode:
             with st.form("quick_add", clear_on_submit=True):
                 c_date, c_dur = st.columns(2)
                 with c_date:
-                    add_date = st.date_input("Ημερομηνία", value=st.session_state.gantt_active_date, key=f"qa_date_{qa_rc}")
+                    add_date = st.date_input("Ημερομηνία", value=st.session_state.view_week_date, key=f"qa_date_{qa_rc}")
                 with c_dur:
                     duration_days = st.number_input("Διάρκεια (Συνεχόμενες Ημέρες)", min_value=1, max_value=365, value=1, step=1, key=f"qa_dur_{qa_rc}")
                     
@@ -689,6 +697,18 @@ if not presentation_mode:
                         edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
                         
                         valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
+                        
+                        # Ανάκτηση υπαλλήλων που βρίσκονται σε άδεια ή εμπλοκή από τις σημειώσεις (για να μην χαθούν απ' τη φόρμα)
+                        for note in target_group.get('Notes_List', []):
+                            matches = re.findall(r'\[(?:Άδεια|Εμπλοκή):\s*(.*?)\]', note)
+                            for match in matches:
+                                name_to_find = match.strip()
+                                for emp in st.session_state.employees:
+                                    if emp['name'].strip() == name_to_find:
+                                        if emp['id'] not in valid_emp_ids:
+                                            valid_emp_ids.append(emp['id'])
+                                        break
+                                        
                         edit_options = list(set(active_employee_ids + valid_emp_ids))
                         edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options, default=valid_emp_ids, format_func=utils.get_employee_name)
                         
@@ -697,7 +717,9 @@ if not presentation_mode:
                             default_color_idx = list(config.BASIC_COLORS.keys()).index(target_group['ColorName']) if target_group['ColorName'] in config.BASIC_COLORS else 0
                             edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(config.BASIC_COLORS.keys()), index=default_color_idx)
                         with e_notes_col:
-                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_group['Notes'])
+                            clean_note = re.sub(r'\[(?:Άδεια|Εμπλοκή):.*?\]', '', target_group.get('Notes', ''))
+                            clean_note = re.sub(r'\s*\|\s*', ' ', clean_note).strip()
+                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=clean_note)
                             
                         e_arr, e_start, e_end = st.columns(3)
                         existing_arr = target_group.get('ArrivalTime', '')
