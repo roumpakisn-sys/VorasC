@@ -754,12 +754,61 @@ if not presentation_mode:
                                         c_notes = f"{edit_notes} {va['msg']}".strip()
                                         
                                     new_a = {
-                                        'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_edit_proj_id,
-                                        'date': edit_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
-                                        'colorName': edit_color, 'colorHex': config.BASIC_COLORS[edit_color], 'notes': c_notes,
-                                        'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 'recurring_id': None
-                                    }
-                                    new_assigns.append(new_a)
-                                    st.session_state.assignments.append(new_a)
-                                utils.db_insert('assignments', new_assigns, track=False)
-                                st.rerun()
+                                    'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_edit_proj_id,
+                                    'date': edit_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
+                                    'colorName': edit_color, 'colorHex': config.BASIC_COLORS[edit_color], 'notes': c_notes,
+                                    'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 'recurring_id': None
+                                }
+                                new_assigns.append(new_a)
+                                st.session_state.assignments.append(new_a)
+                            utils.db_insert('assignments', new_assigns, track=False)
+                            st.rerun()
+
+# --- ΜΑΓΙΚΗ ΛΥΣΗ: Javascript για κάθετο Drag & Scroll με το ποντίκι ---
+st.components.v1.html("""
+<script>
+const doc = window.parent.document;
+// Εντοπίζουμε όλα τα κυλιόμενα δοχεία του Streamlit
+const wrappers = doc.querySelectorAll('div[data-testid="stVerticalBlockBorderWrapper"]');
+
+wrappers.forEach(wrapper => {
+    // Ψάχνουμε το δοχείο που περιέχει το γράφημα Plotly
+    if (wrapper.querySelector('.stPlotlyChart')) {
+        const scrollDiv = wrapper.children[0]; // Το εσωτερικό div που κάνει scroll
+        
+        // Αποτροπή διπλών εκτελέσεων σε κάθε ανανέωση της σελίδας
+        if (scrollDiv.dataset.grabScrollAttached) return;
+        scrollDiv.dataset.grabScrollAttached = "true";
+        
+        let isDown = false;
+        let startY;
+        let scrollTop;
+        
+        // Όταν "πιάνουμε" το διάγραμμα με το κλικ
+        scrollDiv.addEventListener('mousedown', (e) => {
+            isDown = true;
+            startY = e.pageY - scrollDiv.offsetTop;
+            scrollTop = scrollDiv.scrollTop;
+        }, {capture: true});
+        
+        // Όταν αφήνουμε το κλικ (οπουδήποτε στην οθόνη)
+        doc.addEventListener('mouseup', () => {
+            isDown = false;
+        }, {capture: true});
+        
+        // Όταν σέρνουμε το ποντίκι
+        doc.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            
+            const y = e.pageY - scrollDiv.offsetTop;
+            const walk = (startY - y) * 1.5; // Ταχύτητα κύλισης
+            
+            // Αν κουνήσουμε το ποντίκι κάθετα, κυλάμε το εσωτερικό παράθυρο
+            if (Math.abs(walk) > 2) {
+                scrollDiv.scrollTop = scrollTop + walk;
+            }
+        }, {capture: true});
+    }
+});
+</script>
+""", height=0, width=0)
