@@ -82,104 +82,13 @@ if day_leaves:
         ai_prompt += f"- {utils.get_employee_name(l['employeeId'])}\n"
 
 # Εμφάνιση Καρτελών
-tab_auto, tab_ai = st.tabs(["🚀 Αυτόματο Μήνυμα (Γρήγορο)", "🤖 Δημιουργία με AI (Gemini / ChatGPT)"])
+tab_auto, tab_ai = st.tabs(["🚀 Αυτόματο Μήνυμα (Γρήγορο)", "🤖 Δημιουργία με AI (ChatGPT)"])
 
 with tab_auto:
     st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και είναι έτοιμο για αντιγραφή. Κάντε κλικ στο εικονίδιο αντιγραφής επάνω δεξιά στο πλαίσιο.")
     st.code(viber_msg, language="markdown")
     
 with tab_ai:
-    st.write("Αν θέλετε ένα πιο προσαρμοσμένο, έξυπνο κείμενο (π.χ. 'Καλημέρα ομάδα!'), μπορείτε να ζητήσετε από την τεχνητή νοημοσύνη (Gemini) να το γράψει για εσάς.")
-    
-    # Ασφαλής μετατροπή του κειμένου για το JavaScript
-    raw_data_for_js = ai_prompt.replace('\n', '\\n').replace("'", "\\'").replace('"', '\\"')
-    
-    html_code = f"""
-    <div id="ai-container" style="font-family: sans-serif;">
-        <button id="gen-btn" style="background-color: #8e7cc3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold;">
-            ✨ Γράψε το με Gemini AI
-        </button>
-        <div id="loading" style="display:none; margin-top: 15px; color: #666;">⏳ Το AI σκέφτεται... παρακαλώ περιμένετε (διαρκεί λίγα δευτερόλεπτα)...</div>
-        <div id="error" style="display:none; margin-top: 15px; color: #dc2626;"></div>
-        <textarea id="ai-result" style="display:none; width: 100%; height: 300px; margin-top: 15px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; font-family: monospace; resize: vertical;" readonly></textarea>
-        <button id="copy-btn" style="display:none; margin-top: 10px; background-color: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: bold;">📋 Αντιγραφή Μηνύματος</button>
-    </div>
-    
-    <script>
-    document.getElementById('gen-btn').addEventListener('click', async () => {{
-        const btn = document.getElementById('gen-btn');
-        const loading = document.getElementById('loading');
-        const resultArea = document.getElementById('ai-result');
-        const errorArea = document.getElementById('error');
-        const copyBtn = document.getElementById('copy-btn');
-        
-        btn.disabled = true;
-        loading.style.display = 'block';
-        resultArea.style.display = 'none';
-        errorArea.style.display = 'none';
-        copyBtn.style.display = 'none';
-        
-        const apiKey = ""; 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${{apiKey}}`;
-        
-        const prompt = `{raw_data_for_js}`;
-        
-        const payload = {{
-            contents: [{{ parts: [{{ text: prompt }}] }}],
-            systemInstruction: {{ parts: [{{ text: "Είσαι ένας βοηθός διαχειριστή προσωπικού. Γράφεις πολύ φιλικά, ξεκάθαρα, και επαγγελματικά μηνύματα για το Viber. Χρησιμοποίησε κατάλληλα emojis. Μην είσαι φλύαρος." }}] }}
-        }};
-        
-        const sleep = ms => new Promise(r => setTimeout(r, ms));
-        const delays = [1000, 2000, 4000, 8000, 16000];
-        let data = null;
-        let success = false;
-        
-        for (let attempt = 0; attempt < 6; attempt++) {{
-            try {{
-                const response = await fetch(url, {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify(payload)
-                }});
-                
-                if (response.ok) {{
-                    data = await response.json();
-                    success = true;
-                    break;
-                }}
-            }} catch (e) {{
-                // Αγνοούμε τα σφάλματα δικτύου και ξαναπροσπαθούμε
-            }}
-            if (attempt < 5) await sleep(delays[attempt]);
-        }}
-        
-        loading.style.display = 'none';
-        btn.disabled = false;
-        
-        if (success && data && data.candidates && data.candidates[0].content) {{
-            const text = data.candidates[0].content.parts[0].text;
-            resultArea.value = text;
-            resultArea.style.display = 'block';
-            copyBtn.style.display = 'inline-block';
-            
-            copyBtn.onclick = () => {{
-                resultArea.select();
-                document.execCommand('copy');
-                copyBtn.innerText = '✔️ Αντιγράφηκε!';
-                setTimeout(() => copyBtn.innerText = '📋 Αντιγραφή Μηνύματος', 2000);
-            }};
-        }} else {{
-            errorArea.innerText = "Δεν κατέστη δυνατή η σύνδεση με το AI. Χρησιμοποιήστε το έτοιμο κείμενο (Prompt) παρακάτω για το ChatGPT.";
-            errorArea.style.display = 'block';
-        }}
-    }});
-    </script>
-    """
-    
-    import streamlit.components.v1 as components
-    components.html(html_code, height=450)
-    
-    st.markdown("---")
     st.subheader("📝 Χειροκίνητη Αντιγραφή (Prompt)")
-    st.info("Αν προτιμάτε να χρησιμοποιήσετε το **δικό σας ChatGPT**, αντιγράψτε το παρακάτω κείμενο και κάντε το επικόλληση εκεί.")
+    st.info("Αν προτιμάτε να χρησιμοποιήσετε το **δικό σας ChatGPT** για ένα πιο προσαρμοσμένο κείμενο, αντιγράψτε το παρακάτω κείμενο (με το εικονίδιο επάνω δεξιά) και κάντε το επικόλληση εκεί.")
     st.code(ai_prompt, language="text")
