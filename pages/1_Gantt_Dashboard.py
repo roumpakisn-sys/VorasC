@@ -206,77 +206,92 @@ const doc = window.parent.document;
 const findScrollParent = (el) => {
     let curr = el.parentElement;
     while (curr && curr !== doc.body && curr !== doc.documentElement) {
-        const style = window.parent.getComputedStyle(curr);
-        const overflowY = style.overflowY || style.overflow || "";
-        if ((overflowY.includes('auto') || overflowY.includes('scroll')) && curr.scrollHeight > curr.clientHeight) {
-            return curr;
+        if (curr.scrollHeight > curr.clientHeight) {
+            const style = window.parent.getComputedStyle(curr);
+            if (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto') {
+                return curr;
+            }
         }
         curr = curr.parentElement;
     }
-    return el.closest('div[data-testid="stContainer"]') || el.closest('div[style*="overflow"]') || el.parentElement;
+    // Fallback αν δεν βρεθεί ξεκάθαρα, συνήθως το st.container επιστρέφει το πρώτο div μέσα στο wrapper
+    return el.closest('div[data-testid="stVerticalBlockBorderWrapper"] > div') || el.closest('div[data-testid="stContainer"]') || el.parentElement;
 };
 
-// Ευθυγράμμιση του άξονα των ωρών
-const alignAxis = (chart, scrollDiv) => {
-    try {
-        const iframe = chart.querySelector('iframe');
-        const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : chart;
-        const xAxis = plotDoc.querySelector('.xaxislayer-above');
-        if (xAxis) {
-            // Δημιουργία λευκού φόντου (μάσκας) κάτω από τις ώρες
-            if (!xAxis.querySelector('.sticky-bg')) {
-                const svgDoc = xAxis.ownerDocument || plotDoc;
-                const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                bg.setAttribute('class', 'sticky-bg');
-                bg.setAttribute('width', '20000');
-                bg.setAttribute('height', '50');
-                bg.setAttribute('x', '-10000');
-                bg.setAttribute('y', '-25');
-                bg.setAttribute('fill', '#ffffff');
-                xAxis.insertBefore(bg, xAxis.firstChild);
-
-                // Οριζόντια διαχωριστική γραμμή
-                const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('class', 'sticky-line');
-                line.setAttribute('x1', '-10000');
-                line.setAttribute('x2', '10000');
-                line.setAttribute('y1', '25');
-                line.setAttribute('y2', '25');
-                line.setAttribute('stroke', '#1e293b');
-                line.setAttribute('stroke-width', '2');
-                xAxis.appendChild(line);
-            }
-            
-            // Μετακίνηση του άξονα Χ ακριβώς στο ύψος του scroll
-            const topScroll = scrollDiv.scrollTop;
-            xAxis.style.transform = `translateY(${topScroll}px)`;
-            xAxis.setAttribute('transform', `translate(0, ${topScroll})`);
-        }
-    } catch (err) {}
-};
-
-const setupGanttContainer = () => {
+// Η συνάρτηση που κρατάει τις ώρες "καρφωμένες" στην κορυφή (Sticky)
+const alignAxis = () => {
     const charts = doc.querySelectorAll('.stPlotlyChart');
     charts.forEach(chart => {
         const scrollDiv = findScrollParent(chart);
-        if (scrollDiv) {
-            // Προσθήκη event listener μόνο μία φορά ανά κυλιόμενο div
-            if (scrollDiv.dataset.hasScrollListener !== "true") {
-                scrollDiv.dataset.hasScrollListener = "true";
-                scrollDiv.addEventListener('scroll', () => {
-                    const childCharts = scrollDiv.querySelectorAll('.stPlotlyChart');
-                    childCharts.forEach(c => alignAxis(c, scrollDiv));
-                });
+        if (!scrollDiv) return;
+
+        try {
+            const iframe = chart.querySelector('iframe');
+            const plotDoc = (iframe && iframe.contentDocument) ? iframe.contentDocument : chart;
+            const xAxis = plotDoc.querySelector('.xaxislayer-above');
+            
+            if (xAxis) {
+                // 1. Δημιουργία λευκού φόντου (μάσκας) κάτω από τις ώρες
+                if (!xAxis.querySelector('.sticky-bg')) {
+                    const svgDoc = xAxis.ownerDocument || plotDoc;
+                    
+                    const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    bg.setAttribute('class', 'sticky-bg');
+                    bg.setAttribute('width', '20000');
+                    bg.setAttribute('height', '50');
+                    bg.setAttribute('x', '-10000');
+                    bg.setAttribute('y', '-25');
+                    bg.setAttribute('fill', '#ffffff');
+                    xAxis.insertBefore(bg, xAxis.firstChild);
+
+                    const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('class', 'sticky-line');
+                    line.setAttribute('x1', '-10000');
+                    line.setAttribute('x2', '10000');
+                    line.setAttribute('y1', '25');
+                    line.setAttribute('y2', '25');
+                    line.setAttribute('stroke', '#1e293b');
+                    line.setAttribute('stroke-width', '2');
+                    xAxis.appendChild(line);
+                }
+                
+                // 2. ΥΠΟΛΟΓΙΣΜΟΣ OFFSET - Το μυστικό για τέλειο Sticky effect!
+                // Παίρνουμε τις ακριβείς γεωμετρικές θέσεις του Container και του Γραφήματος
+                const scrollRect = scrollDiv.getBoundingClientRect();
+                const chartRect = (iframe || chart).getBoundingClientRect();
+                
+                // Υπολογίζουμε ακριβώς πόσα pixel έχει κρυφτεί το πάνω μέρος του γραφήματος
+                // λόγω του κάθετου scroll.
+                let hiddenTop = scrollRect.top - chartRect.top;
+                
+                // Αν δεν έχει κρυφτεί ακόμα (είμαστε στην κορυφή), δεν το κουνάμε
+                if (hiddenTop < 0) hiddenTop = 0; 
+                
+                // Μετατοπίζουμε ΤΟΝ ΑΞΟΝΑ κατακόρυφα προς τα κάτω για να παραμένει εμφανής!
+                xAxis.style.transform = `translateY(${hiddenTop}px)`;
+                xAxis.setAttribute('transform', `translate(0, ${hiddenTop})`);
             }
-            // Εκτέλεση ευθυγράμμισης άμεσα (για lazy-loads ή refreshes)
-            alignAxis(chart, scrollDiv);
+        } catch (err) {}
+    });
+};
+
+const attachListeners = () => {
+    const charts = doc.querySelectorAll('.stPlotlyChart');
+    charts.forEach(chart => {
+        const scrollDiv = findScrollParent(chart);
+        if (scrollDiv && scrollDiv.dataset.hasStickyListener !== "true") {
+            scrollDiv.dataset.hasStickyListener = "true";
+            // Κάθε φορά που γίνεται scroll, τρέχει η ευθυγράμμιση
+            scrollDiv.addEventListener('scroll', alignAxis);
         }
     });
 };
 
-// Εκτέλεση άμεσα και επαναληπτικά κάθε 200ms για απόλυτη συνέπεια
-setupGanttContainer();
-setInterval(setupGanttContainer, 200);
+// Εκτέλεση άμεσα και επαναληπτικά (κάθε 100ms) για να αντέχει σε refreshes και αλλαγές ζουμ
+setInterval(() => {
+    attachListeners();
+    alignAxis();
+}, 100);
 </script>
 """, height=0, width=0)
 
