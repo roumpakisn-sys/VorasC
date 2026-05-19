@@ -429,11 +429,11 @@ clicked_key = None
 # --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
 st.markdown("""
 <style>
-/* Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο τραβώντας τον στα αριστερά */
+/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο χωρίς να κολλάει στη sidebar */
 .block-container, [data-testid="block-container"] {
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-    max-width: 99% !important; 
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    max-width: 95% !important; /* Μείωση πλάτους στο 95% για απόσταση ασφαλείας από τη sidebar */
 }
 
 /* Αφαίρεση περιθωρίων από το ίδιο το γράφημα για να μην αφήνει κενά */
@@ -474,8 +474,14 @@ const setupGanttContainer = () => {
             wrapper.dataset.styledByScript = "true";
             
             // Δυναμική επιβολή στυλ με !important για να παρακάμψουμε κάθε ενσωματωμένο στυλ του Streamlit
+            // Αλλάξαμε τα margin-left σε θετικά (10px) για να μην κολλάει αριστερά και προσθέσαμε έντονο box-shadow εξωτερικά!
             let currentStyle = wrapper.getAttribute("style") || "";
-            wrapper.setAttribute("style", currentStyle + " border: 4px solid #1e293b !important; border-radius: 12px !important; box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.4) !important; margin-left: -35px !important; margin-right: -10px !important; background-color: #ffffff !important;");
+            wrapper.setAttribute("style", currentStyle + " border: 3px solid #1e293b !important; border-radius: 12px !important; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25), 0 5px 15px rgba(0, 0, 0, 0.15) !important; margin-left: 10px !important; margin-right: 10px !important; background-color: #ffffff !important; overflow: visible !important;");
+            
+            // Εξασφάλιση ότι και ο γονέας επιτρέπει την εμφάνιση της σκιάς (χωρίς overflow clipping)
+            if (wrapper.parentElement) {
+                wrapper.parentElement.style.overflow = "visible";
+            }
             
             // Εφαρμογή λογικής Drag to Scroll
             const scrollDiv = wrapper.children[0]; 
@@ -559,7 +565,7 @@ if not presentation_mode:
                 with c_color: 
                     color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
                 with c_notes: 
-                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+                    add_notes = st.text_input("Παρατηρηση (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                     
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
