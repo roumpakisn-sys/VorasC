@@ -52,28 +52,32 @@ active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('sta
 if "view_week_date" not in st.session_state:
     st.session_state.view_week_date = get_local_today()
 
+# ΣΗΜΑΝΤΙΚΟ: Χρησιμοποιούμε callbacks (on_click) για να αλλάζουμε την ημερομηνία με ασφάλεια!
+def go_prev_week():
+    st.session_state.view_week_date -= timedelta(days=7)
+
+def go_next_week():
+    st.session_state.view_week_date += timedelta(days=7)
+
+def go_to_today():
+    st.session_state.view_week_date = get_local_today()
+
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
 
 col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
 with col_nav1:
     st.write("")
-    if st.button("⬅️ Προηγούμενη", use_container_width=True):
-        st.session_state.view_week_date -= timedelta(days=7)
-        st.rerun()
+    st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
 with col_date:
     # Το key συνδέει ΑΠΕΥΘΕΙΑΣ το ημερολόγιο με τη μεταβλητή. ΔΕΝ μηδενίζεται ποτέ πια!
     selected_date = st.date_input("Επιλογή Εβδομάδας", key="view_week_date")
     start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
 with col_nav2:
     st.write("")
-    if st.button("Επόμενη ➡️", use_container_width=True):
-        st.session_state.view_week_date += timedelta(days=7)
-        st.rerun()
+    st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
 with col_today:
     st.write("")
-    if st.button("📅 Σήμερα", use_container_width=True):
-        st.session_state.view_week_date = get_local_today()
-        st.rerun()
+    st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 with col_zoom:
     zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
 with col_pres:
