@@ -30,6 +30,12 @@ utils.setup_shared_ui()
 
 st.title("⚙️ Διαχείριση Συστήματος")
 
+# --- ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ AUTO-POLLING ΣΤΗ ΔΙΑΧΕΙΡΙΣΗ ---
+# Η παρακάτω "κρυφή" σημαία λέει στη Javascript (του utils.py) να ΜΗΝ 
+# κάνει αυτόματη ανανέωση όσο είμαστε σε αυτή τη σελίδα, 
+# ώστε να μην χάνονται όσα πληκτρολογείς στις φόρμες!
+st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
+
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
