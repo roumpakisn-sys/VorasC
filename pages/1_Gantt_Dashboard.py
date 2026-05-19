@@ -6,6 +6,7 @@ import io
 import textwrap
 import time
 import re
+import base64
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -44,9 +45,24 @@ utils.setup_shared_ui()
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-# --- ΓΕΦΥΡΑ ΕΠΙΚΟΙΝΩΝΙΑΣ ΑΠΟ HTML COMPONENT ---
-# Θα χρησιμοποιήσουμε query params σαν "ασφαλή γέφυρα" (fallback) αλλά με HTML Form submit!
-clicked_key = st.query_params.get("edit_key", None)
+
+# --- ΓΕΦΥΡΑ ΕΠΙΚΟΙΝΩΝΙΑΣ JS -> PYTHON ΓΙΑ ΤΑ ΚΛΙΚ (ΧΩΡΙΣ LOGOUT!) ---
+if "clicked_key" not in st.session_state:
+    st.session_state.clicked_key = None
+
+# Δημιουργούμε δύο στοιχεία (input & button) τα οποία η JavaScript 
+# θα τα χειρίζεται αόρατα για να "ξυπνάει" την Python όταν πατάς μια μπάρα.
+bridge_val = st.text_input("bridge_input", key="bridge_input", label_visibility="collapsed")
+bridge_btn = st.button("BridgeBtn", key="bridge_btn")
+
+if bridge_btn and bridge_val:
+    try:
+        st.session_state.clicked_key = base64.b64decode(bridge_val.encode('utf-8')).decode('utf-8')
+    except:
+        pass
+
+clicked_key = st.session_state.clicked_key
+
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ---
 if "view_week_date" not in st.session_state:
@@ -122,13 +138,8 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
-# --- NATIVE HTML GANTT CHART BUILDER (ΜΕ BUTTONS ΓΙΑ ΚΛΙΚ!) ---
+# --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    # ΜΥΣΤΙΚΟ 1: Κάνουμε το "timeline" να είναι το 200% του πλάτους! 
-    # Έτσι οι 20 ώρες (04:00 - 24:00) απλώνονται σε 2πλάσιο πλάτος, 
-    # άρα η οθόνη δείχνει ακριβώς τις μισές (10 ώρες).
-    timeline_width_pct = int(200 * zoom_factor)
-    
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_short_names = {}
@@ -157,8 +168,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('.mygantt-container::-webkit-scrollbar-thumb:hover { background: #64748b; }')
     html_parts.append('.mygantt-header { position: sticky; top: 0; z-index: 50; display: flex; width: max-content; min-width: 100%; background: #ffffff; border-bottom: 3px solid #1e293b; }')
     html_parts.append('.mygantt-header-corner { position: sticky; left: 0; z-index: 60; width: 230px; flex-shrink: 0; background: #ffffff; border-right: 3px solid #1e293b; }')
-    # Το πλάτος της γραμμής του χρόνου!
-    html_parts.append(f'.mygantt-header-timeline {{ position: relative; height: 40px; width: {timeline_width_pct}%; flex-grow: 1; background: #ffffff; }}')
+    
+    # 200vw = Διπλάσιο πλάτος από την οθόνη. Εφόσον δείχνουμε 20 ώρες, 
+    # το 100% της οθόνης σου θα καταλαμβάνει ακριβώς 10 ώρες (06:00-16:00)!
+    html_parts.append(f'.mygantt-header-timeline {{ position: relative; height: 40px; min-width: calc(200vw * {zoom_factor}); flex-grow: 1; background: #ffffff; }}')
     html_parts.append('.mygantt-tick { position: absolute; border-left: 2px solid #94a3b8; height: 100%; padding-left: 4px; font-size: 13px; font-weight: bold; color: #334155; padding-top: 10px; }')
     html_parts.append('.mygantt-row { display: flex; width: max-content; min-width: 100%; border-bottom: 2px solid #e2e8f0; }')
     html_parts.append('.mygantt-row-odd { background-color: #ffffff; }')
@@ -168,9 +181,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('.mygantt-row-odd .mygantt-left { background-color: #ffffff; }')
     html_parts.append('.mygantt-row-even .mygantt-left { background-color: #f8fafc; }')
     html_parts.append('.mygantt-row-today .mygantt-left { background-color: #eef2ff; border-right: 3px solid #4f46e5; }')
-    html_parts.append(f'.mygantt-lanes {{ position: relative; width: {timeline_width_pct}%; flex-grow: 1; background-size: calc(100% / 20) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}')
     
-    # ΜΥΣΤΙΚΟ 2: Οι μπάρες είναι τώρα BUTTONS!
+    html_parts.append(f'.mygantt-lanes {{ position: relative; min-width: calc(200vw * {zoom_factor}); flex-grow: 1; background-size: calc(100% / 20) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}')
+    
     html_parts.append('.mygantt-bar { position: absolute; height: 38px; border: 1px solid black; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; cursor: pointer; transition: transform 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; }')
     html_parts.append('.mygantt-bar:hover { transform: scale(1.02); z-index: 30; box-shadow: 0 6px 12px rgba(0,0,0,0.3); outline: 2px solid #1e293b; }')
     html_parts.append('.mygantt-bar-text { line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }')
@@ -179,7 +192,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('<div class="mygantt-container" id="mygantt">')
     html_parts.append('<div class="mygantt-header"><div class="mygantt-header-corner"></div><div class="mygantt-header-timeline">')
     
-    # Ώρες: 04:00 έως 24:00
+    # Ώρες: 04:00 έως 24:00 (Σύνολο 20 ώρες)
     for h in range(4, 25):
         pct = ((h - 4) / 20) * 100
         lbl = f"{h:02d}:00" if h < 24 else "00:00"
@@ -275,10 +288,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
             bg_color = g['ColorHex']
             
-            safe_key = g['Key'].replace("'", "\\'")
+            # Κωδικοποιούμε το ID σε Base64 για απόλυτη ασφάλεια κατά τη μεταφορά
+            safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             tooltip = base_text.replace('<br>', ' ')
             
-            # Δημιουργούμε Button για να στέλνει τα δεδομένα.
+            # Οι μπάρες είναι Buttons που καλούν τη συνάρτηση sendClick της JS!
             html_parts.append(f'<button class="mygantt-bar" onclick="sendClick(\'{safe_key}\')" style="left:{left_pct}%; width:{width_pct}%; top:{top_px}px; background-color:{bg_color};" title="{tooltip}"><div class="mygantt-bar-text">{base_text}</div></button>')
 
         html_parts.append('</div></div>')
@@ -286,41 +300,75 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('</div>')
     
     # -------------------------------------------------------------------------
-    # JavaScript: Στέλνει το κλικ στο Parent (Streamlit) μέσω query parameter!
-    # Αυτόματο Scroll στις 06:00 (δηλαδή 2 ώρες = 2/20 = 10% του Width)
+    # JavaScript: Στέλνει το κλικ αόρατα στο Streamlit, χωρίς reload/logout!
+    # Αυτόματο Scroll στις 06:00 (το 06:00 είναι 2 ώρες μετά το 04:00, άρα 10% του Width)
     # -------------------------------------------------------------------------
     js_code = """
     <script>
-    var s = document.getElementById('mygantt');
-    
-    // Αυτόματο Scroll στο 06:00
-    if(!window.scrolled) {
-        window.scrolled = true;
-        setTimeout(()=>{ s.scrollLeft = s.scrollWidth * 0.10; }, 100);
-    }
-    
-    // Drag & Scroll Λογική
-    let isDown = false, isDragging = false, startX, scrollLeft;
-    s.addEventListener('mousedown', e => {
-        isDown = true; isDragging = false; s.style.cursor = 'grabbing';
-        startX = e.pageX - s.offsetLeft; scrollLeft = s.scrollLeft;
+    document.addEventListener("DOMContentLoaded", () => {
+        var s = document.getElementById('mygantt');
+        if(s) {
+            // Αυτόματο Scroll στο 06:00
+            setTimeout(()=>{ s.scrollLeft = s.scrollWidth * 0.10; }, 100);
+            
+            // Drag & Scroll
+            let isDown = false, startX, scrollLeft;
+            window.isDragging = false;
+            
+            s.addEventListener('mousedown', e => {
+                isDown = true; window.isDragging = false; s.style.cursor = 'grabbing';
+                startX = e.pageX - s.offsetLeft; scrollLeft = s.scrollLeft;
+            });
+            s.addEventListener('mouseleave', () => { isDown = false; s.style.cursor = 'auto'; });
+            s.addEventListener('mouseup', () => { isDown = false; s.style.cursor = 'auto'; });
+            s.addEventListener('mousemove', e => {
+                if(!isDown) return;
+                window.isDragging = true; e.preventDefault();
+                const x = e.pageX - s.offsetLeft;
+                s.scrollLeft = scrollLeft - (x - startX) * 1.5;
+            });
+            
+            // Κρύβουμε τα bridge inputs στο κεντρικό Streamlit παράθυρο για ομορφιά
+            setTimeout(() => {
+                try {
+                    let pDoc = window.parent.document;
+                    let inputs = Array.from(pDoc.querySelectorAll('input'));
+                    let inp = inputs.find(i => i.getAttribute('aria-label') === 'bridge_input');
+                    if (inp) {
+                        let wrap = inp.closest('div[data-testid="stTextInput"]');
+                        if (wrap) wrap.style.display = 'none';
+                    }
+                    let btns = Array.from(pDoc.querySelectorAll('button'));
+                    let btn = btns.find(b => b.innerText === 'BridgeBtn');
+                    if (btn) {
+                        let wrap = btn.closest('div[data-testid="stButton"]');
+                        if (wrap) wrap.style.display = 'none';
+                    }
+                } catch(e) {}
+            }, 100);
+        }
     });
-    s.addEventListener('mouseleave', () => { isDown = false; s.style.cursor = 'auto'; });
-    s.addEventListener('mouseup', () => { isDown = false; s.style.cursor = 'auto'; });
-    s.addEventListener('mousemove', e => {
-        if(!isDown) return;
-        isDragging = true; e.preventDefault();
-        const x = e.pageX - s.offsetLeft;
-        s.scrollLeft = scrollLeft - (x - startX) * 1.5;
-    });
-    
-    // Λειτουργία Κλικ: Ενημερώνει το Parent URL!
-    function sendClick(key) {
-        if(isDragging) return; // Μην κάνεις κλικ αν ο χρήστης έκανε σύρσιμο
-        var url = new URL(window.parent.location.href);
-        url.searchParams.set('edit_key', key);
-        window.parent.history.pushState({}, '', url);
-        window.parent.location.reload(); // Ανανεώνει το Streamlit!
+
+    function sendClick(b64key) {
+        if(window.isDragging) return; // Μην κάνεις κλικ αν ο χρήστης απλά έσυρε
+        try {
+            let pDoc = window.parent.document;
+            let inputs = Array.from(pDoc.querySelectorAll('input'));
+            let inp = inputs.find(i => i.getAttribute('aria-label') === 'bridge_input');
+            if (inp) {
+                // Γράφουμε το κλειδί στο κρυφό input του Streamlit
+                let setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+                setter.call(inp, b64key);
+                inp.dispatchEvent(new window.parent.Event('input', { bubbles: true }));
+                
+                // Πατάμε το κρυφό κουμπί για να ξυπνήσει η Python (ΧΩΡΙΣ Reload!)
+                setTimeout(() => {
+                    let btns = Array.from(pDoc.querySelectorAll('button'));
+                    let btn = btns.find(b => b.innerText === 'BridgeBtn');
+                    if (btn) btn.click();
+                }, 50);
+            }
+        } catch(e) { console.error("Bridge Error: ", e); }
     }
     </script>
     """
@@ -329,7 +377,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     
     return "".join(html_parts)
 
-# Χρησιμοποιούμε st.components.v1.html για ΝΑ ΜΗΝ ΣΠΑΣΕΙ ΠΟΤΕ!
+# Σχεδιάζουμε το γράφημα με ασφάλεια (ως iframe) - ΤΕΡΜΑ το τύπωμα κώδικα!
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 st.components.v1.html(html_chart, height=660, scrolling=False)
 
@@ -466,7 +514,7 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ (ΜΕΣΩ URL PARAMETER) ---
+                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ ΤΗΣ ΓΕΦΥΡΑΣ (Χωρίς URL Param) ---
                 default_idx = 0
                 if clicked_key and clicked_key in group_keys:
                     default_idx = group_keys.index(clicked_key) + 1
@@ -532,7 +580,7 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
-                            st.query_params.clear()
+                            st.session_state.clicked_key = None
                             st.rerun()
 
                     with st.form("quick_edit"):
@@ -596,7 +644,7 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
-                            st.query_params.clear()
+                            st.session_state.clicked_key = None
                             st.rerun()
                             
                         if save_edit:
@@ -660,5 +708,5 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
-                                st.query_params.clear()
+                                st.session_state.clicked_key = None
                                 st.rerun()
