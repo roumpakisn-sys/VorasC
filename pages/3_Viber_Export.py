@@ -17,7 +17,22 @@ utils.setup_shared_ui(show_menu=False)
 st.title("📱 Ημερήσιο Πρόγραμμα (Viber)")
 st.write("Δημιουργήστε το πρόγραμμα της ημέρας έτοιμο για αποστολή στο Viber.")
 
+# ΚΛΡΙΣΙΜΟ AUTO-REFRESH: Βάζουμε αυτό το κρυφό flag για να σταματήσει το auto-polling
+# να "κλέβει" τα κλικ στα checkboxes όσο είμαστε σε αυτή τη σελίδα.
+st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
+
 target_date = st.date_input("Επιλέξτε Ημερομηνία", value=date.today())
+
+# --- ΚΑΘΑΡΙΣΜΟΣ ΜΝΗΜΗΣ CHECKBOXES ΟΤΑΝ ΑΛΛΑΖΕΙ Η ΜΕΡΑ ---
+# Αν ο χρήστης αλλάξει μέρα, θέλουμε όλα τα έργα να είναι ξανά προεπιλεγμένα (True).
+if "viber_last_date" not in st.session_state or st.session_state.viber_last_date != target_date:
+    st.session_state.viber_last_date = target_date
+    for key in list(st.session_state.keys()):
+        if key.startswith("chk_proj_"):
+            del st.session_state[key]
+    if "chk_include_leaves" in st.session_state:
+        del st.session_state["chk_include_leaves"]
+
 st.divider()
 
 # 1. Συλλογή Δεδομένων για τη συγκεκριμένη ημέρα
@@ -35,22 +50,31 @@ for a in day_assigns:
 
 selected_project_ids = []
 
-# --- ΔΥΝΑΜΙΚΑ CHECKBOXES ΕΡΓΩΝ ---
+# --- ΔΥΝΑΜΙΚΑ CHECKBOXES ΕΡΓΩΝ (Με Session State) ---
 if unique_projects:
     st.markdown("#### ✅ Επιλογή Έργων προς Εξαγωγή")
     st.caption("Επιλέξτε ποια έργα θέλετε να συμπεριληφθούν στο τελικό μήνυμα.")
+    
+    # Αρχικοποίηση του state για να είναι όλα "Τσεκαρισμένα" by default
+    for pid in unique_projects.keys():
+        chk_key = f"chk_proj_{str(pid)}"
+        if chk_key not in st.session_state:
+            st.session_state[chk_key] = True
+            
+    if "chk_include_leaves" not in st.session_state:
+        st.session_state["chk_include_leaves"] = True
     
     # Δημιουργία στηλών για ωραία εμφάνιση (μέχρι 4 στήλες)
     cols = st.columns(min(len(unique_projects), 4))
     
     for i, (pid, pname) in enumerate(unique_projects.items()):
         with cols[i % len(cols)]:
-            # Τα Checkboxes είναι προεπιλεγμένα (True)
-            if st.checkbox(pname, value=True, key=f"chk_proj_{pid}"):
+            # Το "key" διαβάζει και γράφει κατευθείαν στο st.session_state
+            if st.checkbox(pname, key=f"chk_proj_{str(pid)}"):
                 selected_project_ids.append(pid)
                 
     st.write("")
-    include_leaves = st.checkbox("🌴 Εμφάνιση Αδειών / Απουσιών στο τέλος", value=True)
+    include_leaves = st.checkbox("🌴 Εμφάνιση Αδειών / Απουσιών στο τέλος", key="chk_include_leaves")
 else:
     include_leaves = True
 
