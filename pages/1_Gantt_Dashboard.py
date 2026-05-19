@@ -48,18 +48,29 @@ is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Απόλυτα Αλεξίσφαιρος) ---
-# Φτιάχνουμε μια μεταβλητή "εκτός" ελέγχου Streamlit Widgets (χωρίς key)
-if "gantt_active_date" not in st.session_state:
-    st.session_state.gantt_active_date = get_local_today()
+# Η view_week_date είναι η ΜΟΝΙΜΗ μνήμη που δεν διαγράφεται από το Streamlit
+if "view_week_date" not in st.session_state:
+    st.session_state.view_week_date = get_local_today()
 
+# Συγχρονίζει τη μόνιμη μνήμη με ό,τι επιλέγει ο χρήστης στο ημερολόγιο
+def sync_from_widget():
+    st.session_state.view_week_date = st.session_state.date_picker
+
+# ΣΗΜΑΝΤΙΚΟ: Τα callbacks ενημερώνουν ΚΑΙ τη μόνιμη μνήμη ΚΑΙ το widget!
 def go_prev_week():
-    st.session_state.gantt_active_date -= timedelta(days=7)
+    new_date = st.session_state.view_week_date - timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 def go_next_week():
-    st.session_state.gantt_active_date += timedelta(days=7)
+    new_date = st.session_state.view_week_date + timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 def go_to_today():
-    st.session_state.gantt_active_date = get_local_today()
+    new_date = get_local_today()
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
 
@@ -68,19 +79,14 @@ with col_nav1:
     st.write("")
     st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
 with col_date:
-    # Καταργούμε το key. Χρησιμοποιούμε μόνο το value.
-    # Αυτό λύνει οριστικά το πρόβλημα του "μηδενισμού" της εβδομάδας!
+    # Το ημερολόγιο παίρνει "value" από τη μόνιμη μνήμη. Έτσι επιβιώνει από κάθε rerun ή αλλαγή σελίδας!
     selected_date = st.date_input(
         "Επιλογή Εβδομάδας", 
-        value=st.session_state.gantt_active_date
+        value=st.session_state.view_week_date,
+        key="date_picker", 
+        on_change=sync_from_widget
     )
-    
-    # Χειροκίνητος συγχρονισμός: Αν ο χρήστης αλλάξει μέρα από το ημερολόγιο
-    if selected_date != st.session_state.gantt_active_date:
-        st.session_state.gantt_active_date = selected_date
-        st.rerun()
-        
-    start_of_week = st.session_state.gantt_active_date - timedelta(days=st.session_state.gantt_active_date.weekday())
+    start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
 with col_nav2:
     st.write("")
     st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
@@ -207,7 +213,8 @@ else:
                         'Start': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['startTime'])[:5], "%H:%M").time()),
                         'End': datetime.combine(datetime(1970, 1, 1), datetime.strptime(str(a['endTime'])[:5], "%H:%M").time()),
                         'Employees': [], 'EmployeeIds': [], 'AssignmentIds': [], 'ColorHex': c_hex, 'ColorName': c_name,
-                        'Notes': notes, 'is_cancelled': is_canc, 'cancel_reason': c_reason, 'LegendGroup': legend_val
+                        'Notes': notes, 'is_cancelled': is_canc, 'cancel_reason': c_reason, 'LegendGroup': legend_val,
+                        'RecurringId': a.get('recurring_id') # ΣΗΜΑΝΤΙΚΟ: Αποθηκεύουμε τον κωδικό του μοτίβου (αν υπάρχει)
                     }
                 
                 if not a.get('employeeId'):
@@ -779,7 +786,8 @@ if not presentation_mode:
                                         'id': str(uuid.uuid4()), 'employeeId': va['eid'], 'projectId': final_edit_proj_id,
                                         'date': edit_date, 'arrivalTime': str_arrival, 'startTime': va['start'], 'endTime': va['end'],
                                         'colorName': edit_color, 'colorHex': config.BASIC_COLORS[edit_color], 'notes': c_notes,
-                                        'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 'recurring_id': None
+                                        'is_cancelled': e_is_cancelled, 'cancel_reason': e_cancel_reason if e_is_cancelled else "", 
+                                        'recurring_id': target_group.get('RecurringId') # ΣΗΜΑΝΤΙΚΟ: Διατηρούμε τον κωδικό της επαναλαμβανόμενης βάρδιας!
                                     }
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
