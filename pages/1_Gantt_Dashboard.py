@@ -125,21 +125,34 @@ else:
     empty_shift_annotations = []
     wk_groups = {}
     
+    # --- ΥΠΕΡ-ΒΕΛΤΙΣΤΟΠΟΙΗΣΗ ΤΑΧΥΤΗΤΑΣ (Pre-computation) ---
+    # 1. Προ-υπολογισμός των σύντομων ονομάτων (για να γλιτώσουμε χιλιάδες split)
+    emp_short_names = {}
+    for emp in st.session_state.employees:
+        eid = emp['id']
+        full_name = emp['name']
+        parts = full_name.split()
+        emp_short_names[eid] = f"{parts[-1]} {parts[0][0]}." if len(parts) > 1 else full_name
+
+    # 2. Φιλτράρισμα αδειών ΜΟΝΟ για την τρέχουσα εβδομάδα
+    end_of_week = start_of_week + timedelta(days=6)
+    active_leaves_this_week = [l for l in st.session_state.leaves if l['startDate'] <= end_of_week and l['endDate'] >= start_of_week]
+
+    # 3. Εντοπισμός ενεργών εξωτερικών συνεργείων μια φορά
+    external_crews = [emp for emp in st.session_state.employees if emp.get('status', 'Ενεργός') == 'Ενεργός' and emp.get('is_external_crew', False)]
+    
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
+        
         leaves_today = []
-        for l in st.session_state.leaves:
+        for l in active_leaves_this_week:
             if l['startDate'] <= curr_date <= l['endDate']:
-                emp_full = utils.get_employee_name(l['employeeId'])
-                emp_parts = emp_full.split()
-                emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
+                emp_n = emp_short_names.get(l['employeeId'], utils.get_employee_name(l['employeeId']))
                 sub_id = l.get('substituteId')
                 if sub_id:
-                    sub_full = utils.get_employee_name(sub_id)
-                    sub_parts = sub_full.split()
-                    sub_n = f"{sub_parts[-1]} {sub_parts[0][0]}." if len(sub_parts) > 1 else sub_full
+                    sub_n = emp_short_names.get(sub_id, utils.get_employee_name(sub_id))
                     leaves_today.append(f"{emp_n} (Αντ: {sub_n})")
                 else:
                     leaves_today.append(f"{emp_n}")
@@ -148,24 +161,20 @@ else:
         leaves_dict = st.session_state.get('leaves_by_emp', {})
         day_assigns = st.session_state.get('assignments_by_date', {}).get(curr_date, [])
         
-        for emp in st.session_state.employees:
-            if emp.get('status', 'Ενεργός') == 'Ενεργός' and emp.get('is_external_crew', False):
-                eid = emp['id']
-                if scheduling.is_on_leave(eid, curr_date, leaves_dict):
-                    continue
-                
-                is_busy_after_10 = False
-                for a in day_assigns:
-                    if a.get('employeeId') == eid and not a.get('is_cancelled', False):
-                        if str(a.get('endTime', ''))[:5] > "10:00":
-                            is_busy_after_10 = True
-                            break
-                
-                if not is_busy_after_10:
-                    emp_full = emp['name']
-                    emp_parts = emp_full.split()
-                    emp_n = f"{emp_parts[-1]} {emp_parts[0][0]}." if len(emp_parts) > 1 else emp_full
-                    available_ext_crew.append(emp_n)
+        for emp in external_crews:
+            eid = emp['id']
+            if scheduling.is_on_leave(eid, curr_date, leaves_dict):
+                continue
+            
+            is_busy_after_10 = False
+            for a in day_assigns:
+                if a.get('employeeId') == eid and not a.get('is_cancelled', False):
+                    if str(a.get('endTime', ''))[:5] > "10:00":
+                        is_busy_after_10 = True
+                        break
+            
+            if not is_busy_after_10:
+                available_ext_crew.append(emp_short_names.get(eid, emp['name']))
 
         y_label_parts = [f"<b>{day_str}</b>"]
         
@@ -205,7 +214,6 @@ else:
                 arrival_time = a.get('arrivalTime', "")
                 if arrival_time: arrival_time = arrival_time[:5]
                 
-                # Αφαιρέθηκε το `notes` από το κλειδί ομαδοποίησης
                 key = f"{curr_date}_{a['projectId']}_{a['startTime']}_{a['endTime']}_{c_hex}_{is_canc}_{c_reason}_{arrival_time}"
                 if key not in groups:
                     legend_val = f"{proj['name']} ({c_name})" if proj else "Άγνωστο"
@@ -225,14 +233,7 @@ else:
                 if not a.get('employeeId'):
                     formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
                 else:
-                    full_name = utils.get_employee_name(a['employeeId'])
-                    name_parts = full_name.split()
-                    if len(name_parts) > 1:
-                        first_name_initial = name_parts[0][0] + "."
-                        last_name = name_parts[-1]
-                        formatted_name = f"{last_name} {first_name_initial}"
-                    else:
-                        formatted_name = full_name
+                    formatted_name = emp_short_names.get(a['employeeId'], utils.get_employee_name(a['employeeId']))
                         
                 prev_assigns = []
                 my_eid = a.get('employeeId')
@@ -426,25 +427,38 @@ else:
 
 clicked_key = None
 
-# --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
+# --- ΑΠΟΛΥΤΟ ΚΑΙ ΕΠΙΘΕΤΙΚΟ STYLING ΓΙΑ ΤΟ CONTAINER ---
 st.markdown("""
 <style>
-/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο χωρίς να κολλάει στη sidebar */
+/* 1. Απλώνουμε την οθόνη του Streamlit στο 96% για να αφήσουμε λίγο κενό δεξιά-αριστερά */
 .block-container, [data-testid="block-container"] {
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-    max-width: 95% !important; /* Μείωση πλάτους στο 95% για απόσταση ασφαλείας από τη sidebar */
+    max-width: 96% !important; 
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
 }
 
-/* Αφαίρεση περιθωρίων από το ίδιο το γράφημα για να μην αφήνει κενά */
-.stPlotlyChart {
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit για να μην φαίνονται "διπλά" κουτιά */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
+/* Αυτό ΔΕΝ μπορεί να το αγνοήσει το Streamlit γιατί εφαρμόζεται στο τελικό στοιχείο */
+.stPlotlyChart > div, .stPlotlyChart iframe {
+    border: 4px solid #1e293b !important;
+    border-radius: 12px !important;
+    box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.4) !important;
+    background-color: #ffffff !important;
     margin: 0 !important;
     padding: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-with st.container(height=650, border=True):
+# Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit (αφού το βάζουμε εμείς μέσω CSS παραπάνω)
+with st.container(height=650):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event:
@@ -458,66 +472,6 @@ with st.container(height=650, border=True):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# Javascript για δυναμικό Styling και κάθετο scroll
-st.components.v1.html("""
-<script>
-const doc = window.parent.document;
-
-const setupGanttContainer = () => {
-    const charts = doc.querySelectorAll('.stPlotlyChart');
-    charts.forEach(chart => {
-        // Βρίσκουμε το γονικό στοιχείο (το container wrapper του Streamlit)
-        const wrapper = chart.closest('div[data-testid="stVerticalBlockBorderWrapper"]') || chart.closest('div[data-testid="stContainer"]');
-        
-        if (wrapper && wrapper.dataset.styledByScript !== "true") {
-            // Βάζουμε flag για να μην εκτελείται συνεχώς η αλλαγή
-            wrapper.dataset.styledByScript = "true";
-            
-            // Δυναμική επιβολή στυλ με !important για να παρακάμψουμε κάθε ενσωματωμένο στυλ του Streamlit
-            // Αλλάξαμε τα margin-left σε θετικά (10px) για να μην κολλάει αριστερά και προσθέσαμε έντονο box-shadow εξωτερικά!
-            let currentStyle = wrapper.getAttribute("style") || "";
-            wrapper.setAttribute("style", currentStyle + " border: 3px solid #1e293b !important; border-radius: 12px !important; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25), 0 5px 15px rgba(0, 0, 0, 0.15) !important; margin-left: 10px !important; margin-right: 10px !important; background-color: #ffffff !important; overflow: visible !important;");
-            
-            // Εξασφάλιση ότι και ο γονέας επιτρέπει την εμφάνιση της σκιάς (χωρίς overflow clipping)
-            if (wrapper.parentElement) {
-                wrapper.parentElement.style.overflow = "visible";
-            }
-            
-            // Εφαρμογή λογικής Drag to Scroll
-            const scrollDiv = wrapper.children[0]; 
-            if (scrollDiv && !scrollDiv.dataset.grabScrollAttached) {
-                scrollDiv.dataset.grabScrollAttached = "true";
-                
-                let isDown = false;
-                let startY;
-                let scrollTop;
-                
-                scrollDiv.addEventListener('mousedown', (e) => {
-                    isDown = true;
-                    startY = e.pageY - scrollDiv.offsetTop;
-                    scrollTop = scrollDiv.scrollTop;
-                }, {capture: true});
-                
-                doc.addEventListener('mouseup', () => { isDown = false; }, {capture: true});
-                
-                doc.addEventListener('mousemove', (e) => {
-                    if (!isDown) return;
-                    const y = e.pageY - scrollDiv.offsetTop;
-                    const walk = (startY - y) * 1.5; 
-                    if (Math.abs(walk) > 2) {
-                        scrollDiv.scrollTop = scrollTop + walk;
-                    }
-                }, {capture: true});
-            }
-        }
-    });
-};
-
-// Εκτέλεση άμεσα και επαναληπτικά κάθε 500ms για να πιάνει τα refreshes
-setupGanttContainer();
-setInterval(setupGanttContainer, 500);
-</script>
-""", height=0, width=0)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
