@@ -429,25 +429,22 @@ clicked_key = None
 # --- ΑΝΑΝΕΩΜΕΝΟ STYLING ΓΙΑ ΤΟ CONTAINER ΤΟΥ GANTT ---
 st.markdown("""
 <style>
-/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο */
+/* 1. Εξασφάλιση ότι ο κεντρικός καμβάς του Streamlit δίνει χώρο τραβώντας τον στα αριστερά */
 [data-testid="block-container"] {
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-    max-width: 98% !important; /* Να πιάνει σχεδόν όλη την οθόνη */
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    max-width: 100% !important; 
 }
 
-/* 2. Δυναμικό CSS που εφαρμόζεται κατευθείαν στο container του διαγράμματος */
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 3px solid #334155 !important; /* Παχιά, σκούρα μπλε/γκρι γραμμή */
+/* 2. Στοχεύουμε ΟΛΑ τα container με border στη σελίδα για να είμαστε 100% σίγουροι */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 4px solid #1e293b !important; /* Έντονο, σκούρο περίγραμμα */
     border-radius: 12px !important;
     background-color: #ffffff !important;
-    box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.3) !important; /* Πολύ πιο έντονη 3D σκιά */
-    margin-left: -40px !important; /* Δυνατό τράβηγμα προς τα αριστερά */
-    margin-right: -20px !important; /* Τράβηγμα προς τα δεξιά */
-    padding: 0 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important; /* Ξεκάθαρη και δυνατή εξωτερική σκιά */
 }
 
-/* Αφαίρεση περιθωρίων από το ίδιο το γράφημα για να μην αφήνει κενά */
+/* Μειώνουμε τα κενά μέσα στο γράφημα για να απλώσει καλύτερα */
 .stPlotlyChart {
     margin: 0 !important;
     padding: 0 !important;
