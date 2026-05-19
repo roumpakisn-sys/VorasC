@@ -143,7 +143,9 @@ wk_groups, export_data = get_cached_data(
 
 # --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    min_width_px = int(2400 * zoom_factor) # 20 Ώρες πλέον (04:00 - 24:00)
+    # Πλάτος γραμμής: 200% = 20 ώρες, άρα το 100% (οθόνη) ισούται ακριβώς με 10 ώρες!
+    timeline_width_pct = int(200 * zoom_factor)
+    
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_short_names = {}
@@ -171,7 +173,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('.mygantt-container::-webkit-scrollbar-thumb:hover { background: #64748b; }')
     html_parts.append('.mygantt-header { position: sticky; top: 0; z-index: 50; display: flex; width: max-content; min-width: 100%; background: #ffffff; border-bottom: 3px solid #1e293b; }')
     html_parts.append('.mygantt-header-corner { position: sticky; left: 0; z-index: 60; width: 230px; flex-shrink: 0; background: #ffffff; border-right: 3px solid #1e293b; }')
-    html_parts.append(f'.mygantt-header-timeline {{ position: relative; height: 40px; width: {min_width_px}px; flex-grow: 1; background: #ffffff; }}')
+    html_parts.append(f'.mygantt-header-timeline {{ position: relative; height: 40px; width: {timeline_width_pct}%; flex-grow: 1; background: #ffffff; }}')
     html_parts.append('.mygantt-tick { position: absolute; border-left: 2px solid #94a3b8; height: 100%; padding-left: 4px; font-size: 13px; font-weight: bold; color: #334155; padding-top: 10px; }')
     html_parts.append('.mygantt-row { display: flex; width: max-content; min-width: 100%; border-bottom: 2px solid #e2e8f0; }')
     html_parts.append('.mygantt-row-odd { background-color: #ffffff; }')
@@ -181,7 +183,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     html_parts.append('.mygantt-row-odd .mygantt-left { background-color: #ffffff; }')
     html_parts.append('.mygantt-row-even .mygantt-left { background-color: #f8fafc; }')
     html_parts.append('.mygantt-row-today .mygantt-left { background-color: #eef2ff; border-right: 3px solid #4f46e5; }')
-    html_parts.append(f'.mygantt-lanes {{ position: relative; width: {min_width_px}px; flex-grow: 1; background-size: calc(100% / 20) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}')
+    html_parts.append(f'.mygantt-lanes {{ position: relative; width: {timeline_width_pct}%; flex-grow: 1; background-size: calc(100% / 20) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}')
     html_parts.append('.mygantt-bar { position: absolute; height: 38px; border: 1px solid black; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black !important; cursor: pointer; transition: transform 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; }')
     html_parts.append('.mygantt-bar:hover { transform: scale(1.02); z-index: 30; box-shadow: 0 6px 12px rgba(0,0,0,0.3); outline: 2px solid #1e293b; }')
     html_parts.append('.mygantt-bar-text { text-align: center; line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }')
@@ -285,43 +287,39 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
             bg_color = g['ColorHex']
             
-            # Ασφαλής κωδικοποίηση του key για να περάσει στη JavaScript χωρίς errors
             safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             tooltip = base_text.replace('<br>', ' ')
             
-            # DIV αντί για A (link), για να ελέγχουμε το κλικ με JavaScript!
             html_parts.append(f'<div class="mygantt-bar" data-key="{safe_key}" style="left:{left_pct}%; width:{width_pct}%; top:{top_px}px; background-color:{bg_color};" title="{tooltip}"><div class="mygantt-bar-text">{base_text}</div></div>')
 
         html_parts.append('</div></div>')
 
     html_parts.append('</div>')
     
-    # 1. Drag to Scroll
-    # 2. Αυτόματο Scroll στο 06:00 (το 06:00 είναι 2 ώρες μετά το 04:00, άρα 2/20 = 10%)
-    # 3. ΑΟΡΑΤΗ ΓΕΦΥΡΑ ΓΙΑ ΤΟ ΚΛΙΚ (Διαχωρισμός Drag από Click)
+    # KΑΘΑΡΗ JAVASCRIPT: Χωρίς διπλά εισαγωγικά, ασφαλής για το onerror HTML tag!
     drag_js = """
     var s=document.getElementById('mygantt');
     if(s&&!s.dataset.d){
         s.dataset.d='1';
-        setTimeout(()=>{s.scrollLeft=(s.scrollWidth/20)*2;},100);
-        let d=false, isDragging=false, x, l;
-        s.addEventListener('mousedown',e=>{d=true;isDragging=false;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});
-        s.addEventListener('mouseleave',()=>{d=false;s.style.cursor='auto';});
-        s.addEventListener('mouseup',()=>{d=false;s.style.cursor='auto';});
-        s.addEventListener('mousemove',e=>{if(!d)return;isDragging=true;e.preventDefault();s.scrollLeft=l-(e.pageX-s.offsetLeft-x)*1.5;});
+        setTimeout(()=>{s.scrollLeft=s.scrollWidth*0.10;},50);
+        let d=false, isDrg=false, x, l;
+        s.addEventListener('mousedown', e=>{d=true;isDrg=false;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});
+        s.addEventListener('mouseleave', ()=>{d=false;s.style.cursor='auto';});
+        s.addEventListener('mouseup', ()=>{d=false;s.style.cursor='auto';});
+        s.addEventListener('mousemove', e=>{if(!d)return;isDrg=true;e.preventDefault();s.scrollLeft=l-(e.pageX-s.offsetLeft-x)*1.5;});
         s.addEventListener('click', e=>{
-            if(isDragging) return; // Αγνοούμε το κλικ αν ο χρήστης έκανε drag (σύρσιμο)
+            if(isDrg) return;
             var bar = e.target.closest('.mygantt-bar');
             if(bar){
                 var key = bar.getAttribute('data-key');
-                var inp = document.querySelector('input[aria-label="bridge_input"]');
+                var inp = document.querySelector('input[aria-label=bridge_input]');
                 if(inp){
                     var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                     setter.call(inp, key);
-                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                    inp.dispatchEvent(new Event('input',{bubbles:true}));
                     setTimeout(()=>{
                         var btns = Array.from(document.querySelectorAll('button'));
-                        var btn = btns.find(b => b.innerText.includes('BridgeBtn'));
+                        var btn = btns.find(b=>b.innerText.includes('BridgeBtn'));
                         if(btn) btn.click();
                     }, 50);
                 }
@@ -329,16 +327,20 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         });
         setTimeout(()=>{
             var btns = Array.from(document.querySelectorAll('button'));
-            var btn = btns.find(b => b.innerText.includes('BridgeBtn'));
+            var btn = btns.find(b=>b.innerText.includes('BridgeBtn'));
             if(btn){
-                var bw = btn.closest('div[data-testid="stButton"]');
-                if(bw) bw.style.display = 'none';
+                var p=btn.parentElement.parentElement;
+                if(p) p.style.display='none';
             }
-        }, 50);
+        }, 10);
     }
     """
-    html_parts.append(f'<img src="dummy.png" style="display:none;" onerror="{drag_js.replace(chr(10), " ")}">')
-    return "".join(html_parts).replace('\n', ' ')
+    
+    # Καθαρισμός αλλαγών γραμμής για να μην μπερδεύεται το Streamlit Markdown
+    clean_drag_js = drag_js.replace('\n', ' ').strip()
+    html_parts.append(f"<img src='dummy.png' style='display:none;' onerror='{clean_drag_js}'>")
+    
+    return "".join(html_parts)
 
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 st.markdown(html_chart, unsafe_allow_html=True)
