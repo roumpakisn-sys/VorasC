@@ -3,6 +3,13 @@ import plotly.express as px
 from datetime import datetime, date, timedelta
 import textwrap
 
+def get_local_today():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Athens")).date()
+    except Exception:
+        return (datetime.utcnow() + timedelta(hours=3)).date()
+
 def get_employee_name(emp_id, emp_map):
     if not emp_id: return "Χωρίς Προσωπικό"
     emp = emp_map.get(emp_id)
@@ -46,9 +53,9 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         leaves_by_emp_dict[eid].append(l)
 
     def is_on_leave_fast(eid, check_date):
-         for l in leaves_by_emp_dict.get(eid, []):
-             if l['startDate'] <= check_date <= l['endDate']: return True
-         return False
+        for l in leaves_by_emp_dict.get(eid, []):
+            if l['startDate'] <= check_date <= l['endDate']: return True
+        return False
 
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
     for i in range(7):
