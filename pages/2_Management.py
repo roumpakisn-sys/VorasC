@@ -104,6 +104,7 @@ elif menu == "Προσωπικό":
         with c3:
             e_pos = st.selectbox("Θέση", ["ΕΡΓΑΤΗΣ", "ΕΠΟΠΤΗΣ", "ΟΔΗΓΟΣ"], key=f"new_emp_pos_{erc}")
             e_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"], key=f"new_emp_status_{erc}")
+            e_ext = st.checkbox("Εξωτερικό Συνεργείο;", key=f"new_emp_ext_{erc}")
             
         st.write("")
         col_btn1, col_btn2 = st.columns([1, 1])
@@ -130,7 +131,7 @@ elif menu == "Προσωπικό":
                         is_duplicate = True
                         break
                 if not is_duplicate:
-                    new_e = {'id': str(uuid.uuid4()), 'name': e_name, 'position': e_pos.strip(), 'id_number': e_id_num.strip(), 'phone': e_phone.strip(), 'status': e_status}
+                    new_e = {'id': str(uuid.uuid4()), 'name': e_name, 'position': e_pos.strip(), 'id_number': e_id_num.strip(), 'phone': e_phone.strip(), 'status': e_status, 'is_external_crew': e_ext}
                     st.session_state.employees.append(new_e)
                     utils.db_insert('employees', new_e)
                     st.success(f"Ο/Η '{e_name}' προστέθηκε με επιτυχία! Η σελίδα ανανεώνεται...")
@@ -163,6 +164,7 @@ elif menu == "Προσωπικό":
                     ed_pos = st.selectbox("Θέση", pos_options, index=pos_index, key=f"ed_pos_{emp_to_edit_id}")
                     current_status = emp_to_edit.get('status', 'Ενεργός')
                     ed_status = st.selectbox("Κατάσταση", ["Ενεργός", "Ανενεργός"], index=0 if current_status == 'Ενεργός' else 1, key=f"ed_status_{emp_to_edit_id}")
+                    ed_ext = st.checkbox("Εξωτερικό Συνεργείο;", value=bool(emp_to_edit.get('is_external_crew', False)), key=f"ed_ext_{emp_to_edit_id}")
                 
                 if st.form_submit_button("💾 Αποθήκευση Αλλαγών", type="primary"):
                     ed_name = f"{ed_fname.strip()} {ed_lname.strip()}".strip()
@@ -180,7 +182,7 @@ elif menu == "Προσωπικό":
                                     is_dup = True; break
                         if not is_dup:
                             old_emp_data = dict(emp_to_edit)
-                            emp_to_edit.update({'name': ed_name, 'position': ed_pos.strip(), 'id_number': ed_id_num.strip(), 'phone': ed_phone.strip(), 'status': ed_status})
+                            emp_to_edit.update({'name': ed_name, 'position': ed_pos.strip(), 'id_number': ed_id_num.strip(), 'phone': ed_phone.strip(), 'status': ed_status, 'is_external_crew': ed_ext})
                             utils.db_update('employees', emp_to_edit_id, emp_to_edit, old_data=old_emp_data)
                             st.success("Οι αλλαγές αποθηκεύτηκαν!")
                             st.session_state.emp_reset_counter += 1
@@ -190,7 +192,7 @@ elif menu == "Προσωπικό":
     with tab_import:
         st.write("### 📁 Μαζική Εισαγωγή Υπαλλήλων")
         st.write("Κατεβάστε το Google Sheet σας ως αρχείο Excel (.xlsx) ή CSV και ανεβάστε το εδώ.")
-        st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό', 'Κατάσταση') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
+        st.info("Το αρχείο πρέπει να περιέχει οπωσδήποτε μια στήλη με όνομα **'Ονοματεπώνυμο'** (ή 'Name'). Οι υπόλοιπες στήλες ('Θέση', 'Αριθμός Ταυτότητας', 'Κινητό', 'Κατάσταση', 'Εξωτερικό Συνεργείο') θα διαβαστούν αυτόματα εφόσον υπάρχουν.")
         with st.form("import_form", clear_on_submit=True):
             uploaded_file = st.file_uploader("Επιλέξτε αρχείο Excel ή CSV", type=['csv', 'xlsx'])
             submit_import = st.form_submit_button("Εκτέλεση Εισαγωγής", type="primary")
@@ -208,6 +210,7 @@ elif menu == "Προσωπικό":
                         id_col = next((orig for orig, c in zip(df_import.columns, cols) if 'ταυτοτ' in c or 'ταυτότ' in c or 'αδτ' in c or 'id' in c), None)
                         phone_col = next((orig for orig, c in zip(df_import.columns, cols) if 'τηλ' in c or 'κινητ' in c or 'phone' in c), None)
                         status_col = next((orig for orig, c in zip(df_import.columns, cols) if 'καταστ' in c or 'κατάστ' in c or 'status' in c or 'ενεργ' in c or 'active' in c), None)
+                        ext_col = next((orig for orig, c in zip(df_import.columns, cols) if 'εξωτερικ' in c or 'συνεργει' in c or 'external' in c), None)
                         
                         new_employees_batch = []
                         with st.spinner("Εισαγωγή Δεδομένων..."):
@@ -232,13 +235,18 @@ elif menu == "Προσωπικό":
                                     if any(kw in val for kw in ["ανενεργ", "inactive", "false", "0", "οχι", "όχι", "no", "αποχωρ", "παραιτ"]):
                                         e_status = "Ανενεργός"
                                         
+                                e_ext = False
+                                if ext_col and pd.notna(row[ext_col]):
+                                    val = str(row[ext_col]).strip().lower()
+                                    if any(kw in val for kw in ["ναι", "yes", "true", "1"]): e_ext = True
+                                        
                                 is_duplicate = False
                                 for emp in st.session_state.employees:
                                     if emp['name'].strip().lower() == e_name.lower() or (e_id_num and emp.get('id_number', "").strip().lower() == e_id_num.lower()):
                                         is_duplicate = True; break
                                         
                                 if not is_duplicate:
-                                    new_e = {'id': str(uuid.uuid4()), 'name': e_name, 'position': e_pos, 'id_number': e_id_num, 'phone': e_phone, 'status': e_status}
+                                    new_e = {'id': str(uuid.uuid4()), 'name': e_name, 'position': e_pos, 'id_number': e_id_num, 'phone': e_phone, 'status': e_status, 'is_external_crew': e_ext}
                                     new_employees_batch.append(new_e)
                                     st.session_state.employees.append(new_e)
                                     success_count += 1
@@ -277,16 +285,17 @@ elif menu == "Προσωπικό":
         if not filtered_emps:
             st.info("Δεν βρέθηκαν υπάλληλοι που να ταιριάζουν στα κριτήρια αναζήτησης.")
         else:
-            hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2, 2, 2, 1.5, 1])
-            hc1.write("**Ονοματεπώνυμο**"); hc2.write("**Θέση**"); hc3.write("**Αρ. Ταυτότητας**"); hc4.write("**Κινητό**"); hc5.write("**Κατάσταση**"); hc6.write("")
+            hc1, hc2, hc3, hc4, hc5, hc6, hc7 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
+            hc1.write("**Ονοματεπώνυμο**"); hc2.write("**Θέση**"); hc3.write("**Αρ. Ταυτότητας**"); hc4.write("**Κινητό**"); hc5.write("**Κατάσταση**"); hc6.write("**Εξωτ. Συνεργείο**"); hc7.write("")
             st.divider()
             for e in filtered_emps:
-                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1.5, 1])
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
                 col1.write(e['name']); col2.write(f"*{e.get('position', '')}*"); col3.write(e.get('id_number') or '-'); col4.write(e.get('phone') or '-')
                 status_val = e.get('status', 'Ενεργός')
                 status_color = "#16a34a" if status_val == 'Ενεργός' else "#dc2626"
                 col5.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{status_val}</span>", unsafe_allow_html=True)
-                if col6.button("❌", key=f"del_emp_{e['id']}"):
+                col6.write("Ναι" if e.get('is_external_crew', False) else "Όχι")
+                if col7.button("❌", key=f"del_emp_{e['id']}"):
                     st.session_state.employees = [emp for emp in st.session_state.employees if emp['id'] != e['id']]
                     utils.db_delete('employees', 'id', e['id'], deleted_records=[e])
                     st.rerun()
@@ -381,7 +390,7 @@ elif menu == "Άδειες":
         if not st.session_state.leaves: st.info("Δεν υπάρχουν άδειες προς επεξεργασία.")
         else:
             leave_options = {lv['id']: f"{utils.get_employee_name(lv['employeeId'])} ({lv['startDate'].strftime('%d/%m/%Y')} - {lv['endDate'].strftime('%d/%m/%Y')})" for lv in st.session_state.leaves}
-            leave_to_edit_id = st.selectbox("Επιλέξτε Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x], key=f"edit_leave_sel_{lrc}")
+            leave_to_edit_id = st.selectbox("Επιλέ Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x], key=f"edit_leave_sel_{lrc}")
             leave_to_edit = next(l for l in st.session_state.leaves if l['id'] == leave_to_edit_id)
             c1, c2 = st.columns(2)
             with c1:
