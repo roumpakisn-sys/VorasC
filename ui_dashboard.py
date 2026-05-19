@@ -12,16 +12,20 @@ def render_top_nav(go_prev_week, go_next_week, go_to_today):
         st.write("")
         st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
     with col_date:
-        # --- ΑΠΛΟΠΟΙΗΜΕΝΟΣ & ΑΛΕΞΙΣΦΑΙΡΟΣ ΣΥΓΧΡΟΝΙΣΜΟΣ ---
-        # Χρησιμοποιούμε απευθείας το "view_week_date" ως key. Έτσι το Streamlit
-        # το διαχειρίζεται αυτόματα, αποτρέποντας τα reset σε κάθε εσωτερικό rerun 
-        # (είτε από auto-refresh, είτε από υποβολή φόρμας)!
+        # --- Η ΑΠΟΛΥΤΗ ΛΥΣΗ ΓΙΑ ΤΟ RESET ΤΗΣ ΕΒΔΟΜΑΔΑΣ ---
+        # Τροφοδοτούμε ρητά το ημερολόγιο με την αποθηκευμένη ημερομηνία (value)
+        # Έτσι η φόρμα δεν μπορεί ποτέ να του κάνει "reset" εν αγνοία μας.
         selected_date = st.date_input(
             "Επιλογή Εβδομάδας", 
-            key="view_week_date"
+            value=st.session_state.view_week_date
         )
         
-        start_of_week = selected_date - timedelta(days=selected_date.weekday())
+        # Αν ο χρήστης αλλάξει την ημερομηνία χειροκίνητα στο ημερολόγιο:
+        if selected_date != st.session_state.view_week_date:
+            st.session_state.view_week_date = selected_date
+            st.rerun()
+            
+        start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
     with col_nav2:
         st.write("")
         st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
