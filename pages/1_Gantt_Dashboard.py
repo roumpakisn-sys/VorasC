@@ -47,27 +47,30 @@ utils.setup_shared_ui()
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Αλεξίσφαιρος) ---
+# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Απόλυτα Αλεξίσφαιρος) ---
+# Η view_week_date είναι η ΜΟΝΙΜΗ μνήμη που δεν διαγράφεται από το Streamlit
 if "view_week_date" not in st.session_state:
     st.session_state.view_week_date = get_local_today()
-if "date_picker" not in st.session_state:
-    st.session_state.date_picker = st.session_state.view_week_date
 
-# ΣΗΜΑΝΤΙΚΟ: Χρησιμοποιούμε callbacks για να αλλάζουμε την ημερομηνία με απόλυτη ασφάλεια!
+# Συγχρονίζει τη μόνιμη μνήμη με ό,τι επιλέγει ο χρήστης στο ημερολόγιο
+def sync_from_widget():
+    st.session_state.view_week_date = st.session_state.date_picker
+
+# ΣΗΜΑΝΤΙΚΟ: Τα callbacks ενημερώνουν ΚΑΙ τη μόνιμη μνήμη ΚΑΙ το widget!
 def go_prev_week():
-    st.session_state.view_week_date -= timedelta(days=7)
-    st.session_state.date_picker = st.session_state.view_week_date
+    new_date = st.session_state.view_week_date - timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 def go_next_week():
-    st.session_state.view_week_date += timedelta(days=7)
-    st.session_state.date_picker = st.session_state.view_week_date
+    new_date = st.session_state.view_week_date + timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 def go_to_today():
-    st.session_state.view_week_date = get_local_today()
-    st.session_state.date_picker = st.session_state.view_week_date
-
-def on_date_change():
-    st.session_state.view_week_date = st.session_state.date_picker
+    new_date = get_local_today()
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
 st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
 
@@ -76,8 +79,13 @@ with col_nav1:
     st.write("")
     st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
 with col_date:
-    # ΑΠΟΛΥΤΗ ΛΥΣΗ: Το widget έχει το δικό του key και ενημερώνει το σύστημα μέσω on_change.
-    selected_date = st.date_input("Επιλογή Εβδομάδας", key="date_picker", on_change=on_date_change)
+    # Το ημερολόγιο παίρνει "value" από τη μόνιμη μνήμη. Έτσι επιβιώνει από κάθε rerun ή αλλαγή σελίδας!
+    selected_date = st.date_input(
+        "Επιλογή Εβδομάδας", 
+        value=st.session_state.view_week_date,
+        key="date_picker", 
+        on_change=sync_from_widget
+    )
     start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
 with col_nav2:
     st.write("")
