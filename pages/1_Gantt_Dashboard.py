@@ -198,69 +198,62 @@ if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- JAVASCRIPT: STICKY HEADER ΧΩΡΙΣ IFRAME SANDBOX (ΛΥΣΗ ΜΕ ONERROR) ---
-# Αυτός ο κώδικας εκτελείται απευθείας στο κεντρικό παράθυρο, αποφεύγοντας τους περιορισμούς του Streamlit.
-st.markdown("""
-<img src="dummy.png" style="display:none;" onerror="
-    if (window.ganttStickyFixApplied) return;
-    window.ganttStickyFixApplied = true;
-
-    const makeSticky = () => {
-        const iframes = document.querySelectorAll('iframe');
-        iframes.forEach(iframe => {
-            try {
-                const plotDoc = iframe.contentDocument;
-                if (!plotDoc) return;
-                
-                const xAxis = plotDoc.querySelector('.xaxislayer-above');
-                if (!xAxis) return;
-
-                let scrollDiv = iframe.parentElement;
-                while (scrollDiv && scrollDiv !== document.body) {
-                    if (scrollDiv.scrollHeight > scrollDiv.clientHeight) {
-                        const style = window.getComputedStyle(scrollDiv);
-                        if (style.overflowY === 'auto' || style.overflow === 'auto' || style.overflowY === 'scroll') {
-                            break;
-                        }
+# Ο κώδικας μετατράπηκε σε single-line string ώστε το markdown parser να μην τον κόψει σαν κείμενο.
+js_code = """
+if (window.ganttStickyFixApplied) return;
+window.ganttStickyFixApplied = true;
+const makeSticky = () => {
+    const iframes = document.querySelectorAll('iframe');
+    iframes.forEach(iframe => {
+        try {
+            const plotDoc = iframe.contentDocument;
+            if (!plotDoc) return;
+            const xAxis = plotDoc.querySelector('.xaxislayer-above');
+            if (!xAxis) return;
+            let scrollDiv = iframe.parentElement;
+            while (scrollDiv && scrollDiv !== document.body) {
+                if (scrollDiv.scrollHeight > scrollDiv.clientHeight) {
+                    const style = window.getComputedStyle(scrollDiv);
+                    if (style.overflowY === 'auto' || style.overflow === 'auto' || style.overflowY === 'scroll') {
+                        break;
                     }
-                    scrollDiv = scrollDiv.parentElement;
                 }
-                if (!scrollDiv || scrollDiv === document.body) return;
+                scrollDiv = scrollDiv.parentElement;
+            }
+            if (!scrollDiv || scrollDiv === document.body) return;
+            if (!xAxis.querySelector('.st-sticky-mask')) {
+                const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bg.setAttribute('class', 'st-sticky-mask');
+                bg.setAttribute('width', '50000');
+                bg.setAttribute('height', '50');
+                bg.setAttribute('x', '-25000');
+                bg.setAttribute('y', '-25');
+                bg.setAttribute('fill', '#ffffff');
+                xAxis.insertBefore(bg, xAxis.firstChild);
+                const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('class', 'st-sticky-mask');
+                line.setAttribute('x1', '-25000');
+                line.setAttribute('x2', '25000');
+                line.setAttribute('y1', '25');
+                line.setAttribute('y2', '25');
+                line.setAttribute('stroke', '#1e293b');
+                line.setAttribute('stroke-width', '2');
+                xAxis.appendChild(line);
+            }
+            const scrollRect = scrollDiv.getBoundingClientRect();
+            const chartRect = iframe.getBoundingClientRect();
+            let hiddenTop = scrollRect.top - chartRect.top;
+            if (hiddenTop < 0) hiddenTop = 0;
+            xAxis.style.transform = 'translateY(' + hiddenTop + 'px)';
+        } catch(e) {}
+    });
+};
+window.addEventListener('scroll', makeSticky, true);
+setInterval(makeSticky, 50);
+"""
 
-                if (!xAxis.querySelector('.st-sticky-mask')) {
-                    const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    bg.setAttribute('class', 'st-sticky-mask');
-                    bg.setAttribute('width', '50000');
-                    bg.setAttribute('height', '50');
-                    bg.setAttribute('x', '-25000');
-                    bg.setAttribute('y', '-25');
-                    bg.setAttribute('fill', '#ffffff');
-                    xAxis.insertBefore(bg, xAxis.firstChild);
-
-                    const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('class', 'st-sticky-mask');
-                    line.setAttribute('x1', '-25000');
-                    line.setAttribute('x2', '25000');
-                    line.setAttribute('y1', '25');
-                    line.setAttribute('y2', '25');
-                    line.setAttribute('stroke', '#1e293b');
-                    line.setAttribute('stroke-width', '2');
-                    xAxis.appendChild(line);
-                }
-
-                const scrollRect = scrollDiv.getBoundingClientRect();
-                const chartRect = iframe.getBoundingClientRect();
-                let hiddenTop = scrollRect.top - chartRect.top;
-                if (hiddenTop < 0) hiddenTop = 0;
-                
-                xAxis.style.transform = 'translateY(' + hiddenTop + 'px)';
-            } catch(e) {}
-        });
-    };
-
-    window.addEventListener('scroll', makeSticky, true);
-    setInterval(makeSticky, 50);
-">
-""", unsafe_allow_html=True)
+# Εφαρμογή του script αφαιρώντας τα newlines για να μην "σκάσει" το Streamlit Markdown
+st.markdown(f'<img src="dummy.png" style="display:none;" onerror="{js_code.replace(chr(10), " ")}">', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
