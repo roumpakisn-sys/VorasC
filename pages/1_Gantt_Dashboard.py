@@ -6,6 +6,7 @@ import io
 import textwrap
 import time
 import re
+import urllib.parse
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -122,9 +123,9 @@ wk_groups, export_data = get_cached_data(
 clicked_key = st.query_params.get("edit_key", None)
 
 
-# --- NATIVE HTML GANTT CHART BUILDER (MAIN DOM) ---
+# --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    min_width_px = int(1800 * zoom_factor) # 18 Ώρες πλέον! (06:00 έως 24:00)
+    min_width_px = int(1800 * zoom_factor) # 18 Ώρες (06:00 έως 24:00)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_short_names = {}
@@ -144,8 +145,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         return False
 
     html = [f"""
-    <div class="mygantt-root">
+    <!DOCTYPE html>
+    <html>
+    <head>
     <style>
+    body {{ margin: 0; padding: 0; background: transparent; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }}
+    
     .mygantt-container {{ width: 100%; height: 640px; overflow: auto; border: 4px solid #1e293b; border-radius: 12px; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); position: relative; background: #ffffff; box-sizing: border-box; user-select: none; }}
     
     .mygantt-container::-webkit-scrollbar {{ width: 12px; height: 12px; }}
@@ -153,7 +158,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     .mygantt-container::-webkit-scrollbar-thumb {{ background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; }}
     .mygantt-container::-webkit-scrollbar-thumb:hover {{ background: #64748b; }}
 
-    /* Απόλυτα Native Sticky Header Ωρών */
     .mygantt-header {{ position: sticky; top: 0; z-index: 50; display: flex; width: max-content; min-width: 100%; background: #ffffff; border-bottom: 3px solid #1e293b; }}
     .mygantt-header-corner {{ position: sticky; left: 0; z-index: 60; width: 230px; flex-shrink: 0; background: #ffffff; border-right: 3px solid #1e293b; }}
     .mygantt-header-timeline {{ position: relative; height: 40px; width: {min_width_px}px; flex-grow: 1; background: #ffffff; }}
@@ -164,25 +168,22 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     .mygantt-row-even {{ background-color: #f8fafc; }}
     .mygantt-row-today {{ background-color: #eef2ff !important; }}
     
-    /* Sticky Left Label ΜΕ background για να μην περνάνε οι μπάρες από κάτω οπτικά! */
     .mygantt-left {{ position: sticky; left: 0; z-index: 40; width: 230px; flex-shrink: 0; padding: 10px; border-right: 3px solid #1e293b; font-size: 12px; box-sizing: border-box; }}
     .mygantt-row-odd .mygantt-left {{ background-color: #ffffff; }}
     .mygantt-row-even .mygantt-left {{ background-color: #f8fafc; }}
     .mygantt-row-today .mygantt-left {{ background-color: #eef2ff; border-right: 3px solid #4f46e5; }}
 
-    /* Κατακόρυφες βοηθητικές γραμμές - 18 ώρες */
     .mygantt-lanes {{ position: relative; width: {min_width_px}px; flex-grow: 1; background-size: calc(100% / 18) 100%; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); padding-top: 10px; padding-bottom: 10px; }}
     
-    /* Μπάρες - Native Links! */
     .mygantt-bar {{ position: absolute; height: 38px; border: 1px solid black; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black !important; text-decoration: none !important; cursor: pointer; transition: transform 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; }}
     .mygantt-bar:hover {{ transform: scale(1.02); z-index: 30; box-shadow: 0 6px 12px rgba(0,0,0,0.3); outline: 2px solid #1e293b; }}
     .mygantt-bar-text {{ text-align: center; line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }}
     </style>
-    
+    </head>
+    <body>
     <div class="mygantt-container" id="mygantt">
     """]
 
-    # --- HEADER ΩΡΩΝ (06:00 ΕΩΣ 24:00 - 18 ΩΡΕΣ) ---
     html.append('<div class="mygantt-header"><div class="mygantt-header-corner"></div><div class="mygantt-header-timeline">')
     for h in range(6, 25):
         pct = ((h - 6) / 18) * 100
@@ -190,7 +191,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         html.append(f'<div class="mygantt-tick" style="left: {pct}%;">{lbl}</div>')
     html.append('</div></div>')
 
-    # --- ΗΜΕΡΕΣ ΚΑΙ ΒΑΡΔΙΕΣ ---
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
@@ -253,9 +253,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         for g, lane_idx in group_lanes:
             def t2p(t_str):
                 h, m = map(int, t_str.split(':'))
-                if h <= 5: h += 24 # Αν η βάρδια περνάει τα μεσάνυχτα
+                if h <= 5: h += 24
                 mins = (h - 6) * 60 + m
-                return max(0, min(100, (mins / 1080.0) * 100)) # 1080 mins = 18 ώρες
+                return max(0, min(100, (mins / 1080.0) * 100))
 
             left_pct = t2p(g['StartTime'])
             right_pct = t2p(g['EndTime'])
@@ -280,27 +280,51 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
             bg_color = g['ColorHex']
             
-            # ΜΑΓΕΙΑ: Native Anchor link. Κάνει reload και γεμίζει το st.query_params!
+            # Link που ενημερώνει το parent URL
+            safe_key = urllib.parse.quote(g['Key'])
             html.append(f"""
-            <a href="?edit_key={g['Key']}" target="_self" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
+            <a href="javascript:void(0);" onclick="window.parent.postMessage({{type: 'set_edit_key', key: '{g['Key']}'}}, '*');" class="mygantt-bar" style="left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color};" title="{base_text.replace('<br>', ' ')}">
                 <div class="mygantt-bar-text">{base_text}</div>
             </a>
             """)
 
         html.append('</div></div>')
 
-    html.append('</div>')
-    
-    # Drag-to-Scroll Injection - Ασφαλές από Markdown rendering (μονή γραμμή κώδικα)
-    drag_js = "var s=document.getElementById('mygantt');if(s&&!s.dataset.d){s.dataset.d='1';let d=false,x,l;s.addEventListener('mousedown',e=>{d=true;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});s.addEventListener('mouseleave',()=>{d=false;s.style.cursor='auto';});s.addEventListener('mouseup',()=>{d=false;s.style.cursor='auto';});s.addEventListener('mousemove',e=>{if(!d)return;e.preventDefault();s.scrollLeft=l-(e.pageX-s.offsetLeft-x)*1.5;});}"
-    html.append(f'<img src="x" style="display:none;" onerror="{drag_js}">')
-    
-    html.append('</div>')
+    html.append("""
+    </div>
+    <script>
+    var s=document.getElementById('mygantt');
+    if(s&&!s.dataset.d){
+        s.dataset.d='1';
+        let d=false,x,l;
+        s.addEventListener('mousedown',e=>{d=true;s.style.cursor='grabbing';x=e.pageX-s.offsetLeft;l=s.scrollLeft;});
+        s.addEventListener('mouseleave',()=>{d=false;s.style.cursor='auto';});
+        s.addEventListener('mouseup',()=>{d=false;s.style.cursor='auto';});
+        s.addEventListener('mousemove',e=>{if(!d)return;e.preventDefault();s.scrollLeft=l-(e.pageX-s.offsetLeft-x)*1.5;});
+    }
+    </script>
+    </body>
+    </html>
+    """)
     return "".join(html)
 
-# --- ΕΜΦΑΝΙΣΗ ΑΠΕΥΘΕΙΑΣ ΣΤΟ DOM ΤΟΥ STREAMLIT ---
+# --- ΕΜΦΑΝΙΣΗ ΜΕΣΩ IFRAME ΓΙΑ ΑΣΦΑΛΕΙΑ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
-st.markdown(html_chart, unsafe_allow_html=True)
+st.components.v1.html(html_chart, height=660, scrolling=False)
+
+# Πιάνουμε το μήνυμα από το iframe και ενημερώνουμε το query_params του Streamlit
+st.components.v1.html("""
+<script>
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'set_edit_key') {
+        const url = new URL(window.parent.location.href);
+        url.searchParams.set('edit_key', event.data.key);
+        window.parent.history.pushState({}, '', url);
+        window.parent.location.reload(); // Αναγκαστικό reload για να το δει η Python
+    }
+});
+</script>
+""", height=0, width=0)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -501,7 +525,7 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
-                            # Καθαρίζουμε το URL μετά την επεξεργασία για να μην κολλήσει στο ίδιο edit_key
+                            # Καθαρίζουμε το URL μετά την επεξεργασία
                             st.query_params.clear()
                             st.rerun()
 
