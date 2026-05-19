@@ -153,7 +153,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     background: transparent !important;
 }
 
-/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα */
 .stPlotlyChart > div, .stPlotlyChart iframe {
     border: 4px solid #1e293b !important;
     border-radius: 12px !important;
@@ -182,7 +182,6 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 """, unsafe_allow_html=True)
 
 # Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit
-# Έχει προκαθορισμένο ύψος για να ενεργοποιείται το scrolling ΜΕΣΑ στο κουτί.
 with st.container(height=650):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
@@ -197,68 +196,51 @@ with st.container(height=650):
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# --- JAVASCRIPT: STICKY HEADER (60FPS AGGRESSIVE OVERRIDE) ---
-# Αυτός ο κώδικας εκτελείται αόρατα 60 φορές το δευτερόλεπτο και νικάει τα αυτόματα redraws του Plotly.
-st.components.v1.html("""
-<script>
-const doc = window.parent.document;
-
-const makeSticky = () => {
-    const iframes = doc.querySelectorAll('iframe');
-    iframes.forEach(iframe => {
-        try {
-            const plotDoc = iframe.contentDocument;
-            if (!plotDoc) return;
-            
-            const xAxis = plotDoc.querySelector('.xaxislayer-above');
-            if (!xAxis) return;
-
-            // Βρίσκουμε το κυλιόμενο div του Streamlit (το εσωτερικό του st.container)
-            let wrapper = iframe.closest('div[data-testid="stVerticalBlockBorderWrapper"]');
-            if (!wrapper) wrapper = iframe.closest('div[data-testid="stContainer"]');
-            if (!wrapper) return;
-            
-            let scrollDiv = wrapper.querySelector('div[style*="overflow"]') || wrapper.children[0];
-            if (!scrollDiv) return;
-
-            // Υπολογίζουμε ακριβώς πόσα pixel έχει κρυφτεί το γράφημα λόγω του scroll
-            const scrollRect = scrollDiv.getBoundingClientRect();
-            const chartRect = iframe.getBoundingClientRect();
-            let hiddenTop = scrollRect.top - chartRect.top;
-            if (hiddenTop < 0) hiddenTop = 0;
-
-            // ΕΠΙΒΟΛΗ του transform. Το κάνουμε συνεχώς ώστε το Plotly να μην μπορεί να το διαγράψει!
-            xAxis.setAttribute('transform', `translate(0, ${hiddenTop})`);
-
-            // Αν δεν υπάρχει, δημιουργούμε το λευκό "σεντόνι" πίσω από τις ώρες για να κρύβει τις γραμμές
-            if (!plotDoc.getElementById('sticky-bg-mask')) {
-                const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                bg.id = 'sticky-bg-mask';
-                bg.setAttribute('width', '50000');
-                bg.setAttribute('height', '50');
-                bg.setAttribute('x', '-25000');
-                bg.setAttribute('y', '-25');
-                bg.setAttribute('fill', '#ffffff');
-                xAxis.insertBefore(bg, xAxis.firstChild);
-
-                const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.id = 'sticky-bg-line';
-                line.setAttribute('x1', '-25000');
-                line.setAttribute('x2', '25000');
-                line.setAttribute('y1', '25');
-                line.setAttribute('y2', '25');
-                line.setAttribute('stroke', '#1e293b');
-                line.setAttribute('stroke-width', '3');
-                xAxis.appendChild(line);
-            }
-        } catch(e) {}
+# --- JAVASCRIPT: THE ULTIMATE STICKY HEADER ---
+# Ο κώδικας μετατράπηκε σε 100% επίπεδο κείμενο (flat) για να μην σπάει το Markdown και φαίνεται κάτω από το γράφημα.
+# Πιάνει ΑΠΕΥΘΕΙΑΣ το DOM του Plotly και μετακινεί τον άξονα Χ.
+js_code = """
+if(window.ganttStickyInit) return;
+window.ganttStickyInit = true;
+const applySticky = () => {
+    document.querySelectorAll('.js-plotly-plot').forEach(chart => {
+        const xAxis = chart.querySelector('.xaxislayer-above');
+        if(!xAxis) return;
+        let scrollEl = chart.parentElement;
+        while(scrollEl && scrollEl !== document.body) {
+            const style = window.getComputedStyle(scrollEl);
+            if((style.overflowY === 'auto' || style.overflowY === 'scroll') && scrollEl.scrollHeight > scrollEl.clientHeight) break;
+            scrollEl = scrollEl.parentElement;
+        }
+        if(!scrollEl || scrollEl === document.body) return;
+        if(!xAxis.querySelector('.sticky-bg-mask')) {
+            const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            bg.setAttribute('class', 'sticky-bg-mask');
+            bg.setAttribute('width', '50000');
+            bg.setAttribute('height', '80');
+            bg.setAttribute('x', '-25000');
+            bg.setAttribute('y', '-30');
+            bg.setAttribute('fill', '#ffffff');
+            xAxis.insertBefore(bg, xAxis.firstChild);
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('class', 'sticky-bg-mask');
+            line.setAttribute('x1', '-25000');
+            line.setAttribute('x2', '25000');
+            line.setAttribute('y1', '49');
+            line.setAttribute('y2', '49');
+            line.setAttribute('stroke', '#1e293b');
+            line.setAttribute('stroke-width', '3');
+            xAxis.appendChild(line);
+        }
+        const top = scrollEl.scrollTop;
+        xAxis.setAttribute('transform', 'translate(0, ' + top + ')');
     });
+    requestAnimationFrame(applySticky);
 };
+applySticky();
+"""
 
-// setInterval στα 16ms = ~60 FPS. Αστραπιαία συγχρονισμένο με το ποντίκι.
-setInterval(makeSticky, 16);
-</script>
-""", height=0, width=0)
+st.markdown(f'<img src="dummy.png" style="display:none;" onerror="{js_code.replace(chr(10), " ")}">', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
