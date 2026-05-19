@@ -178,8 +178,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 """, unsafe_allow_html=True)
 
 # Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit
-# ΑΦΑΙΡΕΘΗΚΕ ΤΟ "height=650" ΩΣΤΕ ΤΟ ΓΡΑΦΗΜΑ ΝΑ ΑΠΛΩΝΕΙ ΠΡΟΣ ΤΑ ΚΑΤΩ ΚΑΙ ΝΑ ΔΟΥΛΕΥΕΙ Η ΡΟΔΕΛΑ.
-with st.container():
+# ΕΠΑΝΑΦΕΡΑΜΕ ΤΟ "height=650" ΓΙΑ ΝΑ ΕΝΕΡΓΟΠΟΙΗΘΕΙ Η ΕΣΩΤΕΡΙΚΗ ΚΥΛΙΣΗ
+with st.container(height=650):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event:
@@ -240,7 +240,7 @@ if not presentation_mode:
                 with c_color: 
                     color_choice = st.selectbox("Χρώμα Μπάρας", options=list(config.BASIC_COLORS.keys()), key=f"qa_color_{qa_rc}")
                 with c_notes: 
-                    add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
+                    add_notes = st.text_input("Παρατηρηση (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
                     
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
