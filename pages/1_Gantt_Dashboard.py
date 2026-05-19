@@ -153,7 +153,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     background: transparent !important;
 }
 
-/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα */
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
 .stPlotlyChart > div, .stPlotlyChart iframe {
     border: 4px solid #1e293b !important;
     border-radius: 12px !important;
@@ -181,32 +181,8 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- ΕΠΙΒΟΛΗ ΚΛΕΙΔΩΜΑΤΟΣ ΥΨΟΥΣ & ΚΑΘΕΤΟΥ DRAG (PAN) ΓΙΑ NATIVE STICKY HEADER ---
-viewport_height = 650
-row_height = 50 * zoom_factor
-visible_rows = (viewport_height - 60) / row_height  # Το 60 είναι για περιθώρια (margins)
-
-try:
-    total_rows = len(fig.layout.yaxis.tickvals) if fig.layout.yaxis.tickvals else 0
-    if total_rows > visible_rows:
-        # Ρυθμίζουμε τον άξονα Y να δείχνει μόνο τις πάνω-πάνω γραμμές αρχικά
-        # (Στο Plotly οι πάνω γραμμές είναι στις υψηλές τιμές του Y axis)
-        y_start = total_rows - visible_rows - 0.5
-        y_end = total_rows - 0.5
-        fig.update_yaxes(fixedrange=False, range=[y_start, y_end])
-    else:
-        # Αν χωράνε όλες οι γραμμές, δεν χρειάζεται κάθετο panning
-        fig.update_yaxes(fixedrange=True)
-except Exception:
-    pass
-
-# Κλειδώνουμε το ύψος του γραφήματος (Viewport) για να μην βγαίνει εκτός οθόνης
-fig.update_layout(height=viewport_height, dragmode="pan")
-
-
-# Δημιουργούμε το container (χωρίς σκληρό height, το αναλαμβάνει πλέον το Plotly)
-with st.container():
+# Δημιουργούμε το container ΧΩΡΙΣ το προεπιλεγμένο border του Streamlit
+with st.container(height=650):
     try:
         event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", config={"displayModeBar": False})
         if event and "selection" in event:
@@ -220,9 +196,54 @@ with st.container():
 if clicked_key:
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
+# --- JAVASCRIPT: THE ULTIMATE STICKY HEADER ---
+# Ο κώδικας μετατράπηκε σε 100% επίπεδο κείμενο (flat) για να μην σπάει το Markdown και φαίνεται κάτω από το γράφημα.
+# Πιάνει ΑΠΕΥΘΕΙΑΣ το DOM του Plotly και μετακινεί τον άξονα Χ.
+js_code = """
+if(window.ganttStickyInit) return;
+window.ganttStickyInit = true;
+const applySticky = () => {
+    document.querySelectorAll('.js-plotly-plot').forEach(chart => {
+        const xAxis = chart.querySelector('.xaxislayer-above');
+        if(!xAxis) return;
+        let scrollEl = chart.parentElement;
+        while(scrollEl && scrollEl !== document.body) {
+            const style = window.getComputedStyle(scrollEl);
+            if((style.overflowY === 'auto' || style.overflowY === 'scroll') && scrollEl.scrollHeight > scrollEl.clientHeight) break;
+            scrollEl = scrollEl.parentElement;
+        }
+        if(!scrollEl || scrollEl === document.body) return;
+        if(!xAxis.querySelector('.sticky-bg-mask')) {
+            const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            bg.setAttribute('class', 'sticky-bg-mask');
+            bg.setAttribute('width', '50000');
+            bg.setAttribute('height', '80');
+            bg.setAttribute('x', '-25000');
+            bg.setAttribute('y', '-30');
+            bg.setAttribute('fill', '#ffffff');
+            xAxis.insertBefore(bg, xAxis.firstChild);
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('class', 'sticky-bg-mask');
+            line.setAttribute('x1', '-25000');
+            line.setAttribute('x2', '25000');
+            line.setAttribute('y1', '49');
+            line.setAttribute('y2', '49');
+            line.setAttribute('stroke', '#1e293b');
+            line.setAttribute('stroke-width', '3');
+            xAxis.appendChild(line);
+        }
+        const top = scrollEl.scrollTop;
+        xAxis.setAttribute('transform', 'translate(0, ' + top + ')');
+    });
+    requestAnimationFrame(applySticky);
+};
+applySticky();
+"""
+
+st.markdown(f'<img src="dummy.png" style="display:none;" onerror="{js_code.replace(chr(10), " ")}">', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) **δεξιά-αριστερά** (για ώρες) και **πάνω-κάτω** (για ημέρες)."
+hint_text = "💡 *Συμβουλές:* **1)** Κλικ σε μπάρα για επεξεργασία. **2)** Σύρετε το διάγραμμα (Pan) δεξιά-αριστερά για τον χρόνο. **3)** Σύρετε την μπάρα κύλισης πάνω-κάτω για να δείτε όλες τις μέρες."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint: st.caption(hint_text)
