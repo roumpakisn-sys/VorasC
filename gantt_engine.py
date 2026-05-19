@@ -306,17 +306,18 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=-0.5, y1=-0.5, yref="y", line=dict(color="#1e293b", width=3))
     fig.add_shape(type="line", x0=-0.4, x1=1, xref="paper", y0=len(ordered_categories)-0.5, y1=len(ordered_categories)-0.5, yref="y", line=dict(color="#1e293b", width=3))
             
-    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & "ΚΛΕΙΔΩΜΑ" ΑΞΟΝΑ Χ (Sticky Header) ---
-    row_h = 50 * zoom_factor
-    margin_top = 50
-    margin_bottom = 10
+    # --- ΥΠΟΛΟΓΙΣΜΟΣ ΥΨΟΥΣ & "ΚΛΕΙΔΩΜΑ" ΑΞΟΝΑ Χ (Internal Panning) ---
+    visible_rows = 15 # Πόσες γραμμές φαίνονται στην οθόνη. Για τις υπόλοιπες κάνεις drag πάνω-κάτω.
+    total_rows = len(ordered_categories)
     
-    full_h = int(len(ordered_categories) * row_h) + margin_top + margin_bottom
-    
-    # Επαναφέρουμε το πλήρες ύψος για να λειτουργεί φυσιολογικά η ροδέλα του ποντικιού!
-    dyn_h = max(250, full_h)
-    y_range = [-0.5, len(ordered_categories) - 0.5]
-    y_fixed = True
+    if total_rows > visible_rows:
+        y_range = [total_rows - visible_rows - 0.5, total_rows - 0.5]
+        y_fixed = False # ΕΠΙΤΡΕΠΕΙ ΚΑΘΕΤΟ DRAG - ΚΡΑΤΑΕΙ ΤΙΣ ΩΡΕΣ ΣΤΑΘΕΡΕΣ!
+    else:
+        y_range = [-0.5, total_rows - 0.5]
+        y_fixed = True
+        
+    dyn_h = 650 # Σταθερό ύψος του widget
             
     fig.update_yaxes(
         categoryorder='array', categoryarray=ordered_categories,
@@ -338,11 +339,11 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
         annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
         uirevision="constant",
         xaxis=dict(
-            side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=1800000,
+            side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=3600000, # 1 hour ticks
             tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
-            autorange=False, range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"],
+            autorange=False, range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # ΑΠΟΛΥΤΟ ΠΡΟΕΠΙΛΕΓΜΕΝΟ ΕΥΡΟΣ!
             title="", tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
-            fixedrange=False, rangeslider=dict(visible=False)
+            fixedrange=False, rangeslider=dict(visible=False) # ΕΠΙΤΡΕΠΕΙ ΟΡΙΖΟΝΤΙΟ DRAG!
         )
     )
     return fig, wk_groups, export_data
