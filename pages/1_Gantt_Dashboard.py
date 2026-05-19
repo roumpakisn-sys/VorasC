@@ -71,23 +71,34 @@ def go_to_today():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
 
-# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ ---
-st.markdown("<h3 style='margin-top: -30px; margin-bottom: 5px;'>📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων</h3>", unsafe_allow_html=True)
+# --- ΕΠΑΝΑΦΟΡΑ ΑΡΧΙΚΟΥ, ΑΓΑΠΗΜΕΝΟΥ ΣΟΥ LAYOUT ---
+st.title("📊 Εβδομαδιαίο Χρονοδιάγραμμα Πόρων")
 
-col_date, col_nav1, col_nav2, col_today, col_zoom, col_pres = st.columns([1.5, 0.8, 0.8, 0.8, 1.5, 1.5])
-with col_date:
-    selected_date = st.date_input("Εβδομάδα", value=st.session_state.view_week_date, key="date_picker", on_change=sync_from_widget, label_visibility="collapsed")
-    start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
+col_nav1, col_date, col_nav2, col_today, col_zoom, col_pres = st.columns([1, 2, 1, 1, 2, 2.5])
 with col_nav1:
-    st.button("⬅️ Πριν", on_click=go_prev_week, use_container_width=True)
+    st.write("")
+    st.button("⬅️ Προηγούμενη", on_click=go_prev_week, use_container_width=True)
+with col_date:
+    # Το ημερολόγιο παίρνει "value" από τη μόνιμη μνήμη.
+    selected_date = st.date_input(
+        "Επιλογή Εβδομάδας", 
+        value=st.session_state.view_week_date,
+        key="date_picker", 
+        on_change=sync_from_widget
+    )
+    start_of_week = st.session_state.view_week_date - timedelta(days=st.session_state.view_week_date.weekday())
 with col_nav2:
-    st.button("Μετά ➡️", on_click=go_next_week, use_container_width=True)
+    st.write("")
+    st.button("Επόμενη ➡️", on_click=go_next_week, use_container_width=True)
 with col_today:
+    st.write("")
     st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 with col_zoom:
-    zoom_level = st.slider("Ζουμ", min_value=50, max_value=200, value=100, step=5, label_visibility="collapsed")
+    zoom_level = st.slider("🔍 Ζουμ Διαγράμματος (%)", min_value=50, max_value=200, value=100, step=5)
 with col_pres:
-    presentation_mode = st.checkbox("📺 Πλήρης Προβολή")
+    st.write("")
+    st.write("")
+    presentation_mode = st.checkbox("📺 Λειτουργία Πλήρους Προβολής")
 
 zoom_factor = zoom_level / 100.0
 
@@ -126,38 +137,31 @@ clicked_key = None
 # --- ΑΠΟΛΥΤΟ ΚΑΙ ΕΠΙΘΕΤΙΚΟ STYLING ΓΙΑ ΤΟ CONTAINER ΚΑΙ ΤΟ ΓΚΡΙΖΑΡΙΣΜΑ ---
 st.markdown("""
 <style>
-/* 1. Απλώνουμε την οθόνη του Streamlit στο 98% για να αφήσουμε ελάχιστο κενό δεξιά-αριστερά και μειώνουμε τα κάθετα κενά! */
+/* 1. Απλώνουμε την οθόνη του Streamlit στο 96% για να αφήσουμε λίγο κενό δεξιά-αριστερά */
 .block-container, [data-testid="block-container"] {
-    max-width: 98% !important; 
-    padding-top: 1.0rem !important;
-    padding-bottom: 0.5rem !important;
+    max-width: 96% !important; 
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
 
-/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες) */
-div[data-testid="stNotification"], .stAlert {
-    padding: 6px 12px !important;
-    margin-top: 0px !important;
-    margin-bottom: 4px !important;
-}
-div[data-testid="stNotification"] p {
-    margin: 0 !important;
-    font-size: 14px !important;
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit για να μην φαίνονται "διπλά" κουτιά */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
 }
 
-/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit και εφαρμόζουμε το περίγραμμα και τη σκιά */
-div[data-testid="stVerticalBlockBorderWrapper"] {
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe) */
+.stPlotlyChart > div, .stPlotlyChart iframe {
     border: 4px solid #1e293b !important;
     border-radius: 12px !important;
     box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.4) !important;
     background-color: #ffffff !important;
-    margin-left: 10px !important;
-    margin-right: 10px !important;
+    margin: 0 !important;
     padding: 0 !important;
 }
 
-/* 3. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
+/* 4. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
 [data-testid="stAppViewContainer"], 
 [data-testid="stMainBlockContainer"],
 [data-testid="stAppViewBlockContainer"],
@@ -205,7 +209,12 @@ const setupGanttContainer = () => {
             wrapper.dataset.styledByScript = "true";
             
             // Το scrollDiv είναι το στοιχείο που ελέγχει την κύλιση (scroll)
-            const scrollDiv = wrapper; 
+            // Βρίσκουμε το πραγματικό εσωτερικό κυλιόμενο div που δημιουργεί το st.container(height=650)
+            let scrollDiv = wrapper.querySelector('div[style*="overflow: auto"]') || 
+                            wrapper.querySelector('div[style*="overflow-y"]') || 
+                            wrapper.children[0];
+            if (!scrollDiv) scrollDiv = wrapper;
+            
             if (scrollDiv) {
                 // --- ΛΟΓΙΚΗ: STICKY X-AXIS (Ώρες στην κορυφή) κατά το scroll ---
                 const handleScroll = () => {
@@ -218,20 +227,21 @@ const setupGanttContainer = () => {
                         if (xAxis) {
                             // Δημιουργία λευκού φόντου κάτω από τις ώρες για να κρύβει τις γραμμές που κυλούν από κάτω
                             if (!xAxis.querySelector('.sticky-bg')) {
-                                const bg = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                                const svgDoc = xAxis.ownerDocument || plotDoc;
+                                const bg = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'rect');
                                 bg.setAttribute('class', 'sticky-bg');
-                                bg.setAttribute('width', '5000');
+                                bg.setAttribute('width', '10000');
                                 bg.setAttribute('height', '50');
-                                bg.setAttribute('x', '-2000');
+                                bg.setAttribute('x', '-5000');
                                 bg.setAttribute('y', '-20');
                                 bg.setAttribute('fill', '#ffffff');
                                 xAxis.insertBefore(bg, xAxis.firstChild);
                                 
                                 // Προσθήκη μιας οριζόντιας γραμμής για καθαρό διαχωρισμό (Border bottom)
-                                const line = plotDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
+                                const line = svgDoc.createElementNS('http://www.w3.org/2000/svg', 'line');
                                 line.setAttribute('class', 'sticky-line');
-                                line.setAttribute('x1', '-2000');
-                                line.setAttribute('x2', '3000');
+                                line.setAttribute('x1', '-5000');
+                                line.setAttribute('x2', '5000');
                                 line.setAttribute('y1', '25');
                                 line.setAttribute('y2', '25');
                                 line.setAttribute('stroke', '#1e293b');
