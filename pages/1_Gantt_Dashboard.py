@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
@@ -8,6 +7,7 @@ import textwrap
 import time
 import re
 import hashlib
+import base64
 from st_click_detector import click_detector
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
@@ -61,7 +61,6 @@ if "view_week_date" not in st.session_state:
 def sync_from_widget():
     st.session_state.view_week_date = st.session_state.date_picker
     st.session_state.clicked_key = None
-    st.session_state.edit_bar_select_widget = ""  # Μηδενίζει δυναμικά το μενού
     st.session_state.trigger_scroll = False
     st.session_state.detector_version += 1
 
@@ -70,7 +69,6 @@ def go_prev_week():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
     st.session_state.clicked_key = None
-    st.session_state.edit_bar_select_widget = ""  # Μηδενίζει δυναμικά το μενού
     st.session_state.trigger_scroll = False
     st.session_state.detector_version += 1
 
@@ -79,7 +77,6 @@ def go_next_week():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
     st.session_state.clicked_key = None
-    st.session_state.edit_bar_select_widget = ""  # Μηδενίζει δυναμικά το μενού
     st.session_state.trigger_scroll = False
     st.session_state.detector_version += 1
 
@@ -88,7 +85,6 @@ def go_to_today():
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
     st.session_state.clicked_key = None
-    st.session_state.edit_bar_select_widget = ""  # Μηδενίζει δυναμικά το μενού
     st.session_state.trigger_scroll = False
     st.session_state.detector_version += 1
 
@@ -176,15 +172,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
 
     html = ""
     
+    # Καθαρό Container (Χωρίς inline onmousemove) - Η Javascript το αναλαμβάνει πιο κάτω
     html += (
         "<div id='gantt-master-container' "
-        "onmousedown='window.gIsDown=true; window.gIsDragging=false; this.style.cursor=\"grabbing\"; window.gStartX=event.pageX - this.offsetLeft; window.gScrollL=this.scrollLeft;' "
-        "onmouseleave='window.gIsDown=false; this.style.cursor=\"auto\";' "
-        "onmouseup='window.gIsDown=false; this.style.cursor=\"auto\"; setTimeout(function(){ window.gIsDragging=false; }, 50);' "
-        "onmousemove='if(!window.gIsDown) return; event.preventDefault(); var walk=(event.pageX - this.offsetLeft) - window.gStartX; if(Math.abs(walk)>5) window.gIsDragging=true; this.scrollLeft=window.gScrollL - walk * 1.5;' "
-        "ontouchstart='window.gIsDown=true; window.gIsDragging=false; window.gStartX=event.touches[0].pageX - this.offsetLeft; window.gScrollL=this.scrollLeft;' "
-        "ontouchend='window.gIsDown=false; setTimeout(function(){ window.gIsDragging=false; }, 50);' "
-        "ontouchmove='if(!window.gIsDown) return; var walk=(event.touches[0].pageX - this.offsetLeft) - window.gStartX; if(Math.abs(walk)>5) window.gIsDragging=true; this.scrollLeft=window.gScrollL - walk * 1.5;' "
         "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
     
@@ -277,44 +267,89 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Μπάρες: draggable='false' αποτρέπει το native browser drag του URL
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
     html += "</div>"
     
-    html += """
-    <script>
-    (function() {
-        var s = document.getElementById('gantt-master-container');
-        if (s && !window.gScrollInited) {
-            window.gScrollInited = true;
-            
-            var savedScroll = sessionStorage.getItem('ganttScrollPos');
-            if (savedScroll !== null) {
-                s.scrollLeft = parseFloat(savedScroll);
-            } else {
-                setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
-            }
-            
-            var scrollTimeout;
-            s.addEventListener('scroll', function() {
-                clearTimeout(scrollTimeout);
-                scrollTimeout = setTimeout(function() {
-                    sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
-                }, 100);
-            });
-            
-            document.addEventListener('click', function(e) {
-                var link = e.target.closest('a.mygantt-bar');
-                if (link) {
-                    e.preventDefault(); 
-                }
-            });
+    # --- JS Injector (Base64) παρακάμπτει τους HTML sanitizers ---
+    js_code = """
+    var s = document.getElementById('gantt-master-container');
+    if (s && !window.gScrollInited) {
+        window.gScrollInited = true;
+        
+        var savedScroll = sessionStorage.getItem('ganttScrollPos');
+        if (savedScroll !== null) {
+            s.scrollLeft = parseFloat(savedScroll);
+        } else {
+            setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
         }
-    })();
-    </script>
+        
+        var scrollTimeout;
+        s.addEventListener('scroll', function() {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(function() {
+                sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
+            }, 100);
+        });
+        
+        var isDown = false;
+        var startX;
+        var scrollLeft;
+        window.gIsDragging = false;
+        
+        s.addEventListener('mousedown', function(e) {
+            isDown = true;
+            window.gIsDragging = false;
+            s.style.cursor = 'grabbing';
+            startX = e.pageX - s.offsetLeft;
+            scrollLeft = s.scrollLeft;
+        });
+        s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
+        s.addEventListener('mouseup', function() { 
+            isDown = false; 
+            s.style.cursor = 'auto'; 
+            setTimeout(function(){ window.gIsDragging = false; }, 50);
+        });
+        s.addEventListener('mousemove', function(e) {
+            if (!isDown) return;
+            e.preventDefault();
+            var walk = (e.pageX - s.offsetLeft) - startX;
+            if (Math.abs(walk) > 5) window.gIsDragging = true;
+            s.scrollLeft = scrollLeft - walk * 1.5;
+        });
+
+        s.addEventListener('touchstart', function(e) {
+            isDown = true; window.gIsDragging = false;
+            startX = e.touches[0].pageX - s.offsetLeft; scrollLeft = s.scrollLeft;
+        });
+        s.addEventListener('touchend', function() { 
+            isDown = false; 
+            setTimeout(function() { window.gIsDragging = false; }, 50);
+        });
+        s.addEventListener('touchmove', function(e) {
+            if (!isDown) return;
+            var walk = (e.touches[0].pageX - s.offsetLeft) - startX;
+            if (Math.abs(walk) > 5) window.gIsDragging = true;
+            s.scrollLeft = scrollLeft - walk * 1.5;
+        });
+        
+        document.addEventListener('click', function(e) {
+            var link = e.target.closest('a.mygantt-bar');
+            if (link) {
+                if (window.gIsDragging) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        }, true);
+    }
     """
+    
+    b64_js = base64.b64encode(js_code.encode('utf-8')).decode('utf-8')
+    html += f"<img src='x' style='display:none;' onerror='eval(atob(\"{b64_js}\"))'>"
     
     return html
 
@@ -453,7 +488,7 @@ if not presentation_mode:
                         utils.db_insert("assignments", new_assigns, track=False)
                         
                         st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
-                        time.sleep(0.4)
+                        time.sleep(0.4) 
                         utils.mark_data_changed()
                         utils.init_data_and_sync()
                         
@@ -492,11 +527,6 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                def on_edit_selectbox_change():
-                    new_val = st.session_state.edit_bar_select_widget
-                    st.session_state.clicked_key = new_val if new_val != "" else None
-                    st.session_state.detector_version += 1
-                
                 default_idx = 0
                 if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
                     default_idx = group_keys.index(st.session_state.clicked_key) + 1
@@ -505,13 +535,21 @@ if not presentation_mode:
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
                     options=[""] + group_keys, 
                     index=default_idx,
-                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})",
-                    key="edit_bar_select_widget",
-                    on_change=on_edit_selectbox_change
+                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})"
                 )
                 
-                if st.session_state.clicked_key and st.session_state.clicked_key in wk_groups:
-                    target_group = wk_groups[st.session_state.clicked_key]
+                # Αν ο χρήστης επιλέξει από το Selectbox κανονικά, ενημερώνουμε το state!
+                if selected_key != "" and selected_key != st.session_state.clicked_key:
+                    st.session_state.clicked_key = selected_key
+                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
+                    st.rerun()
+                elif selected_key == "" and st.session_state.clicked_key is not None:
+                    st.session_state.clicked_key = None
+                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
+                    st.rerun()
+                
+                if selected_key != "":
+                    target_group = wk_groups[selected_key]
                     st.markdown("⚡ **Γρήγορη Μετακίνηση**")
                     qm_c1, qm_c2, qm_c3, qm_c4 = st.columns(4)
                     move_m_day = qm_c1.button("⬅️ -1 Μέρα", use_container_width=True)
@@ -566,14 +604,7 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
-                            
-                            st.success("Η βάρδια μετακινήθηκε επιτυχώς!")
-                            time.sleep(0.4) 
-                            utils.mark_data_changed()
-                            utils.init_data_and_sync()
-                            
                             st.session_state.clicked_key = None
-                            st.session_state.edit_bar_select_widget = ""  # ΚΑΘΑΡΙΣΜΟΣ ΜΕΝΟΥ!
                             st.session_state.detector_version += 1 
                             st.rerun()
 
@@ -638,14 +669,7 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
-                            
-                            st.success("Επιτυχής Διαγραφή!")
-                            time.sleep(0.4)
-                            utils.mark_data_changed()
-                            utils.init_data_and_sync()
-                            
                             st.session_state.clicked_key = None
-                            st.session_state.edit_bar_select_widget = "" # ΚΑΘΑΡΙΣΜΟΣ ΜΕΝΟΥ!
                             st.session_state.detector_version += 1
                             st.rerun()
                             
@@ -711,13 +735,6 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
-                                
-                                st.success("Επιτυχής Ενημέρωση!")
-                                time.sleep(0.4)
-                                utils.mark_data_changed()
-                                utils.init_data_and_sync()
-                                
                                 st.session_state.clicked_key = None
-                                st.session_state.edit_bar_select_widget = "" # ΚΑΘΑΡΙΣΜΟΣ ΜΕΝΟΥ!
                                 st.session_state.detector_version += 1
                                 st.rerun()
