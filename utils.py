@@ -1,100 +1,100 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
-import calendar
+import io
 import textwrap
-import threading
-import re
-import ast
 import time
+import re
+
+# --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+if "employees" not in st.session_state: st.session_state.employees = []
+if "projects" not in st.session_state: st.session_state.projects = []
+if "assignments" not in st.session_state: st.session_state.assignments = []
+if "leaves" not in st.session_state: st.session_state.leaves = []
+if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
+if "evaluations" not in st.session_state: st.session_state.evaluations = []
+
+# ΣΗΜΑΝΤΙΚΟ: Σταματάει τον κώδικα εδώ και σε στέλνει στο Login αν δεν είσαι συνδεδεμένος!
+if not st.session_state.get("authenticated"):
+    st.switch_page("streamlit_app.py")
+    st.stop()
+
 import config
+import utils
 import scheduling
+import gantt_engine  # Εισάγουμε τον native "κινητήρα"
 
-try:
-    from supabase import create_client
-    SUPABASE_INSTALLED = True
-except ImportError:
-    SUPABASE_INSTALLED = False
-
-# --- SETUP SUPABASE ---
-try:
-    HAS_SECRETS = "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets
-except Exception:
-    HAS_SECRETS = False
-
-@st.cache_resource
-def init_supabase():
-    if not SUPABASE_INSTALLED or not HAS_SECRETS:
-        return None
+def get_local_today():
+    """Επιστρέφει τη σωστή σημερινή ημερομηνία για Ώρα Ελλάδος"""
     try:
-        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Athens")).date()
     except Exception:
-        return None
+        return (datetime.utcnow() + timedelta(hours=3)).date()
 
-supabase = init_supabase()
+utils.init_data_and_sync()
 
-# --- ΣΥΣΤΗΜΑ UNDO/REDO ---
-def init_undo_stack():
-    if "undo_stack" not in st.session_state:
-        st.session_state.undo_stack = []
-    if "redo_stack" not in st.session_state:
-        st.session_state.redo_stack = []
+# ΑΥΤΟΜΑΤΗ ΕΠΙΔΙΟΡΘΩΣΗ (Self-Healing)
+total_indexed = sum(len(v) for v in st.session_state.get('assignments_by_date', {}).values())
+if total_indexed != len(st.session_state.get('assignments', [])):
+    utils.mark_data_changed()
+    utils.init_data_and_sync()
 
-def add_transaction(actions):
-    init_undo_stack()
-    st.session_state.undo_stack.append(actions)
-    st.session_state.redo_stack.clear()
-    if len(st.session_state.undo_stack) > 30:
-        st.session_state.undo_stack.pop(0)
+utils.setup_shared_ui()
 
-# --- ΒΑΣΗ ΔΕΔΟΜΕΝΩΝ - HELPERS ---
-def mark_data_changed():
-    st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
-    st.session_state.data_dirty = True
+# Helpers
+is_full_admin = st.session_state.get('current_user') != "TAN"
+active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-def fetch_paginated(table):
-    if not supabase: return []
-    all_rows = []
-    offset = 0
-    limit = 1000
-    while True:
-        try:
-            data = supabase.table(table).select("*").range(offset, offset + limit - 1).execute().data
-            if data:
-                all_rows.extend(data)
-            if not data or len(data) < limit:
-                break
-            offset += limit
-        except Exception:
-            break
-    return all_rows
+# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Αλεξίσφαιρος) ---
+if "view_week_date" not in st.session_state:
+    st.session_state.view_week_date = get_local_today()
 
-def serialize_dates(data):
-    if isinstance(data, list):
-        return [serialize_dates(item) for item in data]
-    elif isinstance(data, dict):
-        return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
-    return data
+def sync_from_widget():
+    st.session_state.view_week_date = st.session_state.date_picker
 
-def safe_date_parse(d_val):
-    if isinstance(d_val, date) and not isinstance(d_val, datetime):
-        return d_val
-    if isinstance(d_val, datetime):
-        return d_val.date()
-    if isinstance(d_val, str):
-        s = d_val.split("T")[0][:10]
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-            try:
-                return datetime.strptime(s, fmt).date()
-            except ValueError:
-                continue
-    return None
+def go_prev_week():
+    new_date = st.session_state.view_week_date - timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
 
-def format_log_details(table_name, records):
-    if not records: return "Καμία εγγραφή"
-    if isinstance(records, dict): records = [records]
-    if isinstance(records, str): return records
-    lines = []
-    for r in records:
+def go_next_week():
+    new_date = st.session_state.view_week_date + timedelta(days=7)
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
+
+def go_to_today():
+    new_date = get_local_today()
+    st.session_state.view_week_date = new_date
+    st.session_state.date_picker = new_date
+
+# --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (Compact UI) ---
+st.markdown("""
+<style>
+/* Απλώνουμε την οθόνη του Streamlit στο 98% και μειώνουμε τα πάνω κενά */
+.block-container, [data-testid="block-container"] {
+    max-width: 98% !important; 
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+}
+
+/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες & Αναλυτικά) στο ελάχιστο δυνατό */
+div[data-testid="stNotification"], .stAlert {
+    padding: 2px 10px !important;
+    margin-top: 0px !important;
+    margin-bottom: 2px !important;
+}
+div[data-testid="stNotification"] p, .stAlert p {
+    margin: 0 !important;
+    font-size: 13px !important;
+}
+
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
