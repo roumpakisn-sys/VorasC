@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
@@ -270,8 +271,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             # 👇 Βρίσκουμε το ΑΠΛΟ ID που φτιάξαμε για αυτό το group
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # Το Link με το απλό id
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # 👇 ΑΛΛΑΓΗ ΣΤΟ href="javascript:void(0);" : Διορθώνει την αναπήδηση! Δεν στέλνει την οθόνη στην κορυφή.
+            html += f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
@@ -285,14 +286,14 @@ html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mappin
 # Η δύναμη του st-click-detector με δυναμικό key για να "ξεχνάει" την παλιά επιλογή!
 clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
 
-# 👇 --- ΔΙΑΒΑΣΜΑ ΚΑΙ ΜΕΤΑΦΡΑΣΗ ΤΟΥ ΚΛΙΚ --- 👇
+# 👇 --- ΔΙΑΒΑΣΜΑ ΤΟΥ ΚΛΙΚ (ΧΩΡΙΣ st.rerun ΓΙΑ ΝΑ ΜΗΝ ΑΡΓΕΙ Η ΕΦΑΡΜΟΓΗ!) --- 👇
 if clicked_safe_id:
     # Βρίσκουμε το ΠΡΑΓΜΑΤΙΚΟ Key μέσα από το λεξικό
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        st.rerun()
+        # Αφαιρέσαμε το st.rerun() ! Το script συνεχίζει προς τα κάτω ακαριαία
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
@@ -421,33 +422,52 @@ if not presentation_mode:
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
             
+            # 👇 Ομαλό Scroll (Smooth Down) όταν υπάρχει επιλογή
+            if st.session_state.clicked_key:
+                components.html(
+                    """
+                    <script>
+                        setTimeout(function() {
+                            const headers = window.parent.document.querySelectorAll('h3');
+                            headers.forEach(h => {
+                                if(h.innerText.includes('Επεξεργασία Μπάρας')) {
+                                    h.scrollIntoView({behavior: 'smooth', block: 'start'});
+                                }
+                            });
+                        }, 100);
+                    </script>
+                    """,
+                    height=0,
+                    width=0
+                )
+            
             if not wk_groups:
                 st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
             else:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
+                # 👇 Callback Συνάρτηση: Αποτρέπει την αργοπορία και τη 2η φόρτωση
+                def on_edit_selectbox_change():
+                    new_val = st.session_state.edit_bar_select_widget
+                    st.session_state.clicked_key = new_val if new_val != "" else None
+                    st.session_state.detector_version += 1
+                
                 default_idx = 0
                 if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
                     default_idx = group_keys.index(st.session_state.clicked_key) + 1
                     
                 selected_key = st.selectbox(
-                    "Επιλέξτε Μπάρα (Ημέρα & Έργο)", options=[""] + group_keys, index=default_idx,
-                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})"
+                    "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
+                    options=[""] + group_keys, 
+                    index=default_idx,
+                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})",
+                    key="edit_bar_select_widget",
+                    on_change=on_edit_selectbox_change
                 )
                 
-                # Αν ο χρήστης επιλέξει από το Selectbox κανονικά, ενημερώνουμε το state!
-                if selected_key != "" and selected_key != st.session_state.clicked_key:
-                    st.session_state.clicked_key = selected_key
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
-                    st.rerun()
-                elif selected_key == "" and st.session_state.clicked_key is not None:
-                    st.session_state.clicked_key = None
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
-                    st.rerun()
-                
-                if selected_key != "":
-                    target_group = wk_groups[selected_key]
+                if st.session_state.clicked_key and st.session_state.clicked_key in wk_groups:
+                    target_group = wk_groups[st.session_state.clicked_key]
                     st.markdown("⚡ **Γρήγορη Μετακίνηση**")
                     qm_c1, qm_c2, qm_c3, qm_c4 = st.columns(4)
                     move_m_day = qm_c1.button("⬅️ -1 Μέρα", use_container_width=True)
