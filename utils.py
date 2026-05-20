@@ -233,6 +233,7 @@ def track_deletion(table_name, record_id):
 
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
+    current_user = st.session_state.get("current_user", "Σύστημα (Παρασκήνιο)")
     
     def _thread_task():
         chunk_size = 500
@@ -247,13 +248,14 @@ def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗ
             log_entry = {
                 "id": str(uuid.uuid4()),
                 "timestamp": now_utc,
-                "username": st.session_state.get("current_user", "Σύστημα (Παρασκήνιο)"),
+                "username": current_user,
                 "action_type": log_action,
                 "table_name": table,
                 "details": log_details or f"Προστέθηκαν {len(data)} εγγραφές"
             }
             supabase.table("activity_logs").insert(log_entry).execute()
-        except: pass
+        except Exception:
+            pass
 
     threading.Thread(target=_thread_task, daemon=True).start()
 
