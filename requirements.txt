@@ -4,3 +4,4 @@ plotly
 supabase
 openpyxl
 st-click-detector
+streamlit-plotly-events
