@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
@@ -177,33 +178,13 @@ else:
 
 clicked_key = None
 
-# --- NATIVE PLOTLY ΕΜΦΑΝΙΣΗ & EVENT HANDLING ---
-try:
-    event = st.plotly_chart(
-        fig, 
-        use_container_width=True, 
-        on_select="rerun", 
-        selection_mode="points", 
-        config={
-            "displayModeBar": True,  # Εμφανίζει το μενού του Plotly πάνω δεξιά
-            "scrollZoom": False,     # Δεν κάνει zoom με τη ροδέλα
-            "displaylogo": False,
-            "modeBarButtonsToRemove": ["zoom2d", "select2d", "lasso2d", "autoScale2d"]
-        }
-    )
-    if event and "selection" in event and event["selection"].get("points"):
-        cd = event["selection"]["points"][0].get("customdata", [None])[0]
-        if cd and cd != "Empty": 
-            clicked_key = cd
-except Exception:
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-if clicked_key:
-    st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
+# --- HTML ΕΜΦΑΝΙΣΗ GANTT (αντί για st.plotly_chart) ---
+html_content_live = fig.to_html(full_html=False, include_plotlyjs="cdn")
+components.html(html_content_live, height=900, scrolling=True)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Drag) για οριζόντια μετακίνηση του χρόνου (δεξιά-αριστερά) ή των ημερών (πάνω-κάτω)."
+hint_text = "💡 *Συμβουλές:* **1)** Επιλέξτε μπάρα από τη λίστα για επεξεργασία. **2)** Η άμεση επιλογή πάνω στο γράφημα δεν υποστηρίζεται σε HTML mode."
 if export_data:
     col_hint, col_btn_excel, col_btn_html = st.columns([3, 1, 1])
     with col_hint: st.caption(hint_text)
