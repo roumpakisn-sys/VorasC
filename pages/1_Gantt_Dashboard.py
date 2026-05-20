@@ -205,9 +205,9 @@ if clicked_key:
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Drag) για οριζόντια μετακίνηση του χρόνου (δεξιά-αριστερά) ή των ημερών (πάνω-κάτω)."
 if export_data:
-    col_hint, col_btn = st.columns([3, 1])
+    col_hint, col_btn_excel, col_btn_html = st.columns([3, 1, 1])
     with col_hint: st.caption(hint_text)
-    with col_btn:
+    with col_btn_excel:
         df_export = pd.DataFrame(export_data)
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -216,6 +216,15 @@ if export_data:
             label="📥 Εξαγωγή (Excel)", data=buffer.getvalue(),
             file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    with col_btn_html:
+        html_content = fig.to_html(full_html=True, include_plotlyjs="cdn")
+        st.download_button(
+            label="🌐 Εξαγωγή (HTML)",
+            data=html_content.encode("utf-8"),
+            file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.html",
+            mime="text/html",
             use_container_width=True
         )
 else:
