@@ -7,6 +7,7 @@ import textwrap
 import time
 import re
 import base64
+import streamlit.components.v1 as components
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -46,30 +47,17 @@ is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
 
-# --- ΓΕΦΥΡΑ ΕΠΙΚΟΙΝΩΝΙΑΣ JS -> PYTHON ΓΙΑ ΤΑ ΚΛΙΚ (HIDDEN BRIDGE) ---
+# --- ΔΙΑΒΑΣΜΑ ΤΟΥ ΚΛΙΚ (ΑΠΟ ΤΟ URL QUERY PARAMETER) ---
 if "clicked_key" not in st.session_state:
     st.session_state.clicked_key = None
 
-# Κρύβουμε πλήρως τα στοιχεία της γέφυρας από την οθόνη
-st.markdown("""
-<style>
-div[data-testid="stTextInput"]:has(input[aria-label="gantt_bridge_input"]) { display: none !important; }
-div[data-testid="stButton"]:has(p:contains("gantt_bridge_btn")) { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
-
-bridge_val = st.text_input("gantt_bridge_input", key="gantt_bridge_input", label_visibility="collapsed")
-bridge_btn = st.button("gantt_bridge_btn", key="gantt_bridge_btn")
-
-if bridge_btn:
-    val = st.session_state.gantt_bridge_input
-    if val:
-        try:
-            st.session_state.clicked_key = base64.b64decode(val.encode('utf-8')).decode('utf-8')
-        except:
-            st.session_state.clicked_key = val
-
-clicked_key = st.session_state.clicked_key
+if "edit_key" in st.query_params:
+    raw_key = st.query_params["edit_key"]
+    try:
+        # Αποκωδικοποίηση URL-safe base64 για απόλυτη ασφάλεια
+        st.session_state.clicked_key = base64.urlsafe_b64decode(raw_key.encode('utf-8')).decode('utf-8')
+    except Exception:
+        pass
 
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ---
@@ -149,10 +137,11 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
-# --- NATIVE HTML GANTT CHART BUILDER (ΑΣΦΑΛΗΣ & ΕΠΙΠΕΔΗ ΜΟΡΦΗ) ---
+# --- NATIVE HTML GANTT CHART BUILDER (ΚΑΘΑΡΟ HTML & LINKS) ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    # Πλάτος: 2400px * zoom. Αντιστοιχεί σε 20 ώρες, άρα η οθόνη σου θα βλέπει ακριβώς 10 ώρες.
-    min_width_px = int(2400 * zoom_factor) 
+    # Πλάτος: 200vw. Καθώς έχουμε 20 ώρες (04:00 - 24:00), οι 10 ώρες καταλαμβάνουν 
+    # ακριβώς το 100vw, δίνοντας το τέλειο 06:00-16:00!
+    timeline_width_calc = f"calc(200vw * {zoom_factor})"
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
@@ -174,14 +163,25 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
     html_parts = []
     
-    # Το κυρίως Container - Μία συμπαγής δομή για να μην μπερδεύεται το Streamlit
-    html_parts.append(f'<div class="gantt-master-container" data-week="{start_of_week}" style="overflow: auto; max-height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4);">')
-    html_parts.append('<style>.gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } .gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } .gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } .gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>')
-    
-    # HEADER ΠΕΡΙΟΧΗ - Συμπαγές Κουτί που σφραγίζει το πάνω μέρος
-    html_parts.append('<div style="display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;">')
-    html_parts.append('<div style="width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b;">Ημέρα / Προσωπικό</div>')
-    html_parts.append(f'<div style="width: {min_width_px}px; min-width: {min_width_px}px; position: relative; height: 45px; background: #f8fafc;">')
+    # 1. Βασικό Container και CSS
+    html_parts.append(f"""
+    <div id="gantt-master-container" style="overflow: auto; max-height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4);">
+        <style>
+            #gantt-master-container::-webkit-scrollbar {{ width: 12px; height: 12px; }}
+            #gantt-master-container::-webkit-scrollbar-track {{ background: #f1f5f9; border-radius: 8px; }}
+            #gantt-master-container::-webkit-scrollbar-thumb {{ background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; }}
+            #gantt-master-container::-webkit-scrollbar-thumb:hover {{ background: #64748b; }}
+            .mygantt-bar:hover {{ transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }}
+        </style>
+        
+        <!-- HEADER ΠΕΡΙΟΧΗ - Απόλυτα διαχωρισμένο κουτί για τις ώρες! -->
+        <div style="display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;">
+            <div style="width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b;">
+                Ημέρα / Προσωπικό
+            </div>
+            
+            <div class="gantt-timeline" style="position: relative; width: {timeline_width_calc}; min-width: {timeline_width_calc}; height: 45px; background: #f8fafc;">
+    """)
     
     # Ώρες 04:00 - 24:00
     for h in range(4, 25):
@@ -191,7 +191,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     
     html_parts.append('</div></div>')
 
-    # ΓΡΑΜΜΕΣ ΗΜΕΡΩΝ (Rows)
+    # 2. ΓΡΑΜΜΕΣ ΗΜΕΡΩΝ (Rows)
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
@@ -249,7 +249,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         
         html_parts.append(f'<div style="display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;">')
         html_parts.append(f'<div style="width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;">{label_html}</div>')
-        html_parts.append(f'<div style="width: {min_width_px}px; min-width: {min_width_px}px; position: relative; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: 10px; padding-bottom: 10px;">')
+        html_parts.append(f'<div style="position: relative; width: {timeline_width_calc}; min-width: {timeline_width_calc}; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: 10px; padding-bottom: 10px;">')
 
         for g, lane_idx in group_lanes:
             def t2p(t_str):
@@ -280,135 +280,93 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
                     base_text += f"<br><span style='color:#dc2626;'>[{g['cancel_reason'].upper()}]</span>"
 
             bg_color = g['ColorHex']
-            
-            safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             tooltip = base_text.replace('<br>', ' ')
             
-            # Μπάρες: Απλά DIVs, η JS τα χειρίζεται.
-            html_parts.append(f'<div class="mygantt-bar" onclick="window.sendGanttClick(\'{safe_key}\')" style="position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;" title="{tooltip}">')
-            html_parts.append(f'<div style="line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">{base_text}</div></div>')
+            # ΜΑΓΕΙΑ ΚΛΙΚ: Ασφαλές, URL-Safe Base64 και κανονικό `<a>` Link!
+            safe_key = base64.urlsafe_b64encode(g['Key'].encode('utf-8')).decode('utf-8')
+            
+            html_parts.append(f"""
+                <a href="?edit_key={safe_key}" target="_self" class="mygantt-bar" style="position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;" title="{tooltip}">
+                    <div style="line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">{base_text}</div>
+                </a>
+            """)
 
         html_parts.append('</div></div>')
 
     html_parts.append('</div>')
-    
-    # -------------------------------------------------------------------------
-    # ΤΟ ΜΥΑΛΟ ΤΗΣ ΕΦΑΡΜΟΓΗΣ (JAVASCRIPT) - Τέλεια λειτουργία!
-    # 1. Θυμάται πού είχες σκρολάρει, δεν σε πετάει πίσω αν αλλάξεις zoom!
-    # 2. Το Drag (σύρσιμο) δουλεύει τέλεια χωρίς να μπλοκάρει το κλικ.
-    # 3. Βρίσκει αλάνθαστα το κρυφό κουμπί για να ανοίξει την επεξεργασία.
-    # -------------------------------------------------------------------------
-    js_code = """
-    function initGantt() {
-        let doc = document;
-        let containers = doc.querySelectorAll('.gantt-master-container');
-        if(containers.length === 0 && window.parent) {
-            doc = window.parent.document;
-            containers = doc.querySelectorAll('.gantt-master-container');
-        }
-        if(containers.length === 0) return;
-        
-        let s = containers[containers.length - 1]; // Πιάνουμε πάντα το τελευταίο ενεργό γράφημα
-        if (s.dataset.init) return;
-        s.dataset.init = '1';
+    return "".join(html_parts)
 
-        // Έλεγχος Αλλαγής Εβδομάδας (Αυτόματο Scroll 06:00 ΜΟΝΟ αν άλλαξε η εβδομάδα)
-        let currentWeek = s.getAttribute('data-week');
-        if (window.ganttLastWeek !== currentWeek) {
-            setTimeout(() => { s.scrollLeft = s.scrollWidth * 0.10; }, 100);
-            window.ganttLastWeek = currentWeek;
-        } else if (window.ganttSavedScroll !== undefined) {
-            // Αν αλλάξει μόνο το zoom, διατηρεί την κύλιση!
-            setTimeout(() => { s.scrollLeft = window.ganttSavedScroll; }, 50);
+
+# ΕΜΦΑΝΙΣΗ ΓΡΑΦΗΜΑΤΟΣ NATIVELY!
+html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
+st.markdown(html_chart, unsafe_allow_html=True)
+
+
+# --- SCRIPT INJECTOR ΓΙΑ ΤΟ DRAG & SCROLL ---
+# Αυτό το script εισάγεται "αόρατα" και εφαρμόζει τη λειτουργία Drag κατευθείαν στον καμβά!
+drag_script = """
+<script>
+    const parentDoc = window.parent.document;
+    const container = parentDoc.getElementById('gantt-master-container');
+
+    if (container && !container.dataset.dragAttached) {
+        container.dataset.dragAttached = 'true';
+
+        // 1. Έξυπνη Αποθήκευση Zoom & Auto-Scroll
+        if (window.parent.ganttScrollPos) {
+            container.scrollLeft = window.parent.ganttScrollPos;
+        } else {
+            // Αυτόματο scroll στις 06:00 (10% του συνολικού Timeline)
+            setTimeout(() => {
+                const timeline = container.querySelector('.gantt-timeline');
+                if (timeline) container.scrollLeft = timeline.offsetWidth * 0.10;
+            }, 100);
         }
 
-        s.addEventListener('scroll', () => { window.ganttSavedScroll = s.scrollLeft; });
+        container.addEventListener('scroll', () => { 
+            window.parent.ganttScrollPos = container.scrollLeft; 
+        });
 
+        // 2. Drag to Scroll Λογική
         let isDown = false;
         let startX;
-        let scrollL;
-        window.isGanttDragging = false;
+        let scrollLeft;
 
-        s.addEventListener('mousedown', (e) => {
+        container.addEventListener('mousedown', (e) => {
             isDown = true;
-            window.isGanttDragging = false;
-            s.style.cursor = 'grabbing';
-            startX = e.pageX - s.offsetLeft;
-            scrollL = s.scrollLeft;
+            window.parent.isGanttDragging = false;
+            container.style.cursor = 'grabbing';
+            startX = e.pageX - container.offsetLeft;
+            scrollLeft = container.scrollLeft;
         });
-        s.addEventListener('mouseleave', () => { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mouseup', () => { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mousemove', (e) => {
+        container.addEventListener('mouseleave', () => {
+            isDown = false;
+            container.style.cursor = 'auto';
+        });
+        container.addEventListener('mouseup', () => {
+            isDown = false;
+            container.style.cursor = 'auto';
+        });
+        container.addEventListener('mousemove', (e) => {
             if (!isDown) return;
             e.preventDefault();
-            const x = e.pageX - s.offsetLeft;
+            const x = e.pageX - container.offsetLeft;
             const walk = (x - startX) * 1.5;
-            if (Math.abs(walk) > 5) window.isGanttDragging = true;
-            s.scrollLeft = scrollL - walk;
+            if (Math.abs(walk) > 5) window.parent.isGanttDragging = true;
+            container.scrollLeft = scrollLeft - walk;
         });
 
-        // Κρύβουμε τα bridge components της Python για ασφάλεια
-        setTimeout(() => {
-            try {
-                let btns = Array.from(doc.querySelectorAll('button'));
-                let btn = btns.find(b => b.innerText === 'gantt_bridge_btn');
-                if (btn) { let p = btn.closest('div[data-testid="stButton"]'); if (p) p.style.display = 'none'; }
-                
-                let inps = Array.from(doc.querySelectorAll('input'));
-                let inp = inps.find(i => i.getAttribute('aria-label') === 'gantt_bridge_input');
-                if (inp) { let p = inp.closest('div[data-testid="stTextInput"]'); if (p) p.style.display = 'none'; }
-            } catch(e) {}
-        }, 100);
+        // 3. Προστασία Κλικ: Αν ο χρήστης έκανε Drag, ακυρώνει το άνοιγμα του Link!
+        container.addEventListener('click', (e) => {
+            if (window.parent.isGanttDragging) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        }, true);
     }
-
-    window.sendGanttClick = function(b64key) {
-        if (window.isGanttDragging) return; // Αγνοούμε το κλικ αν ο χρήστης έκανε σύρσιμο (drag)
-        try {
-            let doc = document;
-            let inputs = Array.from(doc.querySelectorAll('input'));
-            let inp = inputs.find(i => i.getAttribute('aria-label') === 'gantt_bridge_input');
-            if (!inp && window.parent) {
-                doc = window.parent.document;
-                inputs = Array.from(doc.querySelectorAll('input'));
-                inp = inputs.find(i => i.getAttribute('aria-label') === 'gantt_bridge_input');
-            }
-            if (inp) {
-                let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                if (!setter && window.parent) {
-                    setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-                }
-                setter.call(inp, b64key);
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                
-                setTimeout(() => {
-                    let btns = Array.from(doc.querySelectorAll('button'));
-                    let btn = btns.find(b => b.innerText === 'gantt_bridge_btn');
-                    if (!btn && window.parent) {
-                        btns = Array.from(window.parent.document.querySelectorAll('button'));
-                        btn = btns.find(b => b.innerText === 'gantt_bridge_btn');
-                    }
-                    if (btn) btn.click(); // Πατάει το κουμπί επεξεργασίας στην Python!
-                }, 150);
-            }
-        } catch(e) { console.error(e); }
-    };
-
-    setTimeout(initGantt, 200);
-    """
-    
-    # 1. Base64 Encode του Script για απόλυτη ασφάλεια. Ο browser το εκτελεί χωρίς να το τυπώνει ποτέ.
-    b64_js = base64.b64encode(js_code.encode('utf-8')).decode('utf-8')
-    html_parts.append(f'<img src="dummy.png" style="display:none;" onerror="eval(atob(\'{b64_js}\'))">')
-    
-    # 2. Συμπίεση σε μία ΕΠΙΠΕΔΗ ΓΡΑΜΜΗ. (Η ρίζα του προβλήματος ήταν τα νέα lines \n).
-    final_html = "".join(html_parts).replace('\n', ' ').replace('\r', '')
-    final_html = re.sub(r'\s{2,}', ' ', final_html)
-    
-    return final_html
-
-# Σχεδιάζουμε το γράφημα Native στο Streamlit
-html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
-st.write(html_chart, unsafe_allow_html=True)
+</script>
+"""
+components.html(drag_script, height=0, width=0)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -543,22 +501,25 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ ΤΟΥ ΓΡΑΦΗΜΑΤΟΣ ---
+                # --- AUTO-SELECT ΑΠΟ ΤΟ URL ΚΛΙΚ ---
                 default_idx = 0
-                if clicked_key and clicked_key in group_keys:
-                    default_idx = group_keys.index(clicked_key) + 1
+                if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
+                    default_idx = group_keys.index(st.session_state.clicked_key) + 1
                     
                 selected_key = st.selectbox(
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)", options=[""] + group_keys, index=default_idx,
                     format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})"
                 )
                 
-                # Αν ο χρήστης επιλέξει από το Selectbox κανονικά, ενημερώνουμε το state!
+                # Συγχρονισμός URL Params με το Selectbox
                 if selected_key != "" and selected_key != st.session_state.clicked_key:
                     st.session_state.clicked_key = selected_key
+                    safe_k = base64.urlsafe_b64encode(selected_key.encode('utf-8')).decode('utf-8')
+                    st.query_params["edit_key"] = safe_k
                     st.rerun()
                 elif selected_key == "" and st.session_state.clicked_key is not None:
                     st.session_state.clicked_key = None
+                    st.query_params.clear()
                     st.rerun()
                 
                 if selected_key != "":
@@ -617,6 +578,7 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
+                            st.query_params.clear()
                             st.session_state.clicked_key = None
                             st.rerun()
 
@@ -681,6 +643,7 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
+                            st.query_params.clear()
                             st.session_state.clicked_key = None
                             st.rerun()
                             
@@ -745,5 +708,6 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
+                                st.query_params.clear()
                                 st.session_state.clicked_key = None
                                 st.rerun()
