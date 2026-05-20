@@ -94,8 +94,6 @@ div[data-testid="stNotification"] p, .stAlert p {
     margin: 0 !important;
     font-size: 13px !important;
 }
-/* 👇 ΜΙΚΡΟ ΚΟΛΠΟ: Αποτρέπουμε τον browser να κάνει το απότομο scroll πάνω σε όλα τα links του εγγράφου */
-html { scroll-behavior: smooth; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,10 +130,10 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
-# Φτιάχνουμε ένα απλό λεξικό αντιστοίχισης (Καθαρό ID -> Πραγματικό Key)
+# 👇 Η ΜΕΓΑΛΗ ΔΙΟΡΘΩΣΗ: Φτιάχνουμε απλά και 100% μοναδικά IDs χωρίς να χάνουμε τα Ελληνικά!
 safe_mapping = {}
-for real_key in wk_groups.keys():
-    safe_id = "group_" + re.sub(r'[^a-zA-Z0-9]', '', real_key)
+for idx, real_key in enumerate(wk_groups.keys()):
+    safe_id = f"bar_{idx}"
     safe_mapping[safe_id] = real_key
 
 # --- NATIVE HTML GANTT CHART BUILDER ---
@@ -262,44 +260,32 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             bg_color = g['ColorHex']
             tooltip = base_text.replace('<br>', ' ').replace('"', '&quot;').replace("'", "&#39;")
             
+            # Βρίσκουμε το ΑΠΛΟ ID!
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # 👇 ΕΠΑΝΑΦΟΡΑ ΤΟΥ href='#' (Το ΑΠΑΙΤΕΙ το st_click_detector για να δουλέψει)
-            # Προστέθηκε κώδικας στο onclick που στέλνει την εντολή χωρίς να αφήνει τον browser να σκρολάρει πάνω!
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }} setTimeout(function(){{ window.scrollTo(0, window.scrollY); }}, 1); ' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Εδώ ο κώδικας είναι καθαρός! Χρησιμοποιούμε href='#' και αποφεύγουμε συγκρούσεις (prevent drag, allow click)
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
     html += "</div>"
     
-    # 👇 ΕΝΣΩΜΑΤΩΜΕΝΟ SCRIPT ΓΙΑ ΠΡΟΣΤΑΣΙΑ ΑΠΟ ΤΗΝ ΑΝΑΠΗΔΗΣΗ (PREVENT DEFAULT ANCHOR BEHAVIOR)
-    html += """
-    <script>
-    document.addEventListener('click', function(e) {
-        var target = e.target.closest('.mygantt-bar');
-        if (target) {
-            // Αυτό λέει στον browser να μην ακολουθήσει το # που πάει στην κορυφή
-            e.preventDefault(); 
-        }
-    });
-    </script>
-    """
-    
     return html
-
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping)
 
+# Περιμένουμε το κλικ από τον χρήστη
 clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
 
 # 👇 --- ΔΙΑΒΑΣΜΑ ΚΑΙ ΕΝΗΜΕΡΩΣΗ STATE (ΜΕ RERUN) --- 👇
 if clicked_safe_id:
+    # Βρίσκουμε το ΠΡΑΓΜΑΤΙΚΟ ελληνικό όνομα (πχ "Δευτέρα 15/05 - ΕΡΓΟ Α")
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        # Το rerun είναι απαραίτητο για να ανοίξει η φόρμα
+        # Το rerun είναι απαραίτητο για να ανοίξει η φόρμα ΑΜΕΣΩΣ!
         st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
