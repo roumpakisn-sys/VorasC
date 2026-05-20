@@ -235,6 +235,13 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
     timeline_width_px = int(2400 * zoom_factor)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
+    # Ζητούμενη εμφάνιση: λίγο πιο ψηλές μπάρες + μικρότερα κενά ανάμεσα
+    BAR_HEIGHT_PX = 44
+    LANE_STEP_PX = 46
+    ROW_PAD_TOP_PX = 6
+    ROW_PAD_BOTTOM_PX = 6
+    TEXT_LINES = 4
+
     emp_short_names = {}
     external_crews = []
     for emp in st.session_state.employees:
@@ -255,7 +262,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     html += (
         "<div id='gantt-master-container' "
-        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; cursor: grab; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
+        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
+        "background: #ffffff; user-select: none; cursor: grab; "
+        "box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
@@ -320,12 +329,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
                 lanes.append(g["EndTime"])
                 group_lanes.append((g, len(lanes) - 1))
 
-        row_height = max(1, len(lanes)) * 48 + 20
+        row_height = max(1, len(lanes)) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
         bg_color_row = "#eef2ff" if curr_date == get_local_today() else ("#f8fafc" if i % 2 == 1 else "#ffffff")
 
         html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;'>"
         html += f"<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;'>{label_html}</div>"
-        html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: 10px; padding-bottom: 10px;'>"
+        html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
 
         for g, lane_idx in group_lanes:
             def t2p(t_str):
@@ -337,7 +346,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
             left_pct = t2p(g["StartTime"])
             width_pct = t2p(g["EndTime"]) - left_pct
-            top_px = lane_idx * 48 + 10
+            top_px = lane_idx * LANE_STEP_PX + ROW_PAD_TOP_PX
 
             emps_str = ", ".join(g["Employees"]).upper()
             proj_name = g["Project"].upper()
@@ -361,12 +370,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
             html += (
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
-                f"background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; "
+                f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; "
                 f"box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'>"
-                f"<div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; "
-                f"-webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+                f"<div style='line-height: 1.15; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; "
+                f"-webkit-line-clamp: {TEXT_LINES}; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
             )
 
         html += "</div></div>"
@@ -374,6 +383,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
     html += "</div>"
 
     # --- JS Injector (Base64) ---
+    # Drag παντού μέσα στο gantt (όχι μόνο στη scrollbar)
     js_code = """
     (function () {
       var s = document.getElementById('gantt-master-container');
@@ -432,30 +442,33 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       s.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
         dragStart(e.pageX);
-        e.preventDefault();
-      });
+      }, true);
 
       document.addEventListener('mousemove', function(e) {
         dragMove(e.pageX);
-      });
+      }, true);
 
       document.addEventListener('mouseup', function() {
+        dragEnd();
+      }, true);
+
+      window.addEventListener('blur', function() {
         dragEnd();
       });
 
       s.addEventListener('touchstart', function(e) {
         if (!e.touches || !e.touches[0]) return;
         dragStart(e.touches[0].pageX);
-      }, { passive: true });
+      }, { passive: true, capture: true });
 
       s.addEventListener('touchmove', function(e) {
         if (!e.touches || !e.touches[0]) return;
         dragMove(e.touches[0].pageX);
-      }, { passive: true });
+      }, { passive: true, capture: true });
 
       s.addEventListener('touchend', function() {
         dragEnd();
-      }, { passive: true });
+      }, { passive: true, capture: true });
 
       s.addEventListener('dragstart', function(e) {
         e.preventDefault();
@@ -497,7 +510,7 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και drag για οριζόντια κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
+hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag οπουδήποτε μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint:
