@@ -260,11 +260,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             bg_color = g['ColorHex']
             tooltip = base_text.replace('<br>', ' ').replace('"', '&quot;').replace("'", "&#39;")
             
-            # Βρίσκουμε το ΑΠΛΟ ID!
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # Εδώ ο κώδικας είναι καθαρός! Χρησιμοποιούμε href='#' και αποφεύγουμε συγκρούσεις (prevent drag, allow click)
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # 👇 ΕΔΩ Η ΜΑΓΕΙΑ: Προστέθηκε το `event.preventDefault();` στο onclick, το οποίο ακυρώνει το άλμα στην κορυφή της οθόνης!
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='event.preventDefault(); if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
@@ -285,7 +284,10 @@ if clicked_safe_id:
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        # Το rerun είναι απαραίτητο για να ανοίξει η φόρμα ΑΜΕΣΩΣ!
+        # 👇 ΛΥΣΗ 1: Ενημερώνουμε ΤΑΥΤΟΧΡΟΝΑ το Widget του Selectbox, ώστε να μην "επιβάλει" την παλιά επιλογή!
+        st.session_state.edit_bar_select_widget = real_clicked_key
+        # 👇 ΛΥΣΗ 2: Ενεργοποιούμε το Smooth Scroll ΜΟΝΟ για αυτή τη συγκεκριμένη στιγμή
+        st.session_state.trigger_scroll = True
         st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -415,26 +417,26 @@ if not presentation_mode:
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
             
-            # 👇 ΒΕΛΤΙΩΜΕΝΟ Ομαλό Scroll (Smooth Down) με χρονοκαθυστέρηση
-            if st.session_state.clicked_key:
+            # 👇 ΒΕΛΤΙΩΜΕΝΟ Ομαλό Scroll (Smooth Down) που τρέχει ΜΟΝΟ όταν κάνεις κλικ!
+            if st.session_state.get("trigger_scroll"):
                 components.html(
                     """
                     <script>
-                        // Περιμένουμε για να σιγουρευτούμε ότι η φόρμα φορτώθηκε στην οθόνη
                         setTimeout(function() {
                             const headers = window.parent.document.querySelectorAll('h3');
                             for (let i = 0; i < headers.length; i++) {
                                 if(headers[i].innerText && headers[i].innerText.includes('Επεξεργασία Μπάρας')) {
-                                    headers[i].scrollIntoView({behavior: 'smooth', block: 'center'});
+                                    headers[i].scrollIntoView({behavior: 'smooth', block: 'start'});
                                     break;
                                 }
                             }
-                        }, 500);
+                        }, 200);
                     </script>
                     """,
                     height=0,
                     width=0
                 )
+                st.session_state.trigger_scroll = False
             
             if not wk_groups:
                 st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
