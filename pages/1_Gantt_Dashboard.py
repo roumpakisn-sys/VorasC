@@ -127,7 +127,7 @@ wk_groups, export_data = get_cached_data(
 )
 
 
-# --- NATIVE HTML GANTT CHART BUILDER (ΜΕ ST-CLICK-DETECTOR) ---
+# --- NATIVE HTML GANTT CHART BUILDER (ΜΕ ST-CLICK-DETECTOR KAI INLINE JS) ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     # Πλάτος: 2400px * zoom. Αντιστοιχεί σε 20 ώρες.
     timeline_width_px = int(2400 * zoom_factor)
@@ -151,8 +151,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         return False
 
     html = ""
-    # Κυρίως Container. Το Overflow κρύβει τις μπάρες και αφήνει το Scroll να δουλέψει
-    html += "<div id='gantt-master-container' style='overflow: auto; max-height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
+    # "Αόρατη" εκκίνηση του scroll μέσω onerror, καθώς τα script blocks αγνοούνται
+    html += "<img src='x' style='display:none;' onerror='var s=document.getElementById(\"gantt-master-container\"); if(s && !window.gScrolled){ setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 100); window.gScrolled=true; }'>"
+    
+    # Κυρίως Container. Ενσωματώσαμε το Drag-and-Scroll απευθείας πάνω στο HTML tag! (Inline events)
+    html += (
+        "<div id='gantt-master-container' "
+        "onmousedown='window.gIsDown=true; window.gIsDragging=false; this.style.cursor=\"grabbing\"; window.gStartX=event.pageX - this.offsetLeft; window.gScrollL=this.scrollLeft;' "
+        "onmouseleave='window.gIsDown=false; this.style.cursor=\"auto\";' "
+        "onmouseup='window.gIsDown=false; this.style.cursor=\"auto\";' "
+        "onmousemove='if(!window.gIsDown) return; event.preventDefault(); var walk=(event.pageX - this.offsetLeft) - window.gStartX; if(Math.abs(walk)>5) window.gIsDragging=true; this.scrollLeft=window.gScrollL - walk * 1.5;' "
+        "style='overflow: auto; max-height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
+    )
+
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
     
     # Header: Το αριστερό κομμάτι "Ημέρα" είναι 230px. Δίπλα ακριβώς ξεκινάει το Timeline.
@@ -241,68 +252,23 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
                 if g['cancel_reason']: base_text += f"<br><span style='color:#dc2626;'>[{g['cancel_reason'].upper()}]</span>"
 
             bg_color = g['ColorHex']
-            tooltip = base_text.replace('<br>', ' ').replace('"', "'")
             
-            # Κωδικοποιούμε το ID ώστε να είναι ασφαλές και το περνάμε στο `id` της <a>
+            # Αντικατάσταση χαρακτήρων για να μην "σπάει" την HTML (Tooltips & IDs)
+            tooltip = base_text.replace('<br>', ' ').replace('"', '&quot;').replace("'", "&#39;")
             safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             
-            # Μπάρες: <a> (anchor link) για να τα εντοπίσει το st-click-detector
-            html += f"<a href='#' id='{safe_key}' class='mygantt-bar' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Προστασία: Αν γίνεται Drag, κάνε ακύρωση του κλικ (stopPropagation/preventDefault)
+            click_shield = "if(window.gIsDragging){ event.preventDefault(); event.stopPropagation(); return false; }"
+            
+            # Το Link: Χρησιμοποιούμε href='javascript:void(0)' για να ΜΗΝ αναπηδά η οθόνη στην κορυφή!
+            html += f"<a href='javascript:void(0)' id='{safe_key}' class='mygantt-bar' onclick='{click_shield}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
     html += "</div>"
-
-    # --- JAVASCRIPT ΓΙΑ DRAG & ΑΥΤΟΜΑΤΟ SCROLL ---
-    js_code = """
-    <script>
-        var s = document.getElementById('gantt-master-container');
-        if (s) {
-            // Αυτόματο Scroll στις 06:00 (10% του πλάτους αφού 20 ώρες = 100%)
-            setTimeout(function() {
-                var timeline = s.querySelector('.gantt-timeline-header');
-                if (timeline) {
-                    s.scrollLeft = timeline.offsetWidth * 0.10;
-                }
-            }, 100);
-
-            var isDown = false;
-            var startX;
-            var scrollLeft;
-            var isDragging = false;
-
-            s.addEventListener('mousedown', function(e) {
-                isDown = true;
-                isDragging = false;
-                s.style.cursor = 'grabbing';
-                startX = e.pageX - s.offsetLeft;
-                scrollLeft = s.scrollLeft;
-            });
-            s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
-            s.addEventListener('mouseup', function() { isDown = false; s.style.cursor = 'auto'; });
-            s.addEventListener('mousemove', function(e) {
-                if (!isDown) return;
-                e.preventDefault();
-                var walk = (e.pageX - s.offsetLeft) - startX;
-                if (Math.abs(walk) > 5) isDragging = true;
-                s.scrollLeft = scrollLeft - walk * 1.5;
-            });
-
-            // Προστασία Κλικ: Αν ο χρήστης έκανε Drag, ακυρώνουμε το κλικ ώστε το st-click-detector να μην ενεργοποιηθεί
-            document.addEventListener('click', function(e) {
-                if (isDragging && e.target.closest('a')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }, true);
-        }
-    </script>
-    """
-    html += js_code
     return html
 
-
-# --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ (ΜΕΣΩ ST-CLICK-DETECTOR) ---
+# --- ΕΜΦΑΝΙΣΗ ΑΠΕΥΘΕΙΑΣ ΜΕΣΩ ST-CLICK-DETECTOR ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 
 # Εμφανίζει το HTML και επιστρέφει το 'id' αν ο χρήστης έκανε κλικ σε <a> tag
@@ -319,7 +285,6 @@ if clicked_id:
         if st.session_state.clicked_key != clicked_id:
             st.session_state.clicked_key = clicked_id
             st.rerun()
-
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
