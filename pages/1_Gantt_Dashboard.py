@@ -7,6 +7,7 @@ import textwrap
 import time
 import re
 import base64
+import streamlit.components.v1 as components
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -141,7 +142,7 @@ wk_groups, export_data = get_cached_data(
 )
 
 
-# --- NATIVE HTML GANTT CHART BUILDER (ΑΣΦΑΛΗΣ 1-LINE STRING) ---
+# --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
     # Το timeline_width_px εξασφαλίζει ότι 20 ώρες καταλαμβάνουν 2400px.
     # Αυτό σημαίνει ότι 1 ώρα = 120px, και 10 ώρες (06:00-16:00) είναι 1200px (ένα κανονικό πλάτος οθόνης!)
@@ -252,106 +253,127 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
             tooltip = base_text.replace('<br>', ' ').replace('"', "'")
             safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             
-            # Μπάρες: div με onClick (Εντελώς Επίπεδο)
-            html += f"<div class='mygantt-bar' onclick='triggerGanttClick(\"{safe_key}\")' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></div>"
+            # Προσθήκη window.triggerGanttClick για να εξασφαλίσουμε την εκτέλεση!
+            html += f"<div class='mygantt-bar' onclick='window.triggerGanttClick(\"{safe_key}\")' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></div>"
 
         html += "</div></div>"
 
     html += "</div>"
-
-    # --- JAVASCRIPT ---
-    js_code = """
-    <script>
-    (function() {
-        var s = document.getElementById('gantt-master-container');
-        if (!s || s.dataset.init) return;
-        s.dataset.init = '1';
-
-        // Scroll στις 06:00 (10% του χώρου, αφού 20 ώρες = 100%)
-        setTimeout(function() {
-            var timeline = s.querySelector('.gantt-timeline-header');
-            if (timeline) {
-                s.scrollLeft = timeline.offsetWidth * 0.10;
-            }
-        }, 100);
-
-        var isDown = false;
-        var startX;
-        var scrollLeft;
-        window.isGanttDragging = false;
-
-        s.addEventListener('mousedown', function(e) {
-            isDown = true;
-            window.isGanttDragging = false;
-            s.style.cursor = 'grabbing';
-            startX = e.pageX - s.offsetLeft;
-            scrollLeft = s.scrollLeft;
-        });
-        s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mouseup', function() { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mousemove', function(e) {
-            if (!isDown) return;
-            e.preventDefault();
-            var walk = (e.pageX - s.offsetLeft) - startX;
-            if (Math.abs(walk) > 5) window.isGanttDragging = true;
-            s.scrollLeft = scrollLeft - walk * 1.5;
-        });
-
-        // Κρύβουμε τα κουμπιά "Γέφυρας" της Python από την οθόνη του χρήστη
-        setTimeout(function() {
-            var inps = document.querySelectorAll('input');
-            for(var i=0; i<inps.length; i++) {
-                if(inps[i].getAttribute('aria-label') === 'gantt_bridge_input') {
-                    var p = inps[i].closest('div[data-testid="stTextInput"]');
-                    if(p) p.style.display = 'none';
-                }
-            }
-            var btns = document.querySelectorAll('button');
-            for(var i=0; i<btns.length; i++) {
-                if(btns[i].innerText === 'gantt_bridge_btn') {
-                    var p = btns[i].closest('div[data-testid="stButton"]');
-                    if(p) p.style.display = 'none';
-                }
-            }
-        }, 100);
-    })();
-
-    // Συνάρτηση που καλείται όταν γίνεται κλικ σε μια μπάρα!
-    window.triggerGanttClick = function(key) {
-        if (window.isGanttDragging) return; // Μην κάνεις κλικ αν το έκανε drag!
-        
-        var inputs = document.querySelectorAll('input');
-        var bridgeInput = null;
-        for (var i=0; i<inputs.length; i++) {
-            if (inputs[i].getAttribute('aria-label') === 'gantt_bridge_input') {
-                bridgeInput = inputs[i];
-                break;
-            }
-        }
-        if (bridgeInput) {
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            setter.call(bridgeInput, key);
-            bridgeInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            setTimeout(function() {
-                var btns = document.querySelectorAll('button');
-                for (var i=0; i<btns.length; i++) {
-                    if (btns[i].innerText === 'gantt_bridge_btn') {
-                        btns[i].click();
-                        break;
-                    }
-                }
-            }, 100);
-        }
-    };
-    </script>
-    """
-    html += js_code
     return html
 
 # --- ΕΜΦΑΝΙΣΗ ΑΠΕΥΘΕΙΑΣ ΣΤΟ STREAMLIT (NATIVE HTML) ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
 st.markdown(html_chart, unsafe_allow_html=True)
+
+
+# --- JAVASCRIPT INJECTOR ΓΙΑ DRAG KAI CLICK ---
+# Χρησιμοποιούμε st.components.v1.html το οποίο δεν κόβεται ΠΟΤΕ από το Streamlit!
+js_injector = """
+<script>
+    (function() {
+        var pDoc = window.parent.document;
+        var pWin = window.parent;
+        
+        // Λειτουργία Εφαρμογής JS στο Γράφημα
+        function attachLogic() {
+            var s = pDoc.getElementById('gantt-master-container');
+            if (!s || s.dataset.drag_init) return;
+            s.dataset.drag_init = '1';
+
+            // Αυτόματο Scroll στις 06:00
+            setTimeout(function() {
+                var timeline = s.querySelector('.gantt-timeline-header');
+                if (timeline) {
+                    s.scrollLeft = timeline.offsetWidth * 0.10;
+                }
+            }, 100);
+
+            var isDown = false;
+            var startX;
+            var scrollLeft;
+            pWin.isGanttDragging = false;
+
+            s.addEventListener('mousedown', function(e) {
+                isDown = true;
+                pWin.isGanttDragging = false;
+                s.style.cursor = 'grabbing';
+                startX = e.pageX - s.offsetLeft;
+                scrollLeft = s.scrollLeft;
+            });
+            
+            s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
+            s.addEventListener('mouseup', function() { isDown = false; s.style.cursor = 'auto'; });
+            
+            s.addEventListener('mousemove', function(e) {
+                if (!isDown) return;
+                e.preventDefault();
+                var walk = (e.pageX - s.offsetLeft) - startX;
+                if (Math.abs(walk) > 5) pWin.isGanttDragging = true;
+                s.scrollLeft = scrollLeft - walk * 1.5;
+            });
+
+            // Κρύβουμε τα inputs γέφυρας
+            setTimeout(function() {
+                var inps = pDoc.querySelectorAll('input');
+                for(var i=0; i<inps.length; i++) {
+                    if(inps[i].getAttribute('aria-label') === 'gantt_bridge_input') {
+                        var p = inps[i].closest('div[data-testid="stTextInput"]');
+                        if(p) p.style.display = 'none';
+                    }
+                }
+                var btns = pDoc.querySelectorAll('button');
+                for(var i=0; i<btns.length; i++) {
+                    if(btns[i].innerText === 'gantt_bridge_btn') {
+                        var p = btns[i].closest('div[data-testid="stButton"]');
+                        if(p) p.style.display = 'none';
+                    }
+                }
+            }, 100);
+            
+            // Η συνάρτηση που καλείται στο κλικ της μπάρας
+            pWin.triggerGanttClick = function(key) {
+                if (pWin.isGanttDragging) return;
+                var inputs = pDoc.querySelectorAll('input');
+                var bridgeInput = null;
+                for (var i=0; i<inputs.length; i++) {
+                    if (inputs[i].getAttribute('aria-label') === 'gantt_bridge_input') {
+                        bridgeInput = inputs[i];
+                        break;
+                    }
+                }
+                if (bridgeInput) {
+                    var setter = Object.getOwnPropertyDescriptor(pWin.HTMLInputElement.prototype, 'value').set;
+                    setter.call(bridgeInput, key);
+                    bridgeInput.dispatchEvent(new pWin.Event('input', { bubbles: true }));
+                    
+                    setTimeout(function() {
+                        var btns = pDoc.querySelectorAll('button');
+                        for (var i=0; i<btns.length; i++) {
+                            if (btns[i].innerText === 'gantt_bridge_btn') {
+                                btns[i].click();
+                                break;
+                            }
+                        }
+                    }, 100);
+                }
+            };
+        }
+
+        // Περιμένουμε το DOM να φορτώσει το γράφημα και εκτελούμε
+        var retry = 0;
+        var interval = setInterval(function() {
+            var s = pDoc.getElementById('gantt-master-container');
+            if (s || retry > 15) {
+                clearInterval(interval);
+                if (s) attachLogic();
+            }
+            retry++;
+        }, 100);
+
+    })();
+</script>
+"""
+components.html(js_injector, height=0, width=0)
 
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -486,10 +508,9 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ ΤΟΥ ΓΡΑΦΗΜΑΤΟΣ ---
                 default_idx = 0
-                if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
-                    default_idx = group_keys.index(st.session_state.clicked_key) + 1
+                if clicked_key and clicked_key in group_keys:
+                    default_idx = group_keys.index(clicked_key) + 1
                     
                 selected_key = st.selectbox(
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)", options=[""] + group_keys, index=default_idx,
