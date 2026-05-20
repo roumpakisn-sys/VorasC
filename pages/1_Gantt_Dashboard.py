@@ -229,6 +229,7 @@ for real_key in wk_groups.keys():
     safe_mapping[safe_id] = real_key
     key_to_safe_id[real_key] = safe_id
 
+
 # --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
     timeline_width_px = int(2400 * zoom_factor)
@@ -254,7 +255,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     html += (
         "<div id='gantt-master-container' "
-        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
+        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; cursor: grab; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
@@ -374,74 +375,100 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     # --- JS Injector (Base64) ---
     js_code = """
-    var s = document.getElementById('gantt-master-container');
-    if (s && !window.gScrollInited) {
-        window.gScrollInited = true;
+    (function () {
+      var s = document.getElementById('gantt-master-container');
+      if (!s || window.gScrollInited) return;
+      window.gScrollInited = true;
 
-        var savedScroll = sessionStorage.getItem('ganttScrollPos');
-        if (savedScroll !== null) {
-            s.scrollLeft = parseFloat(savedScroll);
-        } else {
-            setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+      var savedScroll = sessionStorage.getItem('ganttScrollPos');
+      if (savedScroll !== null) {
+          s.scrollLeft = parseFloat(savedScroll);
+      } else {
+          setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+      }
+
+      var scrollTimeout;
+      s.addEventListener('scroll', function() {
+          clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(function() {
+              sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
+          }, 100);
+      });
+
+      var isDragging = false;
+      var moved = false;
+      var startX = 0;
+      var startScrollLeft = 0;
+      var DRAG_THRESHOLD = 5;
+      window.gIsDragging = false;
+
+      function dragStart(pageX) {
+        isDragging = true;
+        moved = false;
+        startX = pageX;
+        startScrollLeft = s.scrollLeft;
+        s.style.cursor = 'grabbing';
+        if (document.body) document.body.style.userSelect = 'none';
+      }
+
+      function dragMove(pageX) {
+        if (!isDragging) return;
+        var walk = pageX - startX;
+        if (Math.abs(walk) > DRAG_THRESHOLD) {
+          moved = true;
+          window.gIsDragging = true;
         }
+        s.scrollLeft = startScrollLeft - walk * 1.5;
+      }
 
-        var scrollTimeout;
-        s.addEventListener('scroll', function() {
-            clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(function() {
-                sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
-            }, 100);
-        });
+      function dragEnd() {
+        if (!isDragging) return;
+        isDragging = false;
+        s.style.cursor = 'grab';
+        if (document.body) document.body.style.userSelect = '';
+        setTimeout(function(){ window.gIsDragging = false; }, 80);
+      }
 
-        var isDown = false;
-        var startX;
-        var scrollLeft;
-        window.gIsDragging = false;
+      s.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        dragStart(e.pageX);
+        e.preventDefault();
+      });
 
-        s.addEventListener('mousedown', function(e) {
-            isDown = true;
-            window.gIsDragging = false;
-            s.style.cursor = 'grabbing';
-            startX = e.pageX - s.offsetLeft;
-            scrollLeft = s.scrollLeft;
-        });
-        s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mouseup', function() {
-            isDown = false;
-            s.style.cursor = 'auto';
-            setTimeout(function(){ window.gIsDragging = false; }, 50);
-        });
-        s.addEventListener('mousemove', function(e) {
-            if (!isDown) return;
-            e.preventDefault();
-            var walk = (e.pageX - s.offsetLeft) - startX;
-            if (Math.abs(walk) > 5) window.gIsDragging = true;
-            s.scrollLeft = scrollLeft - walk * 1.5;
-        });
+      document.addEventListener('mousemove', function(e) {
+        dragMove(e.pageX);
+      });
 
-        s.addEventListener('touchstart', function(e) {
-            isDown = true; window.gIsDragging = false;
-            startX = e.touches[0].pageX - s.offsetLeft; scrollLeft = s.scrollLeft;
-        });
-        s.addEventListener('touchend', function() {
-            isDown = false;
-            setTimeout(function() { window.gIsDragging = false; }, 50);
-        });
-        s.addEventListener('touchmove', function(e) {
-            if (!isDown) return;
-            var walk = (e.touches[0].pageX - s.offsetLeft) - startX;
-            if (Math.abs(walk) > 5) window.gIsDragging = true;
-            s.scrollLeft = scrollLeft - walk * 1.5;
-        });
+      document.addEventListener('mouseup', function() {
+        dragEnd();
+      });
 
-        document.addEventListener('click', function(e) {
-            var link = e.target.closest('a.mygantt-bar');
-            if (link && window.gIsDragging) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        }, true);
-    }
+      s.addEventListener('touchstart', function(e) {
+        if (!e.touches || !e.touches[0]) return;
+        dragStart(e.touches[0].pageX);
+      }, { passive: true });
+
+      s.addEventListener('touchmove', function(e) {
+        if (!e.touches || !e.touches[0]) return;
+        dragMove(e.touches[0].pageX);
+      }, { passive: true });
+
+      s.addEventListener('touchend', function() {
+        dragEnd();
+      }, { passive: true });
+
+      s.addEventListener('dragstart', function(e) {
+        e.preventDefault();
+      });
+
+      document.addEventListener('click', function(e) {
+        var link = e.target.closest('a.mygantt-bar');
+        if (link && (window.gIsDragging || moved)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+    })();
     """
 
     b64_js = base64.b64encode(js_code.encode("utf-8")).decode("utf-8")
@@ -470,7 +497,7 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
+hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και drag για οριζόντια κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint:
