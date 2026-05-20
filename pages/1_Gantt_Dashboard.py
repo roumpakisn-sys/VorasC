@@ -7,6 +7,7 @@ import io
 import textwrap
 import time
 import re
+import hashlib
 from st_click_detector import click_detector
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
@@ -53,27 +54,39 @@ if "clicked_key" not in st.session_state:
 if "detector_version" not in st.session_state:
     st.session_state.detector_version = 0
 
-# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ---
+# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ΚΑΙ ΕΚΚΑΘΑΡΙΣΗ ΚΛΙΚ ---
 if "view_week_date" not in st.session_state:
     st.session_state.view_week_date = get_local_today()
 
 def sync_from_widget():
     st.session_state.view_week_date = st.session_state.date_picker
+    st.session_state.clicked_key = None
+    st.session_state.trigger_scroll = False
+    st.session_state.detector_version += 1
 
 def go_prev_week():
     new_date = st.session_state.view_week_date - timedelta(days=7)
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
+    st.session_state.clicked_key = None
+    st.session_state.trigger_scroll = False
+    st.session_state.detector_version += 1
 
 def go_next_week():
     new_date = st.session_state.view_week_date + timedelta(days=7)
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
+    st.session_state.clicked_key = None
+    st.session_state.trigger_scroll = False
+    st.session_state.detector_version += 1
 
 def go_to_today():
     new_date = get_local_today()
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
+    st.session_state.clicked_key = None
+    st.session_state.trigger_scroll = False
+    st.session_state.detector_version += 1
 
 # --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (Compact UI) ---
 st.markdown("""
@@ -130,10 +143,10 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
-# 👇 Η ΜΕΓΑΛΗ ΔΙΟΡΘΩΣΗ: Φτιάχνουμε απλά και 100% μοναδικά IDs χωρίς να χάνουμε τα Ελληνικά!
+# 👇 Η ΜΕΓΑΛΗ ΔΙΟΡΘΩΣΗ: Φτιάχνουμε απόλυτα ΜΟΝΑΔΙΚΑ IDs χρησιμοποιώντας HASH, αποκλείοντας συγκρούσεις!
 safe_mapping = {}
-for idx, real_key in enumerate(wk_groups.keys()):
-    safe_id = f"bar_{idx}"
+for real_key in wk_groups.keys():
+    safe_id = "bar_" + hashlib.md5(real_key.encode('utf-8')).hexdigest()
     safe_mapping[safe_id] = real_key
 
 # --- NATIVE HTML GANTT CHART BUILDER ---
@@ -158,8 +171,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
         return False
 
     html = ""
-    # "Αόρατη" εκκίνηση του scroll μέσω onerror
-    html += "<img src='x' style='display:none;' onerror='var s=document.getElementById(\"gantt-master-container\"); if(s && !window.gScrolled){ setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 100); window.gScrolled=true; }'>"
+    # 👇 Διαγράφηκε η εντολή onload που προκαλούσε αναπηδήσεις προς το κέντρο της οθόνης
     
     html += (
         "<div id='gantt-master-container' "
@@ -262,7 +274,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # 👇 ΕΔΩ Η ΜΑΓΕΙΑ: Προστέθηκε το `event.preventDefault();` στο onclick, το οποίο ακυρώνει το άλμα στην κορυφή της οθόνης!
+            # Με το event.preventDefault() ακυρώνουμε το άλμα στην κορυφή.
             html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='event.preventDefault(); if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
@@ -279,14 +291,12 @@ clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_st
 
 # 👇 --- ΔΙΑΒΑΣΜΑ ΚΑΙ ΕΝΗΜΕΡΩΣΗ STATE (ΜΕ RERUN) --- 👇
 if clicked_safe_id:
-    # Βρίσκουμε το ΠΡΑΓΜΑΤΙΚΟ ελληνικό όνομα (πχ "Δευτέρα 15/05 - ΕΡΓΟ Α")
+    # Βρίσκουμε το ΠΡΑΓΜΑΤΙΚΟ ελληνικό όνομα από το Hash
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        # 👇 ΛΥΣΗ 1: Ενημερώνουμε ΤΑΥΤΟΧΡΟΝΑ το Widget του Selectbox, ώστε να μην "επιβάλει" την παλιά επιλογή!
         st.session_state.edit_bar_select_widget = real_clicked_key
-        # 👇 ΛΥΣΗ 2: Ενεργοποιούμε το Smooth Scroll ΜΟΝΟ για αυτή τη συγκεκριμένη στιγμή
         st.session_state.trigger_scroll = True
         st.rerun()
 
@@ -409,6 +419,11 @@ if not presentation_mode:
                                 st.session_state.assignments.append(new_assign)
                                 
                         utils.db_insert("assignments", new_assigns, track=False)
+                        
+                        # Ενημέρωση μνήμης ώστε να μην εξαφανιστεί τίποτα!
+                        utils.mark_data_changed()
+                        utils.init_data_and_sync()
+                        
                         st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
                         time.sleep(0.5)
                         st.session_state.qa_rc += 1
@@ -444,7 +459,6 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # Callback Συνάρτηση (Παραμένει για να είναι γρήγορη η αλλαγή από το dropdown!)
                 def on_edit_selectbox_change():
                     new_val = st.session_state.edit_bar_select_widget
                     st.session_state.clicked_key = new_val if new_val != "" else None
@@ -519,6 +533,11 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
+                            
+                            # Ενημέρωση μνήμης
+                            utils.mark_data_changed()
+                            utils.init_data_and_sync()
+                            
                             st.session_state.clicked_key = None
                             st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                             st.rerun()
@@ -584,6 +603,11 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
+                            
+                            # Ενημέρωση μνήμης
+                            utils.mark_data_changed()
+                            utils.init_data_and_sync()
+                            
                             st.session_state.clicked_key = None
                             st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                             st.rerun()
@@ -650,6 +674,11 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
+                                
+                                # Ενημέρωση μνήμης για να ζωγραφίσει τα νέα δεδομένα!
+                                utils.mark_data_changed()
+                                utils.init_data_and_sync()
+                                
                                 st.session_state.clicked_key = None
                                 st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                                 st.rerun()
