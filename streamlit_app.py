@@ -7,7 +7,6 @@ import textwrap
 import time
 import re
 import base64
-from st_click_detector import click_detector
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -46,12 +45,37 @@ utils.setup_shared_ui()
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
+# --- ΓΕΦΥΡΑ ΕΠΙΚΟΙΝΩΝΙΑΣ JS -> PYTHON ΓΙΑ ΤΑ ΚΛΙΚ (HIDDEN BRIDGE) ---
 if "clicked_key" not in st.session_state:
     st.session_state.clicked_key = None
 
-# Το μυστικό για να σπάσει το Infinite Loop!
-if "detector_version" not in st.session_state:
-    st.session_state.detector_version = 0
+# Κρύβουμε πλήρως τα στοιχεία της γέφυρας χωρίς να σπάμε το DOM
+st.markdown("""
+<style>
+div[data-testid="stTextInput"]:has(input[aria-label="gantt_bridge_input"]) {
+    position: absolute !important; opacity: 0 !important; pointer-events: none !important; z-index: -100 !important;
+}
+div[data-testid="stButton"]:has(p:contains("gantt_bridge_btn")) {
+    position: absolute !important; opacity: 0 !important; pointer-events: none !important; z-index: -100 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Αόρατα στοιχεία: Η JS του γραφήματος θα τα συμπληρώνει και θα τα πατάει αόρατα!
+bridge_val = st.text_input("gantt_bridge_input", key="gantt_bridge_input", label_visibility="collapsed")
+bridge_btn = st.button("gantt_bridge_btn", key="gantt_bridge_btn")
+
+# Όταν το αόρατο κουμπί πατηθεί από τη JavaScript:
+if bridge_btn:
+    val = st.session_state.gantt_bridge_input
+    # Ανιχνεύουμε το random timestamp που στέλνει η JS για να ανανεώνει την επιλογή!
+    if val and "|||" in val:
+        raw_key = val.split("|||")[0]
+        try:
+            st.session_state.clicked_key = base64.b64decode(raw_key.encode('utf-8')).decode('utf-8')
+        except:
+            st.session_state.clicked_key = raw_key
+
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ---
 if "view_week_date" not in st.session_state:
@@ -130,10 +154,9 @@ wk_groups, export_data = get_cached_data(
     st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
 )
 
-
-# --- NATIVE HTML GANTT CHART BUILDER (ΜΕ ST-CLICK-DETECTOR KAI INLINE JS) ---
+# --- NATIVE HTML GANTT CHART BUILDER (ΚΑΘΑΡΟ HTML + INLINE JS) ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor):
-    # Πλάτος: 2400px * zoom. Αντιστοιχεί σε 20 ώρες.
+    # Πλάτος: 2400px * zoom. Αντιστοιχεί σε 20 ώρες, δίνοντας το τέλειο 06:00-16:00!
     timeline_width_px = int(2400 * zoom_factor)
     
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
@@ -155,7 +178,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         return False
 
     html = ""
-    
     # Κυρίως Container
     html += (
         "<div id='gantt-master-container' "
@@ -253,19 +275,21 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
             tooltip = base_text.replace('<br>', ' ').replace('"', "'")
             safe_key = base64.b64encode(g['Key'].encode('utf-8')).decode('utf-8')
             
-            # Μπάρες: <a> (anchor link) για να τα εντοπίσει το st-click-detector. Προστέθηκε draggable='false' για να μην σπάει το drag!
-            html += f"<a href='#' draggable='false' id='{safe_key}' class='mygantt-bar' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Μπάρες: <div> (ΟΧΙ links) με onclick! 
+            html += f"<div class='mygantt-bar' onclick='window.triggerGanttClick(\"{safe_key}\")' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></div>"
 
         html += "</div></div>"
 
     html += "</div>"
 
-    # --- JAVASCRIPT ΓΙΑ DRAG & ΑΥΤΟΜΑΤΟ SCROLL (Μορφή Base64 για να περάσει μέσα στο st-click-detector) ---
+    # --- JAVASCRIPT ΓΙΑ DRAG & ΑΟΡΑΤΟ ΚΛΙΚ (Base64) ---
     js_code = """
-    var s = document.getElementById('gantt-master-container');
-    if (s && !window.dragInitialized) {
-        window.dragInitialized = true;
-        
+    (function() {
+        var s = document.getElementById('gantt-master-container');
+        if (!s || s.dataset.init) return;
+        s.dataset.init = '1';
+
+        // Auto Scroll στο 06:00
         setTimeout(function() {
             var timeline = s.querySelector('.gantt-timeline-header');
             if (timeline) {
@@ -287,12 +311,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
         });
         
         s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
-        
-        s.addEventListener('mouseup', function() { 
-            isDown = false; 
-            s.style.cursor = 'auto'; 
-            setTimeout(function() { window.ganttIsDragging = false; }, 50);
-        });
+        s.addEventListener('mouseup', function() { isDown = false; s.style.cursor = 'auto'; });
         
         s.addEventListener('mousemove', function(e) {
             if (!isDown) return;
@@ -301,14 +320,38 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
             if (Math.abs(walk) > 5) window.ganttIsDragging = true;
             s.scrollLeft = scrollLeft - walk * 1.5;
         });
+    })();
 
-        s.addEventListener('click', function(e) {
-            if (window.ganttIsDragging && e.target.closest('a')) {
-                e.preventDefault();
-                e.stopPropagation();
+    // Συνάρτηση που πυροδοτείται όταν πατάς σε μια HTML μπάρα!
+    window.triggerGanttClick = function(key) {
+        if (window.ganttIsDragging) return; // Αν έκανες drag, αγνόησε το κλικ!
+        
+        var inputs = document.querySelectorAll('input');
+        var bridgeInput = null;
+        for (var i=0; i<inputs.length; i++) {
+            if (inputs[i].getAttribute('aria-label') === 'gantt_bridge_input') {
+                bridgeInput = inputs[i];
+                break;
             }
-        }, true);
-    }
+        }
+        
+        if (bridgeInput) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            // Στέλνουμε το ID + Timestamp για να πιάσει το Streamlit ακόμα και διπλά ίδια κλικ!
+            setter.call(bridgeInput, key + '|||' + Date.now());
+            bridgeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            setTimeout(function() {
+                var btns = document.querySelectorAll('button');
+                for (var i=0; i<btns.length; i++) {
+                    if (btns[i].innerText === 'gantt_bridge_btn') {
+                        btns[i].click();
+                        break;
+                    }
+                }
+            }, 100);
+        }
+    };
     """
     
     b64_js = base64.b64encode(js_code.encode('utf-8')).decode('utf-8')
@@ -316,23 +359,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor):
 
     return html
 
-# --- ΕΜΦΑΝΙΣΗ ΑΠΕΥΘΕΙΑΣ ΜΕΣΩ ST-CLICK-DETECTOR ---
+# --- ΕΜΦΑΝΙΣΗ ΑΠΕΥΘΕΙΑΣ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor)
+st.markdown(html_chart, unsafe_allow_html=True)
 
-# Η δύναμη του st-click-detector με δυναμικό key για να "ξεχνάει" την παλιά επιλογή!
-clicked_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
-
-# Διαβάζουμε το ID που επιστρέφει το plugin
-if clicked_id:
-    try:
-        decoded_key = base64.b64decode(clicked_id.encode('utf-8')).decode('utf-8')
-        if st.session_state.clicked_key != decoded_key:
-            st.session_state.clicked_key = decoded_key
-            st.rerun()
-    except:
-        if st.session_state.clicked_key != clicked_id:
-            st.session_state.clicked_key = clicked_id
-            st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
@@ -478,11 +508,9 @@ if not presentation_mode:
                 # Αν ο χρήστης επιλέξει από το Selectbox κανονικά, ενημερώνουμε το state!
                 if selected_key != "" and selected_key != st.session_state.clicked_key:
                     st.session_state.clicked_key = selected_key
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
                     st.rerun()
                 elif selected_key == "" and st.session_state.clicked_key is not None:
                     st.session_state.clicked_key = None
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
                     st.rerun()
                 
                 if selected_key != "":
@@ -542,7 +570,6 @@ if not presentation_mode:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
                             st.session_state.clicked_key = None
-                            st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                             st.rerun()
 
                     with st.form("quick_edit"):
@@ -607,7 +634,6 @@ if not presentation_mode:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
                             st.session_state.clicked_key = None
-                            st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                             st.rerun()
                             
                         if save_edit:
@@ -672,5 +698,4 @@ if not presentation_mode:
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
                                 st.session_state.clicked_key = None
-                                st.session_state.detector_version += 1 # Σπάμε τη λούπα!
                                 st.rerun()
