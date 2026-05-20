@@ -6,9 +6,6 @@ import io
 import textwrap
 import time
 import re
-import hashlib
-import base64
-from st_click_detector import click_detector
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -19,6 +16,7 @@ if "leaves" not in st.session_state: st.session_state.leaves = []
 if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
 if "evaluations" not in st.session_state: st.session_state.evaluations = []
 
+# ΣΗΜΑΝΤΙΚΟ: Σταματάει τον κώδικα εδώ και σε στέλνει στο Login αν δεν είσαι συνδεδεμένος!
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
     st.stop()
@@ -26,9 +24,10 @@ if not st.session_state.get("authenticated"):
 import config
 import utils
 import scheduling
-import gantt_engine
+import gantt_engine  # Εισάγουμε τον native "κινητήρα"
 
 def get_local_today():
+    """Επιστρέφει τη σωστή σημερινή ημερομηνία για Ώρα Ελλάδος"""
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Europe/Athens")).date()
@@ -37,6 +36,7 @@ def get_local_today():
 
 utils.init_data_and_sync()
 
+# ΑΥΤΟΜΑΤΗ ΕΠΙΔΙΟΡΘΩΣΗ (Self-Healing)
 total_indexed = sum(len(v) for v in st.session_state.get('assignments_by_date', {}).values())
 if total_indexed != len(st.session_state.get('assignments', [])):
     utils.mark_data_changed()
@@ -44,53 +44,36 @@ if total_indexed != len(st.session_state.get('assignments', [])):
 
 utils.setup_shared_ui()
 
+# Helpers
 is_full_admin = st.session_state.get('current_user') != "TAN"
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
-if "clicked_key" not in st.session_state:
-    st.session_state.clicked_key = None
-
-# Το μυστικό για να σπάσει το Infinite Loop με το st-click-detector!
-if "detector_version" not in st.session_state:
-    st.session_state.detector_version = 0
-
-# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ΚΑΙ ΕΚΚΑΘΑΡΙΣΗ ΚΛΙΚ ---
+# --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ (Αλεξίσφαιρος) ---
 if "view_week_date" not in st.session_state:
     st.session_state.view_week_date = get_local_today()
 
 def sync_from_widget():
     st.session_state.view_week_date = st.session_state.date_picker
-    st.session_state.clicked_key = None
-    st.session_state.trigger_scroll = False
-    st.session_state.detector_version += 1
 
 def go_prev_week():
     new_date = st.session_state.view_week_date - timedelta(days=7)
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
-    st.session_state.clicked_key = None
-    st.session_state.trigger_scroll = False
-    st.session_state.detector_version += 1
 
 def go_next_week():
     new_date = st.session_state.view_week_date + timedelta(days=7)
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
-    st.session_state.clicked_key = None
-    st.session_state.trigger_scroll = False
-    st.session_state.detector_version += 1
 
 def go_to_today():
     new_date = get_local_today()
     st.session_state.view_week_date = new_date
     st.session_state.date_picker = new_date
-    st.session_state.clicked_key = None
-    st.session_state.trigger_scroll = False
-    st.session_state.detector_version += 1
 
 # --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (Compact UI) ---
 st.markdown("""
 <style>
+/* Απλώνουμε την οθόνη του Streamlit στο 98% και μειώνουμε τα πάνω κενά */
 .block-container, [data-testid="block-container"] {
     max-width: 98% !important; 
     padding-top: 0.5rem !important;
@@ -98,6 +81,8 @@ st.markdown("""
     padding-left: 1rem !important;
     padding-right: 1rem !important;
 }
+
+/* Συμπίεση των Alert Messages (Ορφανές Βάρδιες & Αναλυτικά) στο ελάχιστο δυνατό */
 div[data-testid="stNotification"], .stAlert {
     padding: 2px 10px !important;
     margin-top: 0px !important;
@@ -106,6 +91,39 @@ div[data-testid="stNotification"], .stAlert {
 div[data-testid="stNotification"] p, .stAlert p {
     margin: 0 !important;
     font-size: 13px !important;
+}
+
+/* 2. Σβήνουμε το προεπιλεγμένο αχνό περίγραμμα του Streamlit */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* 3. Βάζουμε το ΠΑΧΥ ΠΕΡΙΓΡΑΜΜΑ και την ΤΡΙΣΔΙΑΣΤΑΤΗ ΣΚΙΑ κατευθείαν στο γράφημα (iframe/stPlotlyChart) */
+.stPlotlyChart > div, .stPlotlyChart iframe {
+    border: 4px solid #1e293b !important;
+    border-radius: 12px !important;
+    box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.4) !important;
+    background-color: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 4. ΑΦΑΙΡΕΣΗ ΤΟΥ ΓΚΡΙΖΑΡΙΣΜΑΤΟΣ ΚΑΤΑ ΤΗ ΦΟΡΤΩΣΗ */
+[data-testid="stAppViewContainer"], 
+[data-testid="stMainBlockContainer"],
+[data-testid="stAppViewBlockContainer"],
+.stApp, .stApp > div {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
+}
+
+/* Αφαίρεση περιθωρίων από το ίδιο το γράφημα */
+.stPlotlyChart {
+    margin: 0 !important;
+    padding: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -123,252 +141,69 @@ with col_nav2:
 with col_today:
     st.button("📅 Σήμερα", on_click=go_to_today, use_container_width=True)
 with col_zoom:
-    if "gantt_zoom_level" not in st.session_state:
-        st.session_state.gantt_zoom_level = 100
-    zoom_level = st.slider("Ζουμ", min_value=50, max_value=200, value=st.session_state.gantt_zoom_level, step=5, label_visibility="collapsed", key="gantt_zoom_slider")
-    st.session_state.gantt_zoom_level = zoom_level
+    zoom_level = st.slider("Ζουμ", min_value=50, max_value=200, value=100, step=5, label_visibility="collapsed")
 with col_pres:
     presentation_mode = st.checkbox("📺 Πλήρης Προβολή")
 
 zoom_factor = zoom_level / 100.0
 
+current_gantt_params = {
+    "week": start_of_week,
+    "zoom": zoom_factor,
+    "presentation": presentation_mode,
+    "local_version": st.session_state.get('local_gantt_version', 0),
+    "total_assigns": len(st.session_state.get('assignments', []))
+}
+
 # --- ΕΞΑΓΩΓΗ ΔΕΔΟΜΕΝΩΝ ΑΠΟ ΤΟ ENGINE ---
 @st.cache_data(show_spinner=False, max_entries=5)
 def get_cached_data(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map):
-    _, wk_groups, export_data = gantt_engine.generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map)
-    return wk_groups, export_data
+    fig, wk_groups, export_data = gantt_engine.generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_version, _assignments_by_date, _leaves, _employees, _projects, _emp_map, _proj_map)
+    return fig, wk_groups, export_data
 
-wk_groups, export_data = get_cached_data(
-    start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
-    st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
-)
-
-# Φτιάχνουμε απόλυτα ΜΟΝΑΔΙΚΑ IDs χρησιμοποιώντας HASH, αποκλείοντας συγκρούσεις!
-safe_mapping = {}
-for real_key in wk_groups.keys():
-    safe_id = "bar_" + hashlib.md5(real_key.encode('utf-8')).hexdigest()
-    safe_mapping[safe_id] = real_key
-
-# --- NATIVE HTML GANTT CHART BUILDER ---
-def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
-    timeline_width_px = int(2400 * zoom_factor)
-    day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
-
-    emp_short_names = {}
-    external_crews = []
-    for emp in st.session_state.employees:
-        eid = emp['id']
-        full_name = emp['name']
-        parts = full_name.split()
-        emp_short_names[eid] = f"{parts[-1]} {parts[0][0]}." if len(parts) > 1 else full_name
-        if emp.get('status', 'Ενεργός') == 'Ενεργός' and emp.get('is_external_crew', False):
-            external_crews.append(emp)
-
-    def is_on_leave_fast(eid, check_date):
-        for l in st.session_state.leaves:
-            if l['employeeId'] == eid and l['startDate'] <= check_date <= l['endDate']:
-                return True
-        return False
-
-    html = ""
-    
-    # Καθαρό Container (Χωρίς inline onmousemove) - Η Javascript το αναλαμβάνει πιο κάτω
-    html += (
-        "<div id='gantt-master-container' "
-        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
+if st.session_state.get('last_gantt_params') == current_gantt_params and 'cached_fig' in st.session_state and not st.session_state.get('data_dirty', False):
+    fig = st.session_state.cached_fig
+    wk_groups = st.session_state.cached_wk_groups
+    export_data = st.session_state.cached_export_data
+else:
+    fig, wk_groups, export_data = get_cached_data(
+        start_of_week, zoom_factor, presentation_mode, st.session_state.get('local_gantt_version', 0),
+        st.session_state.assignments_by_date, st.session_state.leaves, st.session_state.employees, st.session_state.projects, st.session_state.emp_map, st.session_state.proj_map
     )
-    
-    html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
-    
-    html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
-    html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b; font-size: 14px;'>Ημέρα / Προσωπικό</div>"
-    html += f"<div class='gantt-timeline-header' style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; height: 45px; background: #f8fafc;'>"
-    
-    for h in range(4, 25):
-        pct = ((h - 4) / 20) * 100
-        lbl = f"{h:02d}:00" if h < 24 else "00:00"
-        html += f"<div style='position: absolute; left: {pct}%; height: 100%; border-left: 2px solid #94a3b8; padding-left: 4px; padding-top: 14px; font-weight: bold; font-size: 13px; color: #334155;'>{lbl}</div>"
-    html += "</div></div>"
+    st.session_state.cached_fig = fig
+    st.session_state.cached_wk_groups = wk_groups
+    st.session_state.cached_export_data = export_data
+    st.session_state.last_gantt_params = current_gantt_params
 
-    for i in range(7):
-        curr_date = start_of_week + timedelta(days=i)
-        day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
+clicked_key = None
 
-        leaves_today = []
-        for l in st.session_state.leaves:
-            if l['startDate'] <= curr_date <= l['endDate']:
-                emp_n = emp_short_names.get(l['employeeId'], utils.get_employee_name(l['employeeId']))
-                sub_id = l.get('substituteId')
-                if sub_id:
-                    sub_n = emp_short_names.get(sub_id, utils.get_employee_name(sub_id))
-                    leaves_today.append(f"{emp_n} (Αντ: {sub_n})")
-                else:
-                    leaves_today.append(f"{emp_n}")
-
-        available_ext_crew = []
-        day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
-        for emp in external_crews:
-            eid = emp['id']
-            if not any(l['employeeId'] == eid and l['startDate'] <= curr_date <= l['endDate'] for l in st.session_state.leaves):
-                is_busy_after_10 = any(a.get('employeeId') == eid and not a.get('is_cancelled', False) and str(a.get('endTime', ''))[:5] > "10:00" for a in day_assigns)
-                if not is_busy_after_10:
-                    available_ext_crew.append(emp_short_names.get(eid, emp['name']))
-
-        label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
-        if leaves_today: label_html += f"<div style='color: #d32f2f; margin-bottom: 8px; font-size: 11px;'><b>Άδειες:</b><br>{'<br>'.join(leaves_today)}</div>"
-        if available_ext_crew: label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_ext_crew)}</div>"
-
-        day_groups = [g for g in wk_groups.values() if g['Date'] == curr_date]
-        lanes = []
-        group_lanes = []
-        for g in sorted(day_groups, key=lambda x: x['StartTime']):
-            placed = False
-            for idx, lane_end in enumerate(lanes):
-                if g['StartTime'] >= lane_end:
-                    lanes[idx] = g['EndTime']
-                    group_lanes.append((g, idx))
-                    placed = True
-                    break
-            if not placed:
-                lanes.append(g['EndTime'])
-                group_lanes.append((g, len(lanes)-1))
-
-        row_height = max(1, len(lanes)) * 48 + 20 
-        bg_color_row = "#eef2ff" if curr_date == get_local_today() else ("#f8fafc" if i%2==1 else "#ffffff")
-        
-        html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;'>"
-        html += f"<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;'>{label_html}</div>"
-        html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: 10px; padding-bottom: 10px;'>"
-
-        for g, lane_idx in group_lanes:
-            def t2p(t_str):
-                h, m = map(int, t_str.split(':'))
-                if h < 4: h += 24 
-                mins = (h - 4) * 60 + m 
-                return max(0, min(100, (mins / 1200.0) * 100)) 
-
-            left_pct = t2p(g['StartTime'])
-            width_pct = t2p(g['EndTime']) - left_pct
-            top_px = lane_idx * 48 + 10 
-
-            emps_str = ", ".join(g['Employees']).upper()
-            proj_name = g['Project'].upper()
-            arr_str = f"[Προσ: {g['ArrivalTime']}] " if g['ArrivalTime'] else ""
-            if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_str: emps_str = "⚠️ " + emps_str
-
-            base_text = f"{arr_str}{g['StartTime']}-{g['EndTime']} | {proj_name} | {emps_str}"
-            if g['Notes']: base_text += f" ({g['Notes'].upper()})"
-            if g['is_cancelled']:
-                base_text = f"<s>{base_text}</s>"
-                if g['cancel_reason']: base_text += f"<br><span style='color:#dc2626;'>[{g['cancel_reason'].upper()}]</span>"
-
-            bg_color = g['ColorHex']
-            tooltip = base_text.replace('<br>', ' ').replace('"', '&quot;').replace("'", "&#39;")
-            
-            safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
-            
-            # Μπάρες: draggable='false' αποτρέπει το native browser drag του URL
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
-
-        html += "</div></div>"
-
-    html += "</div>"
-    
-    # --- JS Injector (Base64) παρακάμπτει τους HTML sanitizers ---
-    js_code = """
-    var s = document.getElementById('gantt-master-container');
-    if (s && !window.gScrollInited) {
-        window.gScrollInited = true;
-        
-        var savedScroll = sessionStorage.getItem('ganttScrollPos');
-        if (savedScroll !== null) {
-            s.scrollLeft = parseFloat(savedScroll);
-        } else {
-            setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+# --- NATIVE PLOTLY ΕΜΦΑΝΙΣΗ & EVENT HANDLING ---
+try:
+    event = st.plotly_chart(
+        fig, 
+        use_container_width=True, 
+        on_select="rerun", 
+        selection_mode="points", 
+        config={
+            "displayModeBar": True,  # Εμφανίζει το μενού του Plotly πάνω δεξιά
+            "scrollZoom": False,     # Δεν κάνει zoom με τη ροδέλα
+            "displaylogo": False,
+            "modeBarButtonsToRemove": ["zoom2d", "select2d", "lasso2d", "autoScale2d"]
         }
-        
-        var scrollTimeout;
-        s.addEventListener('scroll', function() {
-            clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(function() {
-                sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
-            }, 100);
-        });
-        
-        var isDown = false;
-        var startX;
-        var scrollLeft;
-        window.gIsDragging = false;
-        
-        s.addEventListener('mousedown', function(e) {
-            isDown = true;
-            window.gIsDragging = false;
-            s.style.cursor = 'grabbing';
-            startX = e.pageX - s.offsetLeft;
-            scrollLeft = s.scrollLeft;
-        });
-        s.addEventListener('mouseleave', function() { isDown = false; s.style.cursor = 'auto'; });
-        s.addEventListener('mouseup', function() { 
-            isDown = false; 
-            s.style.cursor = 'auto'; 
-            setTimeout(function(){ window.gIsDragging = false; }, 50);
-        });
-        s.addEventListener('mousemove', function(e) {
-            if (!isDown) return;
-            e.preventDefault();
-            var walk = (e.pageX - s.offsetLeft) - startX;
-            if (Math.abs(walk) > 5) window.gIsDragging = true;
-            s.scrollLeft = scrollLeft - walk * 1.5;
-        });
+    )
+    if event and "selection" in event and event["selection"].get("points"):
+        cd = event["selection"]["points"][0].get("customdata", [None])[0]
+        if cd and cd != "Empty": 
+            clicked_key = cd
+except Exception:
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-        s.addEventListener('touchstart', function(e) {
-            isDown = true; window.gIsDragging = false;
-            startX = e.touches[0].pageX - s.offsetLeft; scrollLeft = s.scrollLeft;
-        });
-        s.addEventListener('touchend', function() { 
-            isDown = false; 
-            setTimeout(function() { window.gIsDragging = false; }, 50);
-        });
-        s.addEventListener('touchmove', function(e) {
-            if (!isDown) return;
-            var walk = (e.touches[0].pageX - s.offsetLeft) - startX;
-            if (Math.abs(walk) > 5) window.gIsDragging = true;
-            s.scrollLeft = scrollLeft - walk * 1.5;
-        });
-        
-        document.addEventListener('click', function(e) {
-            var link = e.target.closest('a.mygantt-bar');
-            if (link) {
-                if (window.gIsDragging) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }
-        }, true);
-    }
-    """
-    
-    b64_js = base64.b64encode(js_code.encode('utf-8')).decode('utf-8')
-    html += f"<img src='x' style='display:none;' onerror='eval(atob(\"{b64_js}\"))'>"
-    
-    return html
+if clicked_key:
+    st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
-# --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
-html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping)
-
-clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
-
-if clicked_safe_id:
-    real_clicked_key = safe_mapping.get(clicked_safe_id, None)
-    
-    if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
-        st.session_state.clicked_key = real_clicked_key
-        st.session_state.edit_bar_select_widget = real_clicked_key
-        st.session_state.trigger_scroll = True
-        st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
+hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Drag) για οριζόντια μετακίνηση του χρόνου (δεξιά-αριστερά) ή των ημερών (πάνω-κάτω)."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint: st.caption(hint_text)
@@ -486,67 +321,28 @@ if not presentation_mode:
                                 st.session_state.assignments.append(new_assign)
                                 
                         utils.db_insert("assignments", new_assigns, track=False)
-                        
                         st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
-                        time.sleep(0.4) 
-                        utils.mark_data_changed()
-                        utils.init_data_and_sync()
-                        
+                        time.sleep(0.5)
                         st.session_state.qa_rc += 1
-                        st.session_state.detector_version += 1
                         st.rerun()
 
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
-            
-            # 👇 ΤΟ ΜΥΣΤΙΚΟ: Το τυχαίο UUID ξεγελάει το Streamlit ώστε να τρέχει το σκριπτάκι πάντα!
-            if st.session_state.get("trigger_scroll"):
-                components.html(
-                    f"""
-                    <script>
-                        // Μοναδικό ID Εκτέλεσης: {uuid.uuid4()}
-                        setTimeout(function() {{
-                            const headers = window.parent.document.querySelectorAll('h3');
-                            for (let i = 0; i < headers.length; i++) {{
-                                if(headers[i].innerText && headers[i].innerText.includes('Επεξεργασία Μπάρας')) {{
-                                    headers[i].scrollIntoView({{behavior: 'smooth', block: 'start'}});
-                                    break;
-                                }}
-                            }}
-                        }}, 200);
-                    </script>
-                    """,
-                    height=0,
-                    width=0
-                )
-                st.session_state.trigger_scroll = False
-            
             if not wk_groups:
                 st.info("Δεν υπάρχουν μπάρες για επεξεργασία αυτή την εβδομάδα.")
             else:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
+                # --- AUTO-SELECT ΑΠΟ ΤΟ ΚΛΙΚ ΤΟΥ ΓΡΑΦΗΜΑΤΟΣ ---
                 default_idx = 0
-                if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
-                    default_idx = group_keys.index(st.session_state.clicked_key) + 1
+                if clicked_key and clicked_key in group_keys:
+                    default_idx = group_keys.index(clicked_key) + 1
                     
                 selected_key = st.selectbox(
-                    "Επιλέξτε Μπάρα (Ημέρα & Έργο)", 
-                    options=[""] + group_keys, 
-                    index=default_idx,
+                    "Επιλέξτε Μπάρα (Ημέρα & Έργο)", options=[""] + group_keys, index=default_idx,
                     format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})"
                 )
-                
-                # Αν ο χρήστης επιλέξει από το Selectbox κανονικά, ενημερώνουμε το state!
-                if selected_key != "" and selected_key != st.session_state.clicked_key:
-                    st.session_state.clicked_key = selected_key
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
-                    st.rerun()
-                elif selected_key == "" and st.session_state.clicked_key is not None:
-                    st.session_state.clicked_key = None
-                    st.session_state.detector_version += 1 # Σπάμε τη λούπα του click_detector!
-                    st.rerun()
                 
                 if selected_key != "":
                     target_group = wk_groups[selected_key]
@@ -604,8 +400,6 @@ if not presentation_mode:
                                 utils.db_update('assignments', new_a['id'], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
-                            st.session_state.clicked_key = None
-                            st.session_state.detector_version += 1 
                             st.rerun()
 
                     with st.form("quick_edit"):
@@ -637,7 +431,7 @@ if not presentation_mode:
                         with e_notes_col:
                             clean_note = re.sub(r'\[(?:Άδεια|Εμπλοκή):.*?\]', '', target_group.get('Notes', ''))
                             clean_note = re.sub(r'\s*\|\s*', ' ', clean_note).strip()
-                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=clean_note)
+                            edit_notes = st.text_input("Παρατηρηση (Προαιρετικό)", value=clean_note)
                             
                         e_arr, e_start, e_end = st.columns(3)
                         existing_arr = target_group.get('ArrivalTime', '')
@@ -669,8 +463,6 @@ if not presentation_mode:
                             old_assigns = [a for a in st.session_state.assignments if a['id'] in target_group['AssignmentIds']]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
-                            st.session_state.clicked_key = None
-                            st.session_state.detector_version += 1
                             st.rerun()
                             
                         if save_edit:
@@ -718,8 +510,7 @@ if not presentation_mode:
                                 
                                 new_assigns = []
                                 for va in valid_assignments:
-                                    if va['msg'] == "Allowed Overlap": 
-                                        st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
+                                    if va['msg'] == "Allowed Overlap": st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
                                     
                                     c_notes = edit_notes
                                     if va['msg'] and va['msg'] != "Allowed Overlap":
@@ -735,6 +526,4 @@ if not presentation_mode:
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
-                                st.session_state.clicked_key = None
-                                st.session_state.detector_version += 1
                                 st.rerun()
