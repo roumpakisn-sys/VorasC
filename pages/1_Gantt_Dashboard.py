@@ -65,6 +65,8 @@ if "edit_bar_select_widget" not in st.session_state:
     st.session_state.edit_bar_select_widget = ""
 if "last_clicked_safe_id" not in st.session_state:
     st.session_state.last_clicked_safe_id = ""
+if "reset_edit_bar_select_next_run" not in st.session_state:
+    st.session_state.reset_edit_bar_select_next_run = False
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ΚΑΙ ΕΚΚΑΘΑΡΙΣΗ ΚΛΙΚ ---
 if "view_week_date" not in st.session_state:
@@ -74,8 +76,8 @@ if "view_week_date" not in st.session_state:
 def clear_bar_selection():
     st.session_state.clicked_key = None
     st.session_state.trigger_scroll = False
-    st.session_state.edit_bar_select_widget = ""
     st.session_state.last_clicked_safe_id = ""
+    st.session_state.reset_edit_bar_select_next_run = True
 
 
 def sync_from_widget():
@@ -450,13 +452,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id)
-
 clicked_safe_id = click_detector(html_chart, key="gantt_detector_main")
 
 if clicked_safe_id:
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
 
-    # Αποφυγή loop rerun από το ίδιο click id
     if clicked_safe_id != st.session_state.last_clicked_safe_id:
         st.session_state.last_clicked_safe_id = clicked_safe_id
 
@@ -466,7 +466,6 @@ if clicked_safe_id:
             st.session_state.trigger_scroll = True
             st.rerun()
 
-# Σημαία "editing" για να μην χτυπάει το auto-refresh της sidebar όσο κάνεις επεξεργασία
 if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
@@ -678,6 +677,10 @@ if not presentation_mode:
             else:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]["Date"], wk_groups[k]["StartTime"]))
+
+                if st.session_state.get("reset_edit_bar_select_next_run"):
+                    st.session_state.edit_bar_select_widget = ""
+                    st.session_state.reset_edit_bar_select_next_run = False
 
                 if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
                     st.session_state.edit_bar_select_widget = st.session_state.clicked_key
