@@ -131,18 +131,14 @@ wk_groups, export_data = get_cached_data(
 )
 
 # Φτιάχνουμε ένα απλό λεξικό αντιστοίχισης (Καθαρό ID -> Πραγματικό Key)
-# Το Click detector έχει πρόβλημα με spaces, ελληνικά και σύμβολα στα ID.
 safe_mapping = {}
 for real_key in wk_groups.keys():
-    # Δημιουργούμε ένα απλό, αλφαριθμητικό ID χωρίς κενά
     safe_id = "group_" + re.sub(r'[^a-zA-Z0-9]', '', real_key)
     safe_mapping[safe_id] = real_key
 
-# --- NATIVE HTML GANTT CHART BUILDER (ΜΕ ST-CLICK-DETECTOR KAI ΕΝΣΩΜΑΤΩΜΕΝΟ DRAG) ---
+# --- NATIVE HTML GANTT CHART BUILDER ---
 def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
-    # Πλάτος: 2400px * zoom. Αντιστοιχεί σε 20 ώρες, δίνοντας το τέλειο 06:00-16:00!
     timeline_width_px = int(2400 * zoom_factor)
-    
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     emp_short_names = {}
@@ -165,7 +161,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
     # "Αόρατη" εκκίνηση του scroll μέσω onerror
     html += "<img src='x' style='display:none;' onerror='var s=document.getElementById(\"gantt-master-container\"); if(s && !window.gScrolled){ setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 100); window.gScrolled=true; }'>"
     
-    # Κυρίως Container με Inline Events για να δουλεύει τέλεια το Drag & Drop (Mobile & Desktop)
     html += (
         "<div id='gantt-master-container' "
         "onmousedown='window.gIsDown=true; window.gIsDragging=false; this.style.cursor=\"grabbing\"; window.gStartX=event.pageX - this.offsetLeft; window.gScrollL=this.scrollLeft;' "
@@ -180,19 +175,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
     
-    # Header: Το αριστερό κομμάτι "Ημέρα" είναι 230px. Δίπλα ακριβώς ξεκινάει το Timeline.
     html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
     html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b; font-size: 14px;'>Ημέρα / Προσωπικό</div>"
     html += f"<div class='gantt-timeline-header' style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; height: 45px; background: #f8fafc;'>"
     
-    # Ώρες 04:00 - 24:00
     for h in range(4, 25):
         pct = ((h - 4) / 20) * 100
         lbl = f"{h:02d}:00" if h < 24 else "00:00"
         html += f"<div style='position: absolute; left: {pct}%; height: 100%; border-left: 2px solid #94a3b8; padding-left: 4px; padding-top: 14px; font-weight: bold; font-size: 13px; color: #334155;'>{lbl}</div>"
     html += "</div></div>"
 
-    # Γραμμές Ημερών (Rows)
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
@@ -268,11 +260,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             bg_color = g['ColorHex']
             tooltip = base_text.replace('<br>', ' ').replace('"', '&quot;').replace("'", "&#39;")
             
-            # 👇 Βρίσκουμε το ΑΠΛΟ ID που φτιάξαμε για αυτό το group
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # 👇 ΑΛΛΑΓΗ ΣΤΟ href="javascript:void(0);" : Διορθώνει την αναπήδηση! Δεν στέλνει την οθόνη στην κορυφή.
-            html += f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # 👇 ΕΠΑΝΑΦΟΡΑ ΤΟΥ href='#' (Το ΑΠΑΙΤΕΙ το st_click_detector για να δουλέψει)
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
@@ -280,20 +271,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
     return html
 
 
-# --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ (ΜΕΣΩ ST-CLICK-DETECTOR) ---
+# --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping)
 
-# Η δύναμη του st-click-detector με δυναμικό key για να "ξεχνάει" την παλιά επιλογή!
 clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
 
-# 👇 --- ΔΙΑΒΑΣΜΑ ΤΟΥ ΚΛΙΚ (ΧΩΡΙΣ st.rerun ΓΙΑ ΝΑ ΜΗΝ ΑΡΓΕΙ Η ΕΦΑΡΜΟΓΗ!) --- 👇
+# 👇 --- ΔΙΑΒΑΣΜΑ ΚΑΙ ΕΝΗΜΕΡΩΣΗ STATE (ΜΕ RERUN) --- 👇
 if clicked_safe_id:
-    # Βρίσκουμε το ΠΡΑΓΜΑΤΙΚΟ Key μέσα από το λεξικό
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        # Αφαιρέσαμε το st.rerun() ! Το script συνεχίζει προς τα κάτω ακαριαία
+        # 👇 ΤΟ RERUN ΕΙΝΑΙ ΑΠΑΡΑΙΤΗΤΟ για να "ξυπνήσει" η φόρμα αμέσως και να κάνει το scroll
+        st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
 hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κάντε αριστερό κλικ (Pan/Drag) για οριζόντια κύλιση στο χρόνο. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
@@ -422,19 +412,21 @@ if not presentation_mode:
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
             
-            # 👇 Ομαλό Scroll (Smooth Down) όταν υπάρχει επιλογή
+            # 👇 ΒΕΛΤΙΩΜΕΝΟ Ομαλό Scroll (Smooth Down) με χρονοκαθυστέρηση
             if st.session_state.clicked_key:
                 components.html(
                     """
                     <script>
+                        // Περιμένουμε 300ms για να σιγουρευτούμε ότι η φόρμα φορτώθηκε στην οθόνη
                         setTimeout(function() {
                             const headers = window.parent.document.querySelectorAll('h3');
-                            headers.forEach(h => {
-                                if(h.innerText.includes('Επεξεργασία Μπάρας')) {
-                                    h.scrollIntoView({behavior: 'smooth', block: 'start'});
+                            for (let i = 0; i < headers.length; i++) {
+                                if(headers[i].innerText && headers[i].innerText.includes('Επεξεργασία Μπάρας')) {
+                                    headers[i].scrollIntoView({behavior: 'smooth', block: 'center'});
+                                    break;
                                 }
-                            });
-                        }, 100);
+                            }
+                        }, 300);
                     </script>
                     """,
                     height=0,
@@ -447,7 +439,7 @@ if not presentation_mode:
                 group_keys = list(wk_groups.keys())
                 group_keys.sort(key=lambda k: (wk_groups[k]['Date'], wk_groups[k]['StartTime']))
                 
-                # 👇 Callback Συνάρτηση: Αποτρέπει την αργοπορία και τη 2η φόρτωση
+                # Callback Συνάρτηση (Παραμένει για να είναι γρήγορη η αλλαγή από το dropdown!)
                 def on_edit_selectbox_change():
                     new_val = st.session_state.edit_bar_select_widget
                     st.session_state.clicked_key = new_val if new_val != "" else None
