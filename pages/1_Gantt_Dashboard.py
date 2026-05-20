@@ -94,6 +94,8 @@ div[data-testid="stNotification"] p, .stAlert p {
     margin: 0 !important;
     font-size: 13px !important;
 }
+/* 👇 ΜΙΚΡΟ ΚΟΛΠΟ: Αποτρέπουμε τον browser να κάνει το απότομο scroll πάνω σε όλα τα links του εγγράφου */
+html { scroll-behavior: smooth; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -263,11 +265,26 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
             # 👇 ΕΠΑΝΑΦΟΡΑ ΤΟΥ href='#' (Το ΑΠΑΙΤΕΙ το st_click_detector για να δουλέψει)
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Προστέθηκε κώδικας στο onclick που στέλνει την εντολή χωρίς να αφήνει τον browser να σκρολάρει πάνω!
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ event.preventDefault(); event.stopPropagation(); return false; }} setTimeout(function(){{ window.scrollTo(0, window.scrollY); }}, 1); ' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
     html += "</div>"
+    
+    # 👇 ΕΝΣΩΜΑΤΩΜΕΝΟ SCRIPT ΓΙΑ ΠΡΟΣΤΑΣΙΑ ΑΠΟ ΤΗΝ ΑΝΑΠΗΔΗΣΗ (PREVENT DEFAULT ANCHOR BEHAVIOR)
+    html += """
+    <script>
+    document.addEventListener('click', function(e) {
+        var target = e.target.closest('.mygantt-bar');
+        if (target) {
+            // Αυτό λέει στον browser να μην ακολουθήσει το # που πάει στην κορυφή
+            e.preventDefault(); 
+        }
+    });
+    </script>
+    """
+    
     return html
 
 
@@ -282,7 +299,7 @@ if clicked_safe_id:
     
     if real_clicked_key and st.session_state.clicked_key != real_clicked_key:
         st.session_state.clicked_key = real_clicked_key
-        # 👇 ΤΟ RERUN ΕΙΝΑΙ ΑΠΑΡΑΙΤΗΤΟ για να "ξυπνήσει" η φόρμα αμέσως και να κάνει το scroll
+        # Το rerun είναι απαραίτητο για να ανοίξει η φόρμα
         st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -417,7 +434,7 @@ if not presentation_mode:
                 components.html(
                     """
                     <script>
-                        // Περιμένουμε 300ms για να σιγουρευτούμε ότι η φόρμα φορτώθηκε στην οθόνη
+                        // Περιμένουμε για να σιγουρευτούμε ότι η φόρμα φορτώθηκε στην οθόνη
                         setTimeout(function() {
                             const headers = window.parent.document.querySelectorAll('h3');
                             for (let i = 0; i < headers.length; i++) {
@@ -426,7 +443,7 @@ if not presentation_mode:
                                     break;
                                 }
                             }
-                        }, 300);
+                        }, 500);
                     </script>
                     """,
                     height=0,
