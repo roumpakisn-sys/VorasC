@@ -53,8 +53,6 @@ if "clicked_key" not in st.session_state:
 # Το μυστικό για να σπάσει το Infinite Loop με το st-click-detector!
 if "detector_version" not in st.session_state:
     st.session_state.detector_version = 0
-if "gantt_scroll_position" not in st.session_state:
-    st.session_state.gantt_scroll_position = 0
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ΚΑΙ ΕΚΚΑΘΑΡΙΣΗ ΚΛΙΚ ---
 if "view_week_date" not in st.session_state:
@@ -174,12 +172,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
 
     html = ""
     
-    # Το container τώρα θυμάται το scrollLeft του μέσω Javascript!
-    # Όταν φορτώνει, παίρνει τη θέση από ένα data attribute ή ξεκινάει από το 10%
-    initial_scroll = st.session_state.get('gantt_scroll_position', -1)
-    
     html += (
-        f"<div id='gantt-master-container' data-initscroll='{initial_scroll}' "
+        "<div id='gantt-master-container' "
         "onmousedown='window.gIsDown=true; window.gIsDragging=false; this.style.cursor=\"grabbing\"; window.gStartX=event.pageX - this.offsetLeft; window.gScrollL=this.scrollLeft;' "
         "onmouseleave='window.gIsDown=false; this.style.cursor=\"auto\";' "
         "onmouseup='window.gIsDown=false; this.style.cursor=\"auto\"; setTimeout(function(){ window.gIsDragging=false; }, 50);' "
@@ -190,26 +184,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
         "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; background: #ffffff; user-select: none; box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
     
-    html += """
-    <img src='x' style='display:none;' onerror='
-        var s = document.getElementById("gantt-master-container");
-        if (s) {
-            var initScroll = parseFloat(s.getAttribute("data-initscroll"));
-            if (initScroll >= 0) {
-                s.scrollLeft = initScroll;
-            } else if (!window.gScrolled) {
-                setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 100);
-                window.gScrolled = true;
-            }
-            
-            // Παρακολουθούμε το scroll και το στέλνουμε στο parent document
-            s.addEventListener("scroll", function() {
-                window.parent.postMessage({type: "ganttScroll", value: s.scrollLeft}, "*");
-            });
-        }
-    '>
-    """
-
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; }</style>"
     
     html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
@@ -299,46 +273,59 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping):
             
             safe_id = next((k for k, v in safe_mapping.items() if v == g['Key']), "")
             
-            # Με το event.preventDefault() ακυρώνουμε το άλμα στην κορυφή.
-            # Αποθηκεύουμε και το τρέχον scroll πριν κάνουμε οτιδήποτε!
-            onclick_js = f"""
-            event.preventDefault(); 
-            if(window.gIsDragging) return false; 
-            var s = document.getElementById('gantt-master-container');
-            if (s) window.parent.postMessage({{type: 'ganttScroll', value: s.scrollLeft}}, '*');
-            """
-            
-            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick=\"{onclick_js}\" style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+            # Απλό href='#'. Ο κώδικας Javascript παρακάτω αναλαμβάνει να μπλοκάρει το Scroll.
+            html += f"<a href='#' id='{safe_id}' draggable='false' class='mygantt-bar' onclick='if(window.gIsDragging){{ return false; }}' style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; background-color: {bg_color}; height: 38px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'><div style='line-height: 1.2; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
 
         html += "</div></div>"
 
     html += "</div>"
     
+    # 👇 ΕΞΥΠΝΟ JAVASCRIPT: Διαχειρίζεται το Scroll και ακυρώνει το Jump 100% αόρατα!
+    html += """
+    <script>
+    (function() {
+        var s = document.getElementById('gantt-master-container');
+        if (s && !window.gScrollInited) {
+            window.gScrollInited = true;
+            
+            // 1. Επαναφορά της θέσης Scroll από τη μνήμη του Browser
+            var savedScroll = sessionStorage.getItem('ganttScrollPos');
+            if (savedScroll !== null) {
+                s.scrollLeft = parseFloat(savedScroll);
+            } else {
+                setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+            }
+            
+            // 2. Αποθήκευση της νέας θέσης όσο κάνεις κύλιση (Drag/Scroll)
+            var scrollTimeout;
+            s.addEventListener('scroll', function() {
+                clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(function() {
+                    sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
+                }, 100);
+            });
+            
+            // 3. ΜΠΛΟΚΑΡΙΣΜΑ ΑΝΑΠΗΔΗΣΗΣ: Αποτρέπουμε τον Browser να πάει στην κορυφή στα κλικ!
+            document.addEventListener('click', function(e) {
+                var link = e.target.closest('a.mygantt-bar');
+                if (link) {
+                    e.preventDefault(); 
+                }
+            });
+        }
+    })();
+    </script>
+    """
+    
     return html
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
-# Ένα μικρό κόλπο για να πιάνουμε το scroll position
-components.html(
-    """
-    <script>
-    window.addEventListener("message", (event) => {
-        if (event.data && event.data.type === "ganttScroll") {
-            const val = event.data.value;
-            // Δεν μπορούμε να ενημερώσουμε το st.session_state απευθείας από εδώ εύκολα
-            // Αλλά αποθηκεύουμε τη θέση για να μην τη χάσουμε στο επόμενο refresh
-            window.sessionStorage.setItem('ganttScrollPos', val);
-        }
-    });
-    </script>
-    """,
-    height=0, width=0
-)
-
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, safe_mapping)
 
 # Περιμένουμε το κλικ από τον χρήστη
 clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
 
+# 👇 --- ΔΙΑΒΑΣΜΑ ΚΑΙ ΕΝΗΜΕΡΩΣΗ STATE ΧΩΡΙΣ FLICKERING --- 👇
 if clicked_safe_id:
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
     
@@ -347,9 +334,8 @@ if clicked_safe_id:
         st.session_state.edit_bar_select_widget = real_clicked_key
         st.session_state.trigger_scroll = True
         
-        # Αφού πιάσαμε το κλικ, πρέπει να κάνουμε rerun.
-        # Για να αποφύγουμε το flickering αν αλλάξουμε το detector_version,
-        # το αφήνουμε ΙΔΙΟ μέχρι να πατηθεί "Αποθήκευση".
+        # Κάνουμε απλό rerun() για να εμφανιστεί η φόρμα επεξεργασίας. 
+        # ΔΕΝ αυξάνουμε το detector_version εδώ για να αποφύγουμε το αναβόσβημα!
         st.rerun()
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
@@ -472,12 +458,11 @@ if not presentation_mode:
                                 
                         utils.db_insert("assignments", new_assigns, track=False)
                         
-                        # Ενημέρωση μνήμης
+                        st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
+                        time.sleep(0.4)
                         utils.mark_data_changed()
                         utils.init_data_and_sync()
                         
-                        st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
-                        time.sleep(0.5)
                         st.session_state.qa_rc += 1
                         st.session_state.detector_version += 1
                         st.rerun()
@@ -485,6 +470,7 @@ if not presentation_mode:
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
             
+            # 👇 Το Smooth Scroll θα τρέξει ΜΟΝΟ την ακριβή στιγμή που κάνει το κλικ!
             if st.session_state.get("trigger_scroll"):
                 components.html(
                     """
@@ -497,7 +483,7 @@ if not presentation_mode:
                                     break;
                                 }
                             }
-                        }, 200);
+                        }, 100);
                     </script>
                     """,
                     height=0,
@@ -514,6 +500,7 @@ if not presentation_mode:
                 def on_edit_selectbox_change():
                     new_val = st.session_state.edit_bar_select_widget
                     st.session_state.clicked_key = new_val if new_val != "" else None
+                    st.session_state.detector_version += 1 # Εδώ χρειάζεται για να καθαρίσει το παλιό κλικ!
                 
                 default_idx = 0
                 if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
@@ -585,12 +572,13 @@ if not presentation_mode:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             st.session_state.assignments.extend(new_assigns)
                             
-                            # Σημαντικό: Επαναϋπολογισμός μνήμης για να φανούν οι αλλαγές
+                            st.success("Η βάρδια μετακινήθηκε επιτυχώς!")
+                            time.sleep(0.4) # Δίνουμε χρόνο στη βάση
                             utils.mark_data_changed()
                             utils.init_data_and_sync()
                             
                             st.session_state.clicked_key = None
-                            st.session_state.detector_version += 1 # Σπάμε τη λούπα!
+                            st.session_state.detector_version += 1 
                             st.rerun()
 
                     with st.form("quick_edit"):
@@ -655,6 +643,8 @@ if not presentation_mode:
                             st.session_state.assignments = [a for a in st.session_state.assignments if a['id'] not in target_group['AssignmentIds']]
                             utils.db_delete_in('assignments', 'id', target_group['AssignmentIds'], deleted_records=old_assigns)
                             
+                            st.success("Επιτυχής Διαγραφή!")
+                            time.sleep(0.4) # Δίνουμε χρόνο στη βάση
                             utils.mark_data_changed()
                             utils.init_data_and_sync()
                             
@@ -725,9 +715,11 @@ if not presentation_mode:
                                     st.session_state.assignments.append(new_a)
                                 utils.db_insert('assignments', new_assigns, track=False)
                                 
-                                # ΔΙΑΣΦΑΛΙΖΟΥΜΕ ΟΤΙ Η ΜΝΗΜΗ ΕΙΝΑΙ ΣΥΓΧΡΟΝΙΣΜΕΝΗ ΠΡΙΝ ΤΟ RERUN
+                                # 👇 ΚΡΥΦΟ ΜΥΣΤΙΚΟ ΓΙΑ ΝΑ ΜΗΝ ΕΞΑΦΑΝΙΖΟΝΤΑΙ ΟΙ ΜΠΑΡΕΣ
+                                st.success("Επιτυχής Ενημέρωση!")
+                                time.sleep(0.4) # Δίνει χρόνο στο σύστημα να κάνει commit στη βάση 
                                 utils.mark_data_changed()
-                                utils.init_data_and_sync()
+                                utils.init_data_and_sync() # Τώρα το sync διαβάζει τα σωστά δεδομένα!
                                 
                                 st.session_state.clicked_key = None
                                 st.session_state.detector_version += 1
