@@ -800,14 +800,22 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                             utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
-                            
+
+                            # Ζωντανό index βαρδιών μετά τη διαγραφή της παλιάς σειράς
+                            # ώστε να μη συγκρούεται η νέα αποθήκευση με το ίδιο το έργο.
+                            live_assignments_by_date = {}
+                            for _a in st.session_state.assignments:
+                                _d = _a.get('date')
+                                if _d is not None:
+                                    live_assignments_by_date.setdefault(_d, []).append(_a)
+
                             r_end_date = e_r_start_date + timedelta(days=365)
                             dates_to_assign = []
                             curr_date = e_r_start_date
                             day_map = {"Δευτέρα": 0, "Τρίτη": 1, "Τετάρτη": 2, "Πέμπτη": 3, "Παρασκευή": 4, "Σάββατο": 5, "Κυριακή": 6}
                             day_map_inv = {v: k for k, v in day_map.items()}
                             selected_weekday_ints = [day_map[d] for d in e_selected_weekdays] if e_selected_weekdays else []
-                            
+
                             new_assignments_batch = []
                             with st.spinner('Ενημέρωση και επαναϋπολογισμός βαρδιών...'):
                                 while curr_date <= r_end_date:
@@ -817,16 +825,22 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     elif e_r_type == "Μηνιαία":
                                         dates_to_assign.append(curr_date)
                                         month, year = curr_date.month, curr_date.year
-                                        if month == 12: month = 1; year += 1
-                                        else: month += 1
-                                        try: curr_date = curr_date.replace(year=year, month=month)
-                                        except ValueError: curr_date = curr_date.replace(year=year, month=month, day=calendar.monthrange(year, month)[1])
+                                        if month == 12:
+                                            month = 1
+                                            year += 1
+                                        else:
+                                            month += 1
+                                        try:
+                                            curr_date = curr_date.replace(year=year, month=month)
+                                        except ValueError:
+                                            curr_date = curr_date.replace(year=year, month=month, day=calendar.monthrange(year, month)[1])
                                     elif e_r_type == "Επιλεγμένες Μέρες Εβδομάδας":
-                                        if curr_date.weekday() in selected_weekday_ints: dates_to_assign.append(curr_date)
+                                        if curr_date.weekday() in selected_weekday_ints:
+                                            dates_to_assign.append(curr_date)
                                         curr_date += timedelta(days=1)
                                     else:
                                         curr_date += timedelta(days=1)
-                                        
+
                                 success_count, conflict_count, conflict_details = 0, 0, []
                                 for d in dates_to_assign:
                                     emps_to_process = e_selected_weekdays_data.get(day_map_inv[d.weekday()], []) if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
@@ -838,21 +852,49 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 conflict_count += 1
                                                 conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                             else:
-                                                day_assigns = st.session_state.assignments_by_date.get(d, [])
+                                                day_assigns = live_assignments_by_date.get(d, [])
                                                 adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
                                                 if is_conflict:
                                                     conflict_count += 1
                                                     conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
                                                 else:
-                                                    new_assign = {'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': eid, 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': adj_start, 'endTime': adj_end, 'colorName': e_r_color, 'colorHex': config.BASIC_COLORS[e_r_color], 'notes': e_r_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                                    new_assign = {
+                                                        'id': str(uuid.uuid4()),
+                                                        'recurring_id': selected_pattern_id,
+                                                        'employeeId': eid,
+                                                        'projectId': final_r_proj_id,
+                                                        'date': d,
+                                                        'arrivalTime': str_arrival,
+                                                        'startTime': adj_start,
+                                                        'endTime': adj_end,
+                                                        'colorName': e_r_color,
+                                                        'colorHex': config.BASIC_COLORS[e_r_color],
+                                                        'notes': e_r_notes,
+                                                        'is_cancelled': False,
+                                                        'cancel_reason': ""
+                                                    }
                                                     new_assignments_batch.append(new_assign)
+                                                    live_assignments_by_date.setdefault(d, []).append(new_assign)
                                                     success_count += 1
                                         else:
-                                            new_assign = {'id': str(uuid.uuid4()), 'recurring_id': selected_pattern_id, 'employeeId': "", 'projectId': final_r_proj_id, 'date': d, 'arrivalTime': str_arrival, 'startTime': str_start, 'endTime': str_end, 'colorName': e_r_color, 'colorHex': config.BASIC_COLORS[e_r_color], 'notes': e_r_notes, 'is_cancelled': False, 'cancel_reason': ""}
+                                            new_assign = {
+                                                'id': str(uuid.uuid4()),
+                                                'recurring_id': selected_pattern_id,
+                                                'employeeId': "",
+                                                'projectId': final_r_proj_id,
+                                                'date': d,
+                                                'arrivalTime': str_arrival,
+                                                'startTime': str_start,
+                                                'endTime': str_end,
+                                                'colorName': e_r_color,
+                                                'colorHex': config.BASIC_COLORS[e_r_color],
+                                                'notes': e_r_notes,
+                                                'is_cancelled': False,
+                                                'cancel_reason': ""
+                                            }
                                             new_assignments_batch.append(new_assign)
+                                            live_assignments_by_date.setdefault(d, []).append(new_assign)
                                             success_count += 1
-                                            
-                                final_employee_ids = e_selected_weekdays_data if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
                                 
                                 old_pat = dict(pat)
                                 pat.update({'projectId': final_r_proj_id, 'employeeIds': final_employee_ids, 'colorName': e_r_color, 'notes': e_r_notes, 'type': e_r_type, 'weekdays': e_selected_weekdays, 'arrivalTime': str_arrival, 'startDate': e_r_start_date, 'startTime': str_start, 'endTime': str_end})
