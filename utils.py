@@ -179,13 +179,10 @@ def inject_silent_refresh_css():
     st.markdown(
         """
         <style>
-        /* 1. Εξαφάνιση του προεπιλεγμένου εικονιδίου 'Running...' */
         [data-testid="stStatusWidget"] { 
             visibility: hidden !important; 
             display: none !important; 
         }
-        
-        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" */
         [data-testid="stAppViewContainer"], 
         [data-testid="stMainBlockContainer"],
         [data-testid="stAppViewBlockContainer"],
@@ -194,8 +191,6 @@ def inject_silent_refresh_css():
             filter: none !important;
             transition: none !important;
         }
-        
-        /* 3. Κρύβουμε την κόκκινη/πολύχρωμη γραμμή φόρτωσης στην κορυφή */
         [data-testid="stDecoration"] { 
             display: none !important; 
         }
@@ -653,7 +648,6 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
-    # --- ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ΠΑΝΤΟΥ (Prevent AttributeError on Refresh) ---
     if "employees" not in st.session_state: st.session_state.employees = []
     if "projects" not in st.session_state: st.session_state.projects = []
     if "assignments" not in st.session_state: st.session_state.assignments = []
@@ -670,19 +664,15 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # --- ΝΕΟ: ΕΞΥΠΝΟΣ ΦΥΛΑΚΑΣ ΕΠΙΤΑΧΥΝΣΗΣ (CACHE GUARD) ---
-    # Αποτρέπει το βαρύ χτίσιμο ευρετηρίων σε κάθε κλικ αν δεν υπάρχουν αλλαγές!
     current_version = st.session_state.get('local_gantt_version', 0)
     last_processed = st.session_state.get('last_processed_version', -1)
     
     if current_version == last_processed and 'emp_map' in st.session_state:
-        # Αν δεν άλλαξε η βάση, εκτελούμε μόνο τον ελαφρύ έλεγχο επεκτάσεων (1 φορά την ώρα)
         if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
             auto_extend_recurring_patterns()
             st.session_state.last_auto_extend_check = time.time()
         return
 
-    # --- ΒΑΡΥΣ ΥΠΟΛΟΓΙΣΜΟΣ & ΕΚΚΑΘΑΡΙΣΗ (Εκτελείται ΜΟΝΟ όταν υπάρχουν αλλαγές) ---
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         if isinstance(a, dict):
@@ -725,8 +715,6 @@ def init_data_and_sync():
     st.session_state.leaves_by_emp = leaves_by_emp
     
     st.session_state.data_dirty = False
-    
-    # Ενημερώνουμε την έκδοση που μόλις επεξεργαστήκαμε!
     st.session_state.last_processed_version = st.session_state.get('local_gantt_version', 0)
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
@@ -749,6 +737,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         padding-bottom: 1rem !important;
         padding-left: 0.8rem !important;
         padding-right: 0.8rem !important;
+    }
+
+    /* Κρύβουμε το default Streamlit pages menu */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
     }
 
     .stPlotlyChart { border: 1px solid #cbd5e1; border-radius: 8px; }
@@ -952,6 +945,17 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         """,
         unsafe_allow_html=True,
     )
+
+    # HTML-style navigation buttons (αντικατάσταση default links)
+    st.sidebar.markdown('<div class="sb-section-title">Πλοήγηση</div>', unsafe_allow_html=True)
+    if st.sidebar.button("📊 Gantt Dashboard", key="sb_nav_gantt", use_container_width=True):
+        st.switch_page("pages/1_Gantt_Dashboard.py")
+    if st.sidebar.button("⚙️ Management", key="sb_nav_management", use_container_width=True):
+        st.switch_page("pages/2_Management.py")
+    if st.sidebar.button("📱 Viber Export", key="sb_nav_viber", use_container_width=True):
+        st.switch_page("pages/3_Viber_Export.py")
+
+    st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
 
     selected_menu = None
     if show_menu and menu_options:
