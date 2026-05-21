@@ -235,7 +235,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
     timeline_width_px = int(2400 * zoom_factor)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
-    # Ζητούμενη εμφάνιση: λίγο πιο ψηλές μπάρες + μικρότερα κενά ανάμεσα
+    # Ψηλότερες μπάρες + μικρότερα κενά
     BAR_HEIGHT_PX = 44
     LANE_STEP_PX = 46
     ROW_PAD_TOP_PX = 6
@@ -383,12 +383,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
     html += "</div>"
 
     # --- JS Injector (Base64) ---
-    # Drag παντού μέσα στο gantt (όχι μόνο στη scrollbar)
+    # FIX: σε κάθε rerun κάνουμε cleanup παλιών listeners και ξαναδένουμε στο νέο gantt element.
     js_code = """
     (function () {
       var s = document.getElementById('gantt-master-container');
-      if (!s || window.gScrollInited) return;
-      window.gScrollInited = true;
+      if (!s) return;
+
+      if (window.ganttDragCleanup) {
+        try { window.ganttDragCleanup(); } catch (e) {}
+        window.ganttDragCleanup = null;
+      }
 
       var savedScroll = sessionStorage.getItem('ganttScrollPos');
       if (savedScroll !== null) {
@@ -397,90 +401,144 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
           setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
       }
 
-      var scrollTimeout;
-      s.addEventListener('scroll', function() {
-          clearTimeout(scrollTimeout);
-          scrollTimeout = setTimeout(function() {
-              sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
-          }, 100);
-      });
-
-      var isDragging = false;
-      var moved = false;
+      var isDown = false;
       var startX = 0;
-      var startScrollLeft = 0;
+      var scrollLeftStart = 0;
+      var moved = false;
       var DRAG_THRESHOLD = 5;
       window.gIsDragging = false;
 
-      function dragStart(pageX) {
-        isDragging = true;
+      function onScroll() {
+        clearTimeout(onScroll._t);
+        onScroll._t = setTimeout(function() {
+          sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
+        }, 100);
+      }
+
+      function startDrag(pageX) {
+        isDown = true;
         moved = false;
-        startX = pageX;
-        startScrollLeft = s.scrollLeft;
+        window.gIsDragging = false;
+        startX = pageX - s.offsetLeft;
+        scrollLeftStart = s.scrollLeft;
         s.style.cursor = 'grabbing';
         if (document.body) document.body.style.userSelect = 'none';
       }
 
-      function dragMove(pageX) {
-        if (!isDragging) return;
-        var walk = pageX - startX;
+      function moveDrag(pageX, ev) {
+        if (!isDown) return;
+        if (ev) ev.preventDefault();
+        var walk = (pageX - s.offsetLeft) - startX;
         if (Math.abs(walk) > DRAG_THRESHOLD) {
           moved = true;
           window.gIsDragging = true;
         }
-        s.scrollLeft = startScrollLeft - walk * 1.5;
+        s.scrollLeft = scrollLeftStart - walk * 1.5;
       }
 
-      function dragEnd() {
-        if (!isDragging) return;
-        isDragging = false;
+      function endDrag() {
+        if (!isDown) return;
+        isDown = false;
         s.style.cursor = 'grab';
         if (document.body) document.body.style.userSelect = '';
         setTimeout(function(){ window.gIsDragging = false; }, 80);
       }
 
-      s.addEventListener('mousedown', function(e) {
+      function onMouseDown(e) {
         if (e.button !== 0) return;
-        dragStart(e.pageX);
-      }, true);
+        startDrag(e.pageX);
+      }
 
-      document.addEventListener('mousemove', function(e) {
-        dragMove(e.pageX);
-      }, true);
+      function onMouseMoveLocal(e) {
+        moveDrag(e.pageX, e);
+      }
 
-      document.addEventListener('mouseup', function() {
-        dragEnd();
-      }, true);
+      function onMouseMoveWin(e) {
+        moveDrag(e.pageX, e);
+      }
 
-      window.addEventListener('blur', function() {
-        dragEnd();
-      });
+      function onMouseUp() {
+        endDrag();
+      }
 
-      s.addEventListener('touchstart', function(e) {
+      function onMouseLeave() {
+        endDrag();
+      }
+
+      function onBlur() {
+        endDrag();
+      }
+
+      function onTouchStart(e) {
         if (!e.touches || !e.touches[0]) return;
-        dragStart(e.touches[0].pageX);
-      }, { passive: true, capture: true });
+        isDown = true;
+        moved = false;
+        window.gIsDragging = false;
+        startX = e.touches[0].pageX - s.offsetLeft;
+        scrollLeftStart = s.scrollLeft;
+      }
 
-      s.addEventListener('touchmove', function(e) {
-        if (!e.touches || !e.touches[0]) return;
-        dragMove(e.touches[0].pageX);
-      }, { passive: true, capture: true });
+      function onTouchMove(e) {
+        if (!isDown || !e.touches || !e.touches[0]) return;
+        var walk = (e.touches[0].pageX - s.offsetLeft) - startX;
+        if (Math.abs(walk) > DRAG_THRESHOLD) {
+          moved = true;
+          window.gIsDragging = true;
+        }
+        s.scrollLeft = scrollLeftStart - walk * 1.5;
+      }
 
-      s.addEventListener('touchend', function() {
-        dragEnd();
-      }, { passive: true, capture: true });
+      function onTouchEnd() {
+        endDrag();
+      }
 
-      s.addEventListener('dragstart', function(e) {
+      function onDragStart(e) {
         e.preventDefault();
-      });
+      }
 
-      document.addEventListener('click', function(e) {
+      function onClickCapture(e) {
         var link = e.target.closest('a.mygantt-bar');
         if (link && (window.gIsDragging || moved)) {
           e.preventDefault();
           e.stopPropagation();
         }
-      }, true);
+      }
+
+      s.addEventListener('scroll', onScroll);
+      s.addEventListener('mousedown', onMouseDown, true);
+      s.addEventListener('mousemove', onMouseMoveLocal, true);
+
+      window.addEventListener('mousemove', onMouseMoveWin, true);
+      s.addEventListener('mouseup', onMouseUp, true);
+      s.addEventListener('mouseleave', onMouseLeave, true);
+      window.addEventListener('mouseup', onMouseUp, true);
+      window.addEventListener('blur', onBlur);
+
+      s.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+      s.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
+      s.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+
+      s.addEventListener('dragstart', onDragStart);
+      document.addEventListener('click', onClickCapture, true);
+
+      window.ganttDragCleanup = function () {
+        s.removeEventListener('scroll', onScroll);
+        s.removeEventListener('mousedown', onMouseDown, true);
+        s.removeEventListener('mousemove', onMouseMoveLocal, true);
+
+        window.removeEventListener('mousemove', onMouseMoveWin, true);
+        s.removeEventListener('mouseup', onMouseUp, true);
+        s.removeEventListener('mouseleave', onMouseLeave, true);
+        window.removeEventListener('mouseup', onMouseUp, true);
+        window.removeEventListener('blur', onBlur);
+
+        s.removeEventListener('touchstart', onTouchStart, { capture: true });
+        s.removeEventListener('touchmove', onTouchMove, { capture: true });
+        s.removeEventListener('touchend', onTouchEnd, { capture: true });
+
+        s.removeEventListener('dragstart', onDragStart);
+        document.removeEventListener('click', onClickCapture, true);
+      };
     })();
     """
 
