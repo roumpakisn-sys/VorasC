@@ -895,7 +895,25 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             new_assignments_batch.append(new_assign)
                                             live_assignments_by_date.setdefault(d, []).append(new_assign)
                                             success_count += 1
-                                
+                                                                final_employee_ids = (
+                                    e_selected_weekdays_data
+                                    if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας"
+                                    else e_r_emps
+                                )
+
+                                old_pat = dict(pat)
+                                pat.update({
+                                    'projectId': final_r_proj_id,
+                                    'employeeIds': final_employee_ids,
+                                    'colorName': e_r_color,
+                                    'notes': e_r_notes,
+                                    'type': e_r_type,
+                                    'weekdays': e_selected_weekdays,
+                                    'arrivalTime': str_arrival,
+                                    'startDate': e_r_start_date,
+                                    'startTime': str_start,
+                                    'endTime': str_end
+                                })
                                 old_pat = dict(pat)
                                 pat.update({'projectId': final_r_proj_id, 'employeeIds': final_employee_ids, 'colorName': e_r_color, 'notes': e_r_notes, 'type': e_r_type, 'weekdays': e_selected_weekdays, 'arrivalTime': str_arrival, 'startDate': e_r_start_date, 'startTime': str_start, 'endTime': str_end})
                                 utils.db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
