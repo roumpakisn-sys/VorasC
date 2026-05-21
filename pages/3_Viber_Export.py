@@ -112,11 +112,19 @@ else:
         viber_msg += "Δεν έχουν επιλεγεί/βρεθεί βάρδιες έργων.\n\n"
         
     for (start, end, proj, arr, notes), emps in groups.items():
-        viber_msg += f"⏰ *{start} - {end}* | 🏗️ *{proj}*\n"
+        # Ώρες με αστερίσκους, έργο χωρίς αστερίσκους
+        viber_msg += f"⏰ *{start} - {end}* | 🏗️ {proj}\n"
+        
+        # Ονόματα εργαζομένων με αστερίσκους
         emp_str = ", ".join(emps) if emps else "Χωρίς Προσωπικό"
-        viber_msg += f"👥 Προσωπικό: {emp_str}\n"
-        if arr: viber_msg += f"🚶 Προσέλευση: {arr}\n"
-        if notes: viber_msg += f"📝 Σημείωση: {notes}\n"
+        viber_msg += f"👥 Προσωπικό: *{emp_str}*\n"
+        
+        # Ώρα προσέλευσης (αν υπάρχει) με αστερίσκους
+        if arr:
+            viber_msg += f"🚶 Προσέλευση: *{arr}*\n"
+        
+        if notes:
+            viber_msg += f"📝 Σημείωση: {notes}\n"
         viber_msg += "\n"
         
 if day_leaves and include_leaves:
