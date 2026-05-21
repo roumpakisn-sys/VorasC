@@ -776,7 +776,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         time.sleep(1.0)
                         st.rerun()
 
-                                        if save_rec:
+                                              if save_rec:
                         str_arrival = e_r_arrival_time.strftime("%H:%M") if e_use_arr_rec else ""
                         str_start, str_end = e_r_start_time.strftime("%H:%M"), e_r_end_time.strftime("%H:%M")
 
@@ -814,7 +814,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                             utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
 
-                            # Ζωντανό index μετά τη διαγραφή της παλιάς σειράς (αποφεύγει self-conflict)
                             live_assignments_by_date = {}
                             for _a in st.session_state.assignments:
                                 _d = _a.get('date')
@@ -958,7 +957,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 with st.expander("Δείτε τις συγκρούσεις"):
                                     for c in conflict_details:
                                         st.write(f"⚠️ {c}")
-# --- VIEW: EVALUATIONS ---
 elif menu == "Αξιολόγηση Προσωπικού":
     st.markdown("""<style>div[data-testid="stFormSubmitButton"] {position: fixed !important; bottom: 40px !important; right: 40px !important; z-index: 99999 !important;} div[data-testid="stFormSubmitButton"] button {box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4) !important; border: 3px solid #16a34a !important; border-radius: 50px !important; font-weight: bold !important; padding: 15px 30px !important; background-color: white !important; color: #16a34a !important;} div[data-testid="stForm"] {padding-bottom: 120px !important;}</style>""", unsafe_allow_html=True)
     st.title("⭐ Αξιολόγηση Προσωπικού")
