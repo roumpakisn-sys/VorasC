@@ -776,33 +776,45 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         time.sleep(1.0)
                         st.rerun()
 
-                    if save_rec:
+                                        if save_rec:
                         str_arrival = e_r_arrival_time.strftime("%H:%M") if e_use_arr_rec else ""
                         str_start, str_end = e_r_start_time.strftime("%H:%M"), e_r_end_time.strftime("%H:%M")
-                        if str_start >= str_end: st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
-                        elif e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays: st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
-                        elif not e_r_custom_proj_name.strip() and not e_r_proj: st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
+
+                        if str_start >= str_end:
+                            st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
+                        elif e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" and not e_selected_weekdays:
+                            st.error("Επιλέξτε τουλάχιστον μία μέρα της εβδομάδας.")
+                        elif not e_r_custom_proj_name.strip() and not e_r_proj:
+                            st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                         else:
                             actions = []
+
                             if e_r_custom_proj_name.strip():
                                 c_name = e_r_custom_proj_name.strip()
-                                existing_p = next((p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()), None)
+                                existing_p = next(
+                                    (p for p in st.session_state.projects if p['name'].strip().lower() == c_name.lower()),
+                                    None
+                                )
                                 if existing_p:
                                     final_r_proj_id = existing_p['id']
                                 else:
                                     final_r_proj_id = str(uuid.uuid4())
-                                    new_p = {'id': final_r_proj_id, 'name': c_name, 'color': config.BASIC_COLORS[e_r_color]}
+                                    new_p = {
+                                        'id': final_r_proj_id,
+                                        'name': c_name,
+                                        'color': config.BASIC_COLORS[e_r_color]
+                                    }
                                     st.session_state.projects.append(new_p)
                                     utils.db_insert('projects', new_p, track=False)
                                     actions.append({'type': 'insert', 'table': 'projects', 'records': [new_p]})
-                            else: final_r_proj_id = e_r_proj
-                            
+                            else:
+                                final_r_proj_id = e_r_proj
+
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
                             st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
                             utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
 
-                            # Ζωντανό index βαρδιών μετά τη διαγραφή της παλιάς σειράς
-                            # ώστε να μη συγκρούεται η νέα αποθήκευση με το ίδιο το έργο.
+                            # Ζωντανό index μετά τη διαγραφή της παλιάς σειράς (αποφεύγει self-conflict)
                             live_assignments_by_date = {}
                             for _a in st.session_state.assignments:
                                 _d = _a.get('date')
@@ -843,8 +855,13 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
 
                                 success_count, conflict_count, conflict_details = 0, 0, []
                                 for d in dates_to_assign:
-                                    emps_to_process = e_selected_weekdays_data.get(day_map_inv[d.weekday()], []) if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
+                                    emps_to_process = (
+                                        e_selected_weekdays_data.get(day_map_inv[d.weekday()], [])
+                                        if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας"
+                                        else e_r_emps
+                                    )
                                     emps_to_process = emps_to_process if emps_to_process else [""]
+
                                     for eid in emps_to_process:
                                         if eid:
                                             emp_name = utils.get_employee_name(eid)
@@ -853,7 +870,9 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                                 conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια)")
                                             else:
                                                 day_assigns = live_assignments_by_date.get(d, [])
-                                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
+                                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
+                                                    eid, str_start, str_end, day_assigns
+                                                )
                                                 if is_conflict:
                                                     conflict_count += 1
                                                     conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη)")
@@ -895,7 +914,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             new_assignments_batch.append(new_assign)
                                             live_assignments_by_date.setdefault(d, []).append(new_assign)
                                             success_count += 1
-                                                                final_employee_ids = (
+
+                                final_employee_ids = (
                                     e_selected_weekdays_data
                                     if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας"
                                     else e_r_emps
@@ -914,23 +934,30 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'startTime': str_start,
                                     'endTime': str_end
                                 })
-                                old_pat = dict(pat)
-                                pat.update({'projectId': final_r_proj_id, 'employeeIds': final_employee_ids, 'colorName': e_r_color, 'notes': e_r_notes, 'type': e_r_type, 'weekdays': e_selected_weekdays, 'arrivalTime': str_arrival, 'startDate': e_r_start_date, 'startTime': str_start, 'endTime': str_end})
                                 utils.db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
-                                
+
                                 if new_assignments_batch:
                                     st.session_state.assignments.extend(new_assignments_batch)
-                                    utils.db_insert_bulk_background('assignments', new_assignments_batch, "ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", f"Δημιουργήθηκαν {len(new_assignments_batch)} βάρδιες")
+                                    utils.db_insert_bulk_background(
+                                        'assignments',
+                                        new_assignments_batch,
+                                        "ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ",
+                                        f"Δημιουργήθηκαν {len(new_assignments_batch)} βάρδιες"
+                                    )
                                     actions.append({'type': 'insert', 'table': 'assignments', 'records': new_assignments_batch})
-                                    
+
                             utils.add_transaction(actions)
                             st.session_state.rec_reset_counter += 1
-                            if success_count > 0: st.success(f"Επιτυχής ενημέρωση! Δημιουργήθηκαν {success_count} νέες βάρδιες. Η σελίδα ανανεώνεται..."); time.sleep(1.5); st.rerun()
+                            if success_count > 0:
+                                st.success(f"Επιτυχής ενημέρωση! Δημιουργήθηκαν {success_count} νέες βάρδιες. Η σελίδα ανανεώνεται...")
+                                time.sleep(1.5)
+                                st.rerun()
+
                             if conflict_count > 0:
                                 st.warning(f"Παραλείφθηκαν {conflict_count} αναθέσεις λόγω συγκρούσεων.")
                                 with st.expander("Δείτε τις συγκρούσεις"):
-                                    for c in conflict_details: st.write(f"⚠️ {c}")
-
+                                    for c in conflict_details:
+                                        st.write(f"⚠️ {c}")
 # --- VIEW: EVALUATIONS ---
 elif menu == "Αξιολόγηση Προσωπικού":
     st.markdown("""<style>div[data-testid="stFormSubmitButton"] {position: fixed !important; bottom: 40px !important; right: 40px !important; z-index: 99999 !important;} div[data-testid="stFormSubmitButton"] button {box-shadow: 0px 8px 24px rgba(0, 0, 0, 0.4) !important; border: 3px solid #16a34a !important; border-radius: 50px !important; font-weight: bold !important; padding: 15px 30px !important; background-color: white !important; color: #16a34a !important;} div[data-testid="stForm"] {padding-bottom: 120px !important;}</style>""", unsafe_allow_html=True)
