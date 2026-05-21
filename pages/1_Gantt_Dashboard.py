@@ -384,6 +384,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     # --- JS Injector (Base64) ---
     # FIX: σε κάθε rerun κάνουμε cleanup παλιών listeners και ξαναδένουμε στο νέο gantt element.
+    # Επίσης κρατάμε και vertical θέση (scrollTop), όχι μόνο horizontal.
     js_code = """
     (function () {
       var s = document.getElementById('gantt-master-container');
@@ -394,11 +395,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
         window.ganttDragCleanup = null;
       }
 
-      var savedScroll = sessionStorage.getItem('ganttScrollPos');
-      if (savedScroll !== null) {
-          s.scrollLeft = parseFloat(savedScroll);
+      var savedScrollLeft = sessionStorage.getItem('ganttScrollLeft');
+      var savedScrollTop = sessionStorage.getItem('ganttScrollTop');
+
+      if (savedScrollLeft !== null) {
+          s.scrollLeft = parseFloat(savedScrollLeft);
       } else {
           setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
+      }
+
+      if (savedScrollTop !== null) {
+          s.scrollTop = parseFloat(savedScrollTop);
       }
 
       var isDown = false;
@@ -411,7 +418,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       function onScroll() {
         clearTimeout(onScroll._t);
         onScroll._t = setTimeout(function() {
-          sessionStorage.setItem('ganttScrollPos', s.scrollLeft);
+          sessionStorage.setItem('ganttScrollLeft', String(s.scrollLeft));
+          sessionStorage.setItem('ganttScrollTop', String(s.scrollTop));
         }, 100);
       }
 
