@@ -628,4 +628,255 @@ def cleanup_projects():
                         except: pass
                 
                 chunk_size = 100
-                del_ids = [p['id'] for p in projects_to_k
+                del_ids = [p['id'] for p in projects_to_kill if p.get('id')]
+                for i in range(0, len(del_ids), chunk_size):
+                    try: 
+                        chunk = del_ids[i:i+chunk_size]
+                        supabase.table('projects').delete().in_('id', chunk).execute()
+                        for rec_id in chunk:
+                            track_deletion('projects', rec_id)
+                    except: pass
+                try:
+                    now_utc = datetime.utcnow().isoformat() + "Z"
+                    log_entry = {
+                        "id": str(uuid.uuid4()),
+                        "timestamp": now_utc,
+                        "username": "Σύστημα (Καθαριστής)",
+                        "action_type": "ΕΚΚΑΘΑΡΙΣΗ",
+                        "table_name": "projects",
+                        "details": f"Συγχωνεύτηκαν {len(projects_to_kill)} διπλότυπα έργα"
+                    }
+                    supabase.table("activity_logs").insert(log_entry).execute()
+                except: pass
+            threading.Thread(target=merge_db, daemon=True).start()
+
+def init_data_and_sync():
+    init_undo_stack()
+    
+    # --- ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ΠΑΝΤΟΥ (Prevent AttributeError on Refresh) ---
+    if "employees" not in st.session_state: st.session_state.employees = []
+    if "projects" not in st.session_state: st.session_state.projects = []
+    if "assignments" not in st.session_state: st.session_state.assignments = []
+    if "leaves" not in st.session_state: st.session_state.leaves = []
+    if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
+    if "evaluations" not in st.session_state: st.session_state.evaluations = []
+    
+    try:
+        import database
+        database.sync_data_incremental()
+    except Exception as e:
+        print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
+
+    if 'view_week_date' not in st.session_state:
+        st.session_state.view_week_date = date.today()
+
+    # --- ΝΕΟ: ΕΞΥΠΝΟΣ ΦΥΛΑΚΑΣ ΕΠΙΤΑΧΥΝΣΗΣ (CACHE GUARD) ---
+    # Αποτρέπει το βαρύ χτίσιμο ευρετηρίων σε κάθε κλικ αν δεν υπάρχουν αλλαγές!
+    current_version = st.session_state.get('local_gantt_version', 0)
+    last_processed = st.session_state.get('last_processed_version', -1)
+    
+    if current_version == last_processed and 'emp_map' in st.session_state:
+        # Αν δεν άλλαξε η βάση, εκτελούμε μόνο τον ελαφρύ έλεγχο επεκτάσεων (1 φορά την ώρα)
+        if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+            auto_extend_recurring_patterns()
+            st.session_state.last_auto_extend_check = time.time()
+        return
+
+    # --- ΒΑΡΥΣ ΥΠΟΛΟΓΙΣΜΟΣ & ΕΚΚΑΘΑΡΙΣΗ (Εκτελείται ΜΟΝΟ όταν υπάρχουν αλλαγές) ---
+    valid_assignments = []
+    for a in st.session_state.get('assignments', []):
+        if isinstance(a, dict):
+            parsed_d = safe_date_parse(a.get('date'))
+            if parsed_d:
+                a['date'] = parsed_d
+                valid_assignments.append(a)
+    st.session_state.assignments = valid_assignments
+
+    valid_leaves = []
+    for l in st.session_state.get('leaves', []):
+        if isinstance(l, dict):
+            sd = safe_date_parse(l.get('startDate'))
+            ed = safe_date_parse(l.get('endDate'))
+            if sd: l['startDate'] = sd
+            if ed: l['endDate'] = ed
+            valid_leaves.append(l)
+    st.session_state.leaves = valid_leaves
+
+    cleanup_duplicates()
+    cleanup_projects()
+
+    st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
+    st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
+    
+    assign_date_map = {}
+    for a in st.session_state.get('assignments', []):
+        d = a.get('date')
+        if d:
+            if d not in assign_date_map: assign_date_map[d] = []
+            assign_date_map[d].append(a)
+    st.session_state.assignments_by_date = assign_date_map
+    
+    leaves_by_emp = {}
+    for l in st.session_state.get('leaves', []):
+        eid = l.get('employeeId')
+        if eid:
+            if eid not in leaves_by_emp: leaves_by_emp[eid] = []
+            leaves_by_emp[eid].append(l)
+    st.session_state.leaves_by_emp = leaves_by_emp
+    
+    st.session_state.data_dirty = False
+    
+    # Ενημερώνουμε την έκδοση που μόλις επεξεργαστήκαμε!
+    st.session_state.last_processed_version = st.session_state.get('local_gantt_version', 0)
+
+    if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+        auto_extend_recurring_patterns()
+        st.session_state.last_auto_extend_check = time.time()
+
+def setup_shared_ui(show_menu=False, menu_options=None):
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] {
+        box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
+        border-right: 1px solid #e2e8f0 !important;
+    }
+    .stPlotlyChart { border: 1px solid #cbd5e1; border-radius: 8px; }
+    .leave-conflict-box {
+        padding: 12px; border-radius: 8px; background-color: #fee2e2;
+        border: 1px solid #ef4444; margin-bottom: 8px; color: #b91c1c; font-weight: 500;
+    }
+    .hidden-btn-container {
+        display: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    polling_js = """
+    setInterval(() => {
+        const isEditing = doc.getElementById("is_editing_flag");
+        if (isEditing) return;
+        
+        const buttons = doc.querySelectorAll("button");
+        for (let btn of buttons) {
+            if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
+                btn.click();
+                break;
+            }
+        }
+    }, 15000);
+    """ if not show_menu else ""
+    
+    components.html("""
+    <script>
+    const doc = window.parent.document;
+    
+    let clockDiv = doc.getElementById("staff_pro_clock");
+    if (!clockDiv) {
+        clockDiv = doc.createElement("div");
+        clockDiv.id = "staff_pro_clock";
+        doc.body.appendChild(clockDiv);
+    }
+    clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
+    
+    function updateClock() {
+        const now = new Date();
+        const dateOptions = { day: 'numeric', month: 'long', year: 'numeric' };
+        clockDiv.innerHTML = now.toLocaleDateString('el-GR', dateOptions) + " | " + now.toLocaleTimeString('el-GR', {hour12: false});
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    let loaderDiv = doc.getElementById("staff_pro_cleaner");
+    if (!loaderDiv) {
+        loaderDiv = doc.createElement("div");
+        loaderDiv.id = "staff_pro_cleaner";
+        doc.body.appendChild(loaderDiv);
+    }
+    loaderDiv.style.cssText = "position: fixed; top: 12px; right: 680px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
+    
+    const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
+    let cIdx = 0;
+    setInterval(() => {
+        loaderDiv.innerText = "καθαρίζω... " + cleaningIcons[cIdx];
+        cIdx = (cIdx + 1) % cleaningIcons.length;
+    }, 400);
+
+    setInterval(() => {
+        const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
+        if (isRunning) {
+            loaderDiv.style.display = 'block';
+        } else {
+            loaderDiv.style.display = 'none';
+        }
+    }, 150);
+
+    """ + polling_js + """
+    </script>
+    """, height=0, width=0)
+
+    st.sidebar.title("STAFF.PRO")
+    st.sidebar.write("---")
+    
+    selected_menu = None
+    if show_menu and menu_options:
+        selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options)
+        st.sidebar.write("---")
+    
+    col_u, col_r = st.sidebar.columns(2)
+    with col_u:
+        if st.button("⏪ Undo", disabled=len(st.session_state.get('undo_stack', [])) == 0, use_container_width=True):
+            perform_undo()
+            st.rerun()
+    with col_r:
+        if st.button("⏩ Redo", disabled=len(st.session_state.get('redo_stack', [])) == 0, use_container_width=True):
+            perform_redo()
+            st.rerun()
+            
+    st.sidebar.write("---")
+    st.sidebar.subheader("Κατάσταση Συστήματος")
+    if supabase:
+        st.sidebar.success("☁️ Cloud Sync (Incremental)")
+        
+        st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
+        if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
+            st.rerun()
+        st.sidebar.markdown('</div>', unsafe_allow_html=True)
+        
+        if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+            st.session_state.last_sync_time = None 
+            st.rerun()
+    else:
+        st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
+        
+    if not SUPABASE_INSTALLED:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Κάνε Reboot την εφαρμογή.")
+    elif not HAS_SECRETS:
+        st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY).")
+
+    st.sidebar.write("---")
+    st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
+    if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.current_user = None
+        st.switch_page("streamlit_app.py")
+
+    today_date = date.today()
+    orphan_count = 0
+    orphan_details = []
+    for i in range(8):
+        check_d = today_date + timedelta(days=i)
+        day_assigns = st.session_state.get('assignments_by_date', {}).get(check_d, [])
+        for a in day_assigns:
+            if not a.get('employeeId') and not a.get('is_cancelled', False):
+                orphan_count += 1
+                proj = get_project_info(a['projectId'])
+                proj_name = proj.get('name', "Άγνωστο Έργο") if proj else "Άγνωστο Έργο"
+                orphan_details.append(f"🔴 **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {str(a.get('startTime', ''))[:5]}-{str(a.get('endTime', ''))[:5]} | Έργο: **{proj_name}**")
+    
+    if orphan_count > 0:
+        st.error(f"⚠️ **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
+        with st.expander("🔍 Δείτε αναλυτικά τις ορφανές βάρδιες"):
+            for detail in orphan_details: st.markdown(detail)
+        st.write("---")
+
+    return selected_menu
