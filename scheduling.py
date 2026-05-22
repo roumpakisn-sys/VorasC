@@ -24,12 +24,21 @@ def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exc
         
     if exclude_ids is None: 
         exclude_ids = []
+    exclude_ids = {str(x) for x in exclude_ids}
         
     new_s = str(t_start)[:5]
     new_e = str(t_end)[:5]
     
-    # Φιλτράρισμα: Κρατάμε μόνο τις βάρδιες του συγκεκριμένου υπαλλήλου, αγνοώντας όσες εξαιρούνται (π.χ. όταν κάνουμε edit)
-    emp_assigns = [a for a in day_assignments if a['employeeId'] == employee_id and a['id'] not in exclude_ids]
+    # Φιλτράρισμα:
+    # - μόνο βάρδιες του συγκεκριμένου υπαλλήλου
+    # - αγνοούμε όσες εξαιρούνται (π.χ. όταν κάνουμε edit)
+    # - αγνοούμε ακυρωμένες βάρδιες (is_cancelled=True), γιατί δεν πρέπει να δημιουργούν conflict
+    emp_assigns = [
+        a for a in day_assignments
+        if a.get('employeeId') == employee_id
+        and str(a.get('id')) not in exclude_ids
+        and not bool(a.get('is_cancelled', False))
+    ]
     
     allowed_overlap = False
     for ea in emp_assigns:
