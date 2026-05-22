@@ -1,3 +1,4 @@
+# streamlit_app.py
 import streamlit as st
 
 # ΠΡΕΠΕΙ να είναι η πρώτη εντολή Streamlit
@@ -22,16 +23,16 @@ if "current_user" not in st.session_state:
 if not st.session_state.authenticated:
     st.markdown("<h1 style='text-align: center; margin-top: 10vh;'>🛡️ Staff Manager Pro</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: gray;'>Παρακαλώ επιλέξτε χρήστη και εισάγετε τον κωδικό πρόσβασης.</p>", unsafe_allow_html=True)
-    
+
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
             users_list = ["Admin", "EXOU", "MEMEK", "NAK", "PAP", "TAN"]
             username = st.selectbox("Χρήστης", users_list)
-            
+
             password = st.text_input("Κωδικός Πρόσβασης", type="password")
             submit = st.form_submit_button("Είσοδος", use_container_width=True)
-            
+
             if submit:
                 # 1. Θέτουμε αρχικά τους προεπιλεγμένους κωδικούς (Fallback για τοπική χρήση)
                 valid_passwords = {
@@ -42,7 +43,7 @@ if not st.session_state.authenticated:
                     "PAP": "pass4",
                     "TAN": "pass5"
                 }
-                
+
                 # 2. ΑΛΕΞΙΣΦΑΙΡΗ ΛΟΓΙΚΗ ΓΙΑ ΤΑ SECRETS (Cloud)
                 try:
                     if hasattr(st, "secrets"):
@@ -54,15 +55,16 @@ if not st.session_state.authenticated:
                         if "USER5_PASSWORD" in st.secrets: valid_passwords["TAN"] = st.secrets["USER5_PASSWORD"]
                 except BaseException:
                     pass
-                
+
                 if password == valid_passwords.get(username):
                     st.session_state.authenticated = True
                     st.session_state.current_user = username
 
-                    # Force καθαρό sync/rebuild στο πρώτο load μετά το login
+                    # Force clean sync state στο login, ώστε ο χρήστης να βλέπει πάντα τα πιο πρόσφατα δεδομένα
                     st.session_state.last_sync_time = None
                     st.session_state.global_db_ts = "force_refresh"
                     st.session_state.last_processed_version = -1
+                    st.session_state.data_dirty = True
 
                     st.switch_page("pages/1_Gantt_Dashboard.py")
                 else:
