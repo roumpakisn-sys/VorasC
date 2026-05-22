@@ -67,6 +67,8 @@ if "last_clicked_safe_id" not in st.session_state:
     st.session_state.last_clicked_safe_id = ""
 if "reset_edit_bar_select_next_run" not in st.session_state:
     st.session_state.reset_edit_bar_select_next_run = False
+if "suppress_next_detector_click" not in st.session_state:
+    st.session_state.suppress_next_detector_click = False
 if "detector_version" not in st.session_state:
     st.session_state.detector_version = 0
 
@@ -79,6 +81,7 @@ def clear_bar_selection():
     st.session_state.clicked_key = None
     st.session_state.trigger_scroll = False
     st.session_state.last_clicked_safe_id = ""
+    st.session_state.suppress_next_detector_click = True
     st.session_state.reset_edit_bar_select_next_run = True
     st.session_state.detector_version = st.session_state.get("detector_version", 0) + 1
 
@@ -109,14 +112,7 @@ def go_to_today():
     clear_bar_selection()
 
 
-def on_edit_bar_select_change():
-    selected = st.session_state.get("edit_bar_select_widget", "")
-    if selected:
-        st.session_state.clicked_key = selected
-        st.session_state.trigger_scroll = True
-    else:
-        clear_bar_selection()
-
+# Η επιλογή του selectbox διαχειρίζεται inline πιο κάτω, χωρίς on_change callback.
 
 # --- ΣΥΜΠΙΕΣΗ ΤΟΥ ΠΑΝΩ ΜΕΡΟΥΣ ΣΕ ΜΙΑ ΣΥΜΠΑΓΗ ΓΡΑΜΜΗ (Compact UI) ---
 st.markdown(
@@ -562,7 +558,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id)
 clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
 
-if clicked_safe_id:
+if st.session_state.get("suppress_next_detector_click", False):
+    st.session_state.suppress_next_detector_click = False
+elif clicked_safe_id:
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
 
     if clicked_safe_id != st.session_state.last_clicked_safe_id:
@@ -801,9 +799,17 @@ if not presentation_mode:
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)",
                     options=options_for_select,
                     key="edit_bar_select_widget",
-                    on_change=on_edit_bar_select_change,
                     format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})",
                 )
+
+                if selected_key == "" and st.session_state.clicked_key is not None:
+                    clear_bar_selection()
+                    st.rerun()
+
+                if selected_key != "" and selected_key != st.session_state.clicked_key:
+                    st.session_state.clicked_key = selected_key
+                    st.session_state.trigger_scroll = True
+                    st.rerun()
 
                 if selected_key != "":
                     target_group = wk_groups[selected_key]
