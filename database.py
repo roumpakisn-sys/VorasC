@@ -103,7 +103,7 @@ def sync_data_incremental():
     """
     Ο έξυπνος μηχανισμός Delta Updates.
     Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας 
-    χωρίς polling guard 30'' ώστε να μη χάνονται αλλαγές μεταξύ χρηστών.
+    ένα ελαφρύ Polling Guard για την ελαχιστοποίηση των ερωτημάτων στη βάση.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
     inject_silent_refresh_css()
@@ -150,9 +150,21 @@ def sync_data_incremental():
             utils.mark_data_changed()
             return
 
-    # --- INCREMENTAL SYNC (Delta Updates) ---
+    # --- INCREMENTAL SYNC (Delta Updates) με Polling Guard ---
     try:
-        # 1. Ανακτούμε τις διαγραφές
+        # 1. ULTRA-LIGHT POLLING GUARD
+        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
+        if res_logs.data:
+            latest_activity_ts = res_logs.data[0]['timestamp']
+            
+            latest_ts = to_timestamp(latest_activity_ts)
+            sync_ts = to_timestamp(last_sync)
+            
+            if latest_ts <= sync_ts:
+                st.session_state.last_sync_time = current_db_time
+                return
+
+        # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές
         deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
         deletions = deleted_res.data or []
         
@@ -163,7 +175,7 @@ def sync_data_incremental():
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 2. Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
+        # 3. Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
         tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
         changes_detected = False
 
