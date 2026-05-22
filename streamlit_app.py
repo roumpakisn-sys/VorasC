@@ -58,12 +58,6 @@ if not st.session_state.authenticated:
                 if password == valid_passwords.get(username):
                     st.session_state.authenticated = True
                     st.session_state.current_user = username
-                    # Force background auto-refresh state στο login,
-                    # ώστε ο χρήστης να ξεκινάει πάντα με φρέσκα δεδομένα.
-                    st.session_state.last_sync_time = None
-                    st.session_state.global_db_ts = "force_refresh"
-                    st.session_state.last_processed_version = -1
-                    st.session_state.data_dirty = True
                     st.switch_page("pages/1_Gantt_Dashboard.py")
                 else:
                     st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
