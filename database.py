@@ -1,4 +1,3 @@
-# database.py
 import streamlit as st
 from datetime import datetime, date
 import uuid
@@ -104,8 +103,8 @@ def sync_data_incremental():
     """
     Ο έξυπνος μηχανισμός Delta Updates.
     Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας
-    Polling Guard βασισμένο σε updated_at/deleted_at ώστε να μη χάνει αλλαγές
-    που γράφτηκαν με track=False.
+    polling guard πάνω σε πραγματικά data timestamps (updated_at/deleted_at),
+    ώστε να μη χάνει αλλαγές που έγιναν με track=False.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
     inject_silent_refresh_css()
@@ -122,7 +121,7 @@ def sync_data_incremental():
             st.session_state.employees = utils.fetch_paginated("employees")
             st.session_state.projects = utils.fetch_paginated("projects")
 
-            # ΔΙΟΡΘΩΣΗ: Πλέον χρησιμοποιούμε τον έξυπνο μεταφραστή για να μη «σκάει» με παλιές ημερομηνίες
+            # Ασφαλής μετάφραση ημερομηνιών
             assigns = utils.fetch_paginated("assignments")
             for a in assigns:
                 d = utils.safe_date_parse(a.get('date'))
@@ -160,7 +159,7 @@ def sync_data_incremental():
     try:
         tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
 
-        # 1) Polling Guard με βάση τα πραγματικά data timestamps
+        # 1) Polling Guard με βάση τελευταία updated_at / deleted_at
         sync_ts = to_timestamp(last_sync)
         newest_signal_ts = 0.0
 
@@ -178,7 +177,6 @@ def sync_data_incremental():
                     if ts_val:
                         newest_signal_ts = max(newest_signal_ts, to_timestamp(ts_val))
             except Exception:
-                # Αν αποτύχει ένα probe, συνεχίζουμε με τα υπόλοιπα για ανθεκτικότητα
                 pass
 
         try:
@@ -196,12 +194,11 @@ def sync_data_incremental():
         except Exception:
             pass
 
-        # Αν δεν υπάρχει τίποτα νεότερο από το last_sync, σταματάμε
         if newest_signal_ts <= sync_ts:
             st.session_state.last_sync_time = current_db_time
             return
 
-        # 2) Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές από last_sync
+        # 2) Αν υπάρχουν νέες αλλαγές, φέρνουμε διαγραφές
         deleted_res = (
             supabase.table("deleted_records")
             .select("table_name, record_id")
@@ -217,19 +214,18 @@ def sync_data_incremental():
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 3) Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
+        # 3) Συγχρονίζουμε μόνο ό,τι άλλαξε
         changes_detected = False
 
         for table in tables_to_sync:
             delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
             delta_records = delta_res.data or []
-
             table_deleted_ids = deleted_by_table.get(table, [])
 
             if delta_records or table_deleted_ids:
                 changes_detected = True
 
-                # ΔΙΟΡΘΩΣΗ: Ασφαλής μετάφραση και στο Incremental Update
+                # Ασφαλής μετάφραση ημερομηνιών
                 if table == "assignments":
                     for r in delta_records:
                         d = utils.safe_date_parse(r.get('date'))
