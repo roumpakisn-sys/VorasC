@@ -59,22 +59,10 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.session_state.current_user = username
 
-                    # Force fresh sync/cache on every successful login
+                    # Force καθαρό sync/rebuild στο πρώτο load μετά το login
                     st.session_state.last_sync_time = None
+                    st.session_state.global_db_ts = "force_refresh"
                     st.session_state.last_processed_version = -1
-                    st.session_state.data_dirty = True
-
-                    for _k in [
-                        "cached_fig",
-                        "cached_wk_groups",
-                        "cached_export_data",
-                        "last_gantt_params",
-                        "assignments_by_date",
-                        "leaves_by_emp",
-                        "emp_map",
-                        "proj_map",
-                    ]:
-                        st.session_state.pop(_k, None)
 
                     st.switch_page("pages/1_Gantt_Dashboard.py")
                 else:
