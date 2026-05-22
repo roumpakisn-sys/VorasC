@@ -179,10 +179,13 @@ def inject_silent_refresh_css():
     st.markdown(
         """
         <style>
+        /* 1. Εξαφάνιση του προεπιλεγμένου εικονιδίου 'Running...' */
         [data-testid="stStatusWidget"] { 
             visibility: hidden !important; 
             display: none !important; 
         }
+        
+        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" */
         [data-testid="stAppViewContainer"], 
         [data-testid="stMainBlockContainer"],
         [data-testid="stAppViewBlockContainer"],
@@ -191,6 +194,8 @@ def inject_silent_refresh_css():
             filter: none !important;
             transition: none !important;
         }
+        
+        /* 3. Κρύβουμε την κόκκινη/πολύχρωμη γραμμή φόρτωσης στην κορυφή */
         [data-testid="stDecoration"] { 
             display: none !important; 
         }
@@ -648,6 +653,7 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
+    # --- ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ΠΑΝΤΟΥ (Prevent AttributeError on Refresh) ---
     if "employees" not in st.session_state: st.session_state.employees = []
     if "projects" not in st.session_state: st.session_state.projects = []
     if "assignments" not in st.session_state: st.session_state.assignments = []
@@ -664,15 +670,19 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
+    # --- ΝΕΟ: ΕΞΥΠΝΟΣ ΦΥΛΑΚΑΣ ΕΠΙΤΑΧΥΝΣΗΣ (CACHE GUARD) ---
+    # Αποτρέπει το βαρύ χτίσιμο ευρετηρίων σε κάθε κλικ αν δεν υπάρχουν αλλαγές!
     current_version = st.session_state.get('local_gantt_version', 0)
     last_processed = st.session_state.get('last_processed_version', -1)
     
     if current_version == last_processed and 'emp_map' in st.session_state:
+        # Αν δεν άλλαξε η βάση, εκτελούμε μόνο τον ελαφρύ έλεγχο επεκτάσεων (1 φορά την ώρα)
         if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
             auto_extend_recurring_patterns()
             st.session_state.last_auto_extend_check = time.time()
         return
 
+    # --- ΒΑΡΥΣ ΥΠΟΛΟΓΙΣΜΟΣ & ΕΚΚΑΘΑΡΙΣΗ (Εκτελείται ΜΟΝΟ όταν υπάρχουν αλλαγές) ---
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         if isinstance(a, dict):
@@ -715,6 +725,8 @@ def init_data_and_sync():
     st.session_state.leaves_by_emp = leaves_by_emp
     
     st.session_state.data_dirty = False
+    
+    # Ενημερώνουμε την έκδοση που μόλις επεξεργαστήκαμε!
     st.session_state.last_processed_version = st.session_state.get('local_gantt_version', 0)
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
@@ -725,158 +737,25 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     st.markdown("""
     <style>
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%) !important;
         box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
-        border-right: 1px solid #dbe4f0 !important;
+        border-right: 1px solid #e2e8f0 !important;
     }
-    [data-testid="stSidebar"] > div:first-child {
-        background: transparent !important;
-    }
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 0.75rem !important;
-        padding-bottom: 1rem !important;
-        padding-left: 0.8rem !important;
-        padding-right: 0.8rem !important;
-    }
-
-    /* Κρύβουμε το default Streamlit pages menu */
-    [data-testid="stSidebarNav"] {
-        display: none !important;
-    }
-
     .stPlotlyChart { border: 1px solid #cbd5e1; border-radius: 8px; }
     .leave-conflict-box {
         padding: 12px; border-radius: 8px; background-color: #fee2e2;
         border: 1px solid #ef4444; margin-bottom: 8px; color: #b91c1c; font-weight: 500;
     }
-
-    .sb-brand-card {
-        background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
-        border: 1px solid #d8e1ec;
-        border-radius: 14px;
-        padding: 14px 12px;
-        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
-        margin-bottom: 10px;
-    }
-    .sb-brand-title {
-        font-size: 32px;
-        line-height: 1;
-        font-weight: 900;
-        letter-spacing: 1px;
-        color: #1f2937;
-        margin: 0;
-    }
-    .sb-brand-sub {
-        margin-top: 6px;
-        font-size: 12px;
-        color: #64748b;
-        font-weight: 600;
-        letter-spacing: 0.4px;
-        text-transform: uppercase;
-    }
-
-    .sb-divider {
-        height: 1px;
-        border: 0;
-        background: linear-gradient(90deg, rgba(148,163,184,0) 0%, rgba(148,163,184,0.8) 15%, rgba(148,163,184,0.8) 85%, rgba(148,163,184,0) 100%);
-        margin: 10px 0 12px 0;
-    }
-
-    .sb-section-title {
-        font-size: 14px;
-        font-weight: 800;
-        color: #1e293b;
-        letter-spacing: 0.4px;
-        margin: 0 0 8px 0;
-        text-transform: uppercase;
-    }
-
-    [data-testid="stSidebar"] .stButton > button {
-        width: 100%;
-        min-height: 42px;
-        border-radius: 12px;
-        border: 1px solid #cbd5e1;
-        background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
-        color: #1f2937;
-        font-weight: 700;
-        font-size: 17px;
-        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
-        transition: all 0.15s ease;
-    }
-    [data-testid="stSidebar"] .stButton > button:hover {
-        border-color: #94a3b8;
-        background: linear-gradient(180deg, #ffffff 0%, #eaf1ff 100%);
-        transform: translateY(-1px);
-    }
-    [data-testid="stSidebar"] .stButton > button:active {
-        transform: translateY(0);
-    }
-    [data-testid="stSidebar"] .stButton > button:disabled {
-        color: #94a3b8;
-        background: #f1f5f9;
-        border-color: #dbe4ee;
-        box-shadow: none;
-        transform: none;
-        cursor: not-allowed;
-    }
-
-    [data-testid="stSidebar"] .stRadio > div {
-        background: #ffffff;
-        border: 1px solid #d7e0ea;
-        border-radius: 12px;
-        padding: 6px 6px 2px 6px;
-        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-    }
-    [data-testid="stSidebar"] .stRadio label {
-        border-radius: 10px;
-        padding: 8px 10px;
-        margin-bottom: 4px;
-        transition: all 0.15s ease;
-    }
-    [data-testid="stSidebar"] .stRadio label:hover {
-        background: #eef2ff;
-    }
-
-    .sb-status {
-        border-radius: 12px;
-        border: 1px solid #d7e0ea;
-        padding: 10px 12px;
-        font-weight: 700;
-        font-size: 15px;
-        margin-bottom: 8px;
-    }
-    .sb-status.ok {
-        background: linear-gradient(180deg, #ecfdf3 0%, #d1fae5 100%);
-        border-color: #86efac;
-        color: #166534;
-    }
-    .sb-status.off {
-        background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
-        border-color: #fda4af;
-        color: #9f1239;
-    }
-
-    .sb-user {
-        background: #ffffff;
-        border: 1px solid #d7e0ea;
-        border-radius: 12px;
-        padding: 10px 12px;
-        color: #334155;
-        font-size: 14px;
-        margin-bottom: 8px;
-    }
-
     .hidden-btn-container {
         display: none !important;
     }
     </style>
     """, unsafe_allow_html=True)
-
+    
     polling_js = """
     setInterval(() => {
         const isEditing = doc.getElementById("is_editing_flag");
         if (isEditing) return;
-
+        
         const buttons = doc.querySelectorAll("button");
         for (let btn of buttons) {
             if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
@@ -886,11 +765,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         }
     }, 15000);
     """ if not show_menu else ""
-
+    
     components.html("""
     <script>
     const doc = window.parent.document;
-
+    
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
@@ -898,7 +777,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         doc.body.appendChild(clockDiv);
     }
     clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
-
+    
     function updateClock() {
         const now = new Date();
         const dateOptions = { day: 'numeric', month: 'long', year: 'numeric' };
@@ -914,7 +793,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         doc.body.appendChild(loaderDiv);
     }
     loaderDiv.style.cssText = "position: fixed; top: 12px; right: 680px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
-
+    
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
     let cIdx = 0;
     setInterval(() => {
@@ -935,75 +814,48 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </script>
     """, height=0, width=0)
 
-    st.sidebar.markdown(
-        """
-        <div class="sb-brand-card">
-            <p class="sb-brand-title">STAFF.PRO</p>
-            <div class="sb-brand-sub">Staff Manager Dashboard</div>
-        </div>
-        <div class="sb-divider"></div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # HTML-style navigation buttons (αντικατάσταση default links)
-    st.sidebar.markdown('<div class="sb-section-title">Πλοήγηση</div>', unsafe_allow_html=True)
-    if st.sidebar.button("📊 Gantt Dashboard", key="sb_nav_gantt", use_container_width=True):
-        st.switch_page("pages/1_Gantt_Dashboard.py")
-    if st.sidebar.button("⚙️ Management", key="sb_nav_management", use_container_width=True):
-        st.switch_page("pages/2_Management.py")
-    if st.sidebar.button("📱 Viber Export", key="sb_nav_viber", use_container_width=True):
-        st.switch_page("pages/3_Viber_Export.py")
-
-    st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
-
+    st.sidebar.title("STAFF.PRO")
+    st.sidebar.write("---")
+    
     selected_menu = None
     if show_menu and menu_options:
-        st.sidebar.markdown('<div class="sb-section-title">Μενού</div>', unsafe_allow_html=True)
         selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options)
-        st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
-
-    st.sidebar.markdown('<div class="sb-section-title">Ενέργειες</div>', unsafe_allow_html=True)
+        st.sidebar.write("---")
+    
     col_u, col_r = st.sidebar.columns(2)
     with col_u:
-        if st.button("⏪ Undo", key="sb_undo_btn", disabled=len(st.session_state.get('undo_stack', [])) == 0, use_container_width=True):
+        if st.button("⏪ Undo", disabled=len(st.session_state.get('undo_stack', [])) == 0, use_container_width=True):
             perform_undo()
             st.rerun()
     with col_r:
-        if st.button("⏩ Redo", key="sb_redo_btn", disabled=len(st.session_state.get('redo_stack', [])) == 0, use_container_width=True):
+        if st.button("⏩ Redo", disabled=len(st.session_state.get('redo_stack', [])) == 0, use_container_width=True):
             perform_redo()
             st.rerun()
-
-    st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
-    st.sidebar.markdown('<div class="sb-section-title">Κατάσταση Συστήματος</div>', unsafe_allow_html=True)
-
+            
+    st.sidebar.write("---")
+    st.sidebar.subheader("Κατάσταση Συστήματος")
     if supabase:
-        st.sidebar.markdown('<div class="sb-status ok">☁️ Cloud Sync (Incremental)</div>', unsafe_allow_html=True)
-
+        st.sidebar.success("☁️ Cloud Sync (Incremental)")
+        
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
             st.rerun()
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
-
-        if st.sidebar.button("🔄 Άμεση Ανανέωση", key="sb_refresh_btn", use_container_width=True):
-            st.session_state.last_sync_time = None
+        
+        if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
+            st.session_state.last_sync_time = None 
             st.rerun()
     else:
-        st.sidebar.markdown('<div class="sb-status off">🔌 Εκτός Σύνδεσης (Τοπικά)</div>', unsafe_allow_html=True)
-
+        st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
+        
     if not SUPABASE_INSTALLED:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Κάνε Reboot την εφαρμογή.")
     elif not HAS_SECRETS:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Δεν βρέθηκαν τα Secrets (SUPABASE_URL ή SUPABASE_KEY).")
 
-    st.sidebar.markdown('<div class="sb-divider"></div>', unsafe_allow_html=True)
-    st.sidebar.markdown('<div class="sb-section-title">Χρήστης</div>', unsafe_allow_html=True)
-    st.sidebar.markdown(
-        f'<div class="sb-user">👤 Συνδεδεμένος ως: <strong>{st.session_state.get("current_user", "Άγνωστος")}</strong></div>',
-        unsafe_allow_html=True,
-    )
-
-    if st.sidebar.button("🚪 Αποσύνδεση", key="sb_logout_btn", use_container_width=True):
+    st.sidebar.write("---")
+    st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
+    if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
         st.session_state.authenticated = False
         st.session_state.current_user = None
         st.switch_page("streamlit_app.py")
@@ -1020,12 +872,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 proj = get_project_info(a['projectId'])
                 proj_name = proj.get('name', "Άγνωστο Έργο") if proj else "Άγνωστο Έργο"
                 orphan_details.append(f"🔴 **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {str(a.get('startTime', ''))[:5]}-{str(a.get('endTime', ''))[:5]} | Έργο: **{proj_name}**")
-
+    
     if orphan_count > 0:
         st.error(f"⚠️ **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
         with st.expander("🔍 Δείτε αναλυτικά τις ορφανές βάρδιες"):
-            for detail in orphan_details:
-                st.markdown(detail)
+            for detail in orphan_details: st.markdown(detail)
         st.write("---")
 
     return selected_menu
