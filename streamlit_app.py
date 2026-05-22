@@ -1,4 +1,3 @@
-# streamlit_app.py
 import streamlit as st
 
 # ΠΡΕΠΕΙ να είναι η πρώτη εντολή Streamlit
@@ -60,7 +59,7 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.session_state.current_user = username
 
-                    # Force clean sync state στο login, ώστε ο χρήστης να βλέπει πάντα τα πιο πρόσφατα δεδομένα
+                    # Force auto-refresh sync στο login (χωρίς αλλαγή UI)
                     st.session_state.last_sync_time = None
                     st.session_state.global_db_ts = "force_refresh"
                     st.session_state.last_processed_version = -1
