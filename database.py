@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import uuid
 import scheduling
 import config
@@ -10,7 +10,7 @@ supabase = utils.supabase
 
 def inject_silent_refresh_css():
     """
-    Εισάγει CSS κανόνες που απενεργοποιούν εντελώς τα προεπιλεγμένα
+    Εισάγει CSS κανόνες που απενεργοποιούν εντελώς τα προεπιλεγμένα 
     οπτικά εφέ φόρτωσης του Streamlit (το γκριζάρισμα και το Running...).
     Έτσι, το Auto-Polling λειτουργεί 100% αόρατα στο παρασκήνιο!
     """
@@ -41,19 +41,33 @@ def inject_silent_refresh_css():
 
 def to_timestamp(iso_str):
     """
-    Βοηθητική συνάρτηση που μετατρέπει ασφαλώς τα ISO strings της βάσης
+    Βοηθητική συνάρτηση που μετατρέπει ασφαλώς τα ISO strings της βάσης 
     σε αριθμούς (timestamps) για να κάνουμε ακριβή σύγκριση.
     """
-    if not iso_str:
+    if not iso_str: 
         return 0.0
     try:
         return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
     except Exception:
         return 0.0
 
+def iso_with_safety_lag(iso_str, seconds=90):
+    """
+    Επιστρέφει ISO χρόνο ελαφρώς προς τα πίσω (safety lag),
+    ώστε να μην χαθούν αλλαγές σε οριακές στιγμές login/polling.
+    """
+    if not iso_str:
+        return datetime.utcnow().isoformat()
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        dt = dt - timedelta(seconds=seconds)
+        return dt.replace(tzinfo=None).isoformat()
+    except Exception:
+        return datetime.utcnow().isoformat()
+
 def get_db_current_time():
     """
-    Ανακτά την ακριβή τρέχουσα ώρα του εξυπηρετητή (Supabase server time)
+    Ανακτά την ακριβή τρέχουσα ώρα του εξυπηρετητή (Supabase server time) 
     χρησιμοποιώντας τη συνάρτηση RPC 'get_server_time' που δημιουργήσαμε στην PostgreSQL.
     """
     if not supabase:
@@ -74,12 +88,12 @@ def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
     # 1. Αφαίρεση των εγγραφών που έχουν διαγραφεί από άλλον χρήστη
     if deleted_ids:
         local_list = [r for r in local_list if str(r.get('id')) not in deleted_ids]
-
+    
     # 2. Αντικατάσταση των παλιών εγγραφών με τις νέες/ενημερωμένες
     updated_ids = {str(r['id']) for r in delta_records}
     local_list = [r for r in local_list if str(r.get('id')) not in updated_ids]
     local_list.extend(delta_records)
-
+    
     return local_list
 
 def track_deletion(table_name, record_id):
@@ -102,9 +116,8 @@ def track_deletion(table_name, record_id):
 def sync_data_incremental():
     """
     Ο έξυπνος μηχανισμός Delta Updates.
-    Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας
-    polling guard πάνω σε πραγματικά data timestamps (updated_at/deleted_at),
-    ώστε να μη χάνει αλλαγές που έγιναν με track=False.
+    Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time.
+    Περιλαμβάνει safety lag ώστε ο νέος χρήστης στο login να μη μένει με παλιό snapshot.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
     inject_silent_refresh_css()
@@ -114,6 +127,7 @@ def sync_data_incremental():
 
     last_sync = st.session_state.get("last_sync_time", None)
     current_db_time = get_db_current_time()
+    tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
 
     # --- FULL FETCH (Εκτελείται ΜΟΝΟ κατά την πρώτη είσοδο στην εφαρμογή) ---
     if not last_sync:
@@ -121,7 +135,6 @@ def sync_data_incremental():
             st.session_state.employees = utils.fetch_paginated("employees")
             st.session_state.projects = utils.fetch_paginated("projects")
 
-            # Ασφαλής μετάφραση ημερομηνιών
             assigns = utils.fetch_paginated("assignments")
             for a in assigns:
                 d = utils.safe_date_parse(a.get('date'))
@@ -151,15 +164,14 @@ def sync_data_incremental():
             except Exception:
                 st.session_state.evaluations = []
 
-            st.session_state.last_sync_time = current_db_time
+            # Safety lag για να μην χαθεί αλλαγή που έγινε πολύ κοντά στο login
+            st.session_state.last_sync_time = iso_with_safety_lag(current_db_time, seconds=120)
             utils.mark_data_changed()
             return
 
     # --- INCREMENTAL SYNC (Delta Updates) με αξιόπιστο Polling Guard ---
     try:
-        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
-
-        # 1) Polling Guard με βάση τελευταία updated_at / deleted_at
+        # 1) Polling Guard με βάση τα πραγματικά data timestamps
         sync_ts = to_timestamp(last_sync)
         newest_signal_ts = 0.0
 
@@ -194,11 +206,12 @@ def sync_data_incremental():
         except Exception:
             pass
 
+        # Αν δεν υπάρχει τίποτα νεότερο από το last_sync, σταματάμε
         if newest_signal_ts <= sync_ts:
-            st.session_state.last_sync_time = current_db_time
+            st.session_state.last_sync_time = iso_with_safety_lag(current_db_time, seconds=30)
             return
 
-        # 2) Αν υπάρχουν νέες αλλαγές, φέρνουμε διαγραφές
+        # 2) Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές
         deleted_res = (
             supabase.table("deleted_records")
             .select("table_name, record_id")
@@ -214,7 +227,7 @@ def sync_data_incremental():
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 3) Συγχρονίζουμε μόνο ό,τι άλλαξε
+        # 3) Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
         changes_detected = False
 
         for table in tables_to_sync:
@@ -255,7 +268,7 @@ def sync_data_incremental():
         if changes_detected:
             utils.mark_data_changed()
 
-        st.session_state.last_sync_time = current_db_time
+        st.session_state.last_sync_time = iso_with_safety_lag(current_db_time, seconds=30)
 
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
