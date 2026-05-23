@@ -102,8 +102,11 @@ def track_deletion(table_name, record_id):
 def sync_data_incremental():
     """
     Ο έξυπνος μηχανισμός Delta Updates.
-    Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας 
-    ένα ελαφρύ Polling Guard για την ελαχιστοποίηση των ερωτημάτων στη βάση.
+    Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time.
+
+    NOTE:
+    Για σταθερότητα μεταξύ χρηστών αφαιρέθηκε το activity_logs polling guard,
+    ώστε κάθε rerun να ζητά πραγματικά deltas από τους πίνακες.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
     inject_silent_refresh_css()
@@ -150,20 +153,9 @@ def sync_data_incremental():
             utils.mark_data_changed()
             return
 
-    # --- INCREMENTAL SYNC (Delta Updates) με Polling Guard ---
+    # --- INCREMENTAL SYNC (Delta Updates) ---
     try:
-        # 1. ULTRA-LIGHT POLLING GUARD
-        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
-        if res_logs.data:
-            latest_activity_ts = res_logs.data[0]['timestamp']
-            
-            latest_ts = to_timestamp(latest_activity_ts)
-            sync_ts = to_timestamp(last_sync)
-            
-            if (latest_ts + 30.0) <= sync_ts:
-                return
-
-        # 2. Αν ανιχνευτεί νέα δραστηριότητα, ανακτούμε τις διαγραφές
+        # 1. Ανάκτηση διαγραφών μετά το τελευταίο sync
         deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
         deletions = deleted_res.data or []
         
@@ -174,7 +166,7 @@ def sync_data_incremental():
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 3. Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
+        # 2. Συγχρονίζουμε incremental για όλους τους πίνακες δεδομένων
         tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
         changes_detected = False
 
@@ -187,7 +179,7 @@ def sync_data_incremental():
             if delta_records or table_deleted_ids:
                 changes_detected = True
                 
-                # ΔΙΟΡΘΩΣΗ: Ασφαλής μετάφραση και στο Incremental Update
+                # Ασφαλής μεταφορά τύπων ημερομηνίας
                 if table == "assignments":
                     for r in delta_records:
                         d = utils.safe_date_parse(r.get('date'))
