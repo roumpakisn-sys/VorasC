@@ -9,6 +9,7 @@ import threading
 import re
 import ast
 import time
+from functools import lru_cache
 import config
 import scheduling
 
@@ -78,6 +79,16 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
+@lru_cache(maxsize=8192)
+def _safe_date_parse_str(s):
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def safe_date_parse(d_val):
     if isinstance(d_val, date) and not isinstance(d_val, datetime):
         return d_val
@@ -85,58 +96,94 @@ def safe_date_parse(d_val):
         return d_val.date()
     if isinstance(d_val, str):
         s = d_val.split("T")[0][:10]
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-            try:
-                return datetime.strptime(s, fmt).date()
-            except ValueError:
-                continue
+        if not s:
+            return None
+        return _safe_date_parse_str(s)
     return None
 
 def format_log_details(table_name, records):
-    if not records: return "Καμία εγγραφή"
-    if isinstance(records, dict): records = [records]
-    if isinstance(records, str): return records
+    if not records:
+        return "Καμία εγγραφή"
+    if isinstance(records, dict):
+        records = [records]
+    if isinstance(records, str):
+        return records
+
+    employees = st.session_state.get('employees', [])
+    projects = st.session_state.get('projects', [])
+    emp_map = st.session_state.get('emp_map') or {
+        e.get('id'): e for e in employees if isinstance(e, dict) and e.get('id')
+    }
+    proj_map = st.session_state.get('proj_map') or {
+        p.get('id'): p for p in projects if isinstance(p, dict) and p.get('id')
+    }
+
     lines = []
     for r in records:
-        if not isinstance(r, dict): continue
+        if not isinstance(r, dict):
+            continue
+
         if table_name == 'employees':
             lines.append(f"{r.get('name', 'Άγνωστος')}")
+
         elif table_name == 'projects':
             lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
+
         elif table_name == 'assignments':
             emp_id = r.get('employeeId')
             emp_name = "Χαμηλό / Χωρίς Προσωπικό"
-            if emp_id and 'employees' in st.session_state:
-                e_info = next((e for e in st.session_state.get('employees', []) if e.get('id') == emp_id), None)
-                if e_info: emp_name = e_info.get('name', emp_name)
+            if emp_id:
+                e_info = emp_map.get(emp_id)
+                if e_info:
+                    emp_name = e_info.get('name', emp_name)
+
             proj_id = r.get('projectId')
             proj_name = "Άγνωστο Έργο"
-            if proj_id and 'projects' in st.session_state:
-                p_info = next((p for p in st.session_state.get('projects', []) if p.get('id') == proj_id), None)
-                if p_info: proj_name = p_info.get('name', proj_name)
+            if proj_id:
+                p_info = proj_map.get(proj_id)
+                if p_info:
+                    proj_name = p_info.get('name', proj_name)
+
             d = r.get('date', "")
-            if isinstance(d, date): d = d.strftime('%d/%m/%Y')
-            elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
+            if isinstance(d, date):
+                d = d.strftime('%d/%m/%Y')
+            elif isinstance(d, str) and "T" in d:
+                d = d.split("T")[0]
             lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
+
         elif table_name == 'leaves':
             emp_id = r.get('employeeId')
-            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
+            e_info = emp_map.get(emp_id) if emp_id else None
+            emp_name = e_info.get('name', 'Άγνωστος') if e_info else 'Άγνωστος'
+
             sd = r.get('startDate', "")
             ed = r.get('endDate', "")
-            if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
-            if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
+            if isinstance(sd, date):
+                sd = sd.strftime('%d/%m/%Y')
+            if isinstance(ed, date):
+                ed = ed.strftime('%d/%m/%Y')
+
             sub_id = r.get('substituteId')
-            sub_str = f" [Αντικατ: {next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == sub_id), 'Άγνωστος')}]" if sub_id else ""
+            sub_info = emp_map.get(sub_id) if sub_id else None
+            sub_name = sub_info.get('name', 'Άγνωστος') if sub_info else 'Άγνωστος'
+            sub_str = f" [Αντικατ: {sub_name}]" if sub_id else ""
+
             lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
+
         elif table_name == 'evaluations':
             emp_id = r.get('employeeId')
-            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
+            e_info = emp_map.get(emp_id) if emp_id else None
+            emp_name = e_info.get('name', 'Άγνωστος') if e_info else 'Άγνωστος'
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
+
         elif table_name == 'recurring_patterns':
             lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
+
         else:
             lines.append("Εγγραφή")
-    if not lines: return "Λεπτομέρειες μη διαθέσιμες"
+
+    if not lines:
+        return "Λεπτομέρειες μη διαθέσιμες"
     if len(lines) > 5:
         return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
     return " | ".join(lines)
