@@ -11,6 +11,31 @@ supabase = utils.supabase
 # Πίνακας 1-row για γρήγορο sync probe (ενημερώνεται από DB triggers)
 SYNC_WATERMARK_TABLE = "sync_watermark"
 
+# Βασικοί πίνακες business data
+BUSINESS_TABLES = [
+    "employees",
+    "projects",
+    "assignments",
+    "leaves",
+    "recurring_patterns",
+    "evaluations",
+]
+
+# Probe tables (business + deletion/activity signals)
+PROBE_TABLES = BUSINESS_TABLES + ["deleted_records", "activity_logs"]
+
+# Per-table watermark columns μέσα στο sync_watermark
+PROBE_WATERMARK_COLUMNS = {
+    "employees": "employees_at",
+    "projects": "projects_at",
+    "assignments": "assignments_at",
+    "leaves": "leaves_at",
+    "recurring_patterns": "recurring_patterns_at",
+    "evaluations": "evaluations_at",
+    "deleted_records": "deleted_records_at",
+    "activity_logs": "activity_logs_at",
+}
+
 
 def inject_silent_refresh_css():
     """
@@ -88,14 +113,35 @@ def get_db_current_time():
     return datetime.utcnow().isoformat()
 
 
-def get_sync_watermark_time():
+def get_sync_watermark_payload():
     """
     1-query polling probe:
-    Διαβάζει το τελευταίο timestamp αλλαγής από τον πίνακα sync_watermark.
-    Επιστρέφει ISO string ή None αν δεν υπάρχει/δεν είναι διαθέσιμο.
+    Διαβάζει από sync_watermark:
+      - last_change_at
+      - per-table *_at watermarks (αν υπάρχουν)
+    Επιστρέφει dict ή None.
     """
     if not supabase:
         return None
+
+    # Προσπαθούμε πρώτα με extended schema (per-table columns).
+    extended_cols = ["last_change_at"] + [PROBE_WATERMARK_COLUMNS[t] for t in PROBE_TABLES]
+    extended_select = ",".join(extended_cols)
+
+    try:
+        res = (
+            supabase.table(SYNC_WATERMARK_TABLE)
+            .select(extended_select)
+            .eq("id", 1)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]
+    except Exception:
+        pass
+
+    # Fallback για παλιό schema (μόνο last_change_at)
     try:
         res = (
             supabase.table(SYNC_WATERMARK_TABLE)
@@ -105,9 +151,10 @@ def get_sync_watermark_time():
             .execute()
         )
         if res.data:
-            return res.data[0].get("last_change_at")
+            return res.data[0]
     except Exception as e:
         print(f"Error reading sync watermark: {e}")
+
     return None
 
 
@@ -278,14 +325,22 @@ def _full_fetch_all_tables(current_db_time):
     utils.mark_data_changed()
 
 
+def _changed_after_sync(watermark_payload, table_name, sync_ts):
+    col = PROBE_WATERMARK_COLUMNS.get(table_name)
+    if not col:
+        return False
+    return to_timestamp(watermark_payload.get(col)) > sync_ts
+
+
 def sync_data_incremental():
     """
     Delta sync με lightweight polling probe.
 
-    Νέα λογική:
-    - 1 query probe σε sync_watermark για να ξέρουμε αν υπάρχει νέα αλλαγή.
-    - Αν δεν έχει γίνει setup του sync_watermark, γίνεται αυτόματο fallback στο legacy probe.
-    - Τα delta fetches παραμένουν ίδια για 100% συμβατή λειτουργία.
+    Λογική:
+    - 1 query probe σε sync_watermark.
+    - Αν υπάρχουν per-table *_at watermarks, χτυπάμε delta queries μόνο για πίνακες
+      που όντως άλλαξαν.
+    - Αν όχι, κρατάμε fallback συμπεριφορά για 100% συμβατότητα.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
     inject_silent_refresh_css()
@@ -294,7 +349,7 @@ def sync_data_incremental():
         return
 
     last_sync = st.session_state.get("last_sync_time", None)
-    tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
+    tables_to_sync = BUSINESS_TABLES
     force_full_sync_once = bool(st.session_state.get("force_full_sync_once", False))
 
     # --- FULL FETCH (Πρώτη είσοδος ή force refresh μετά από login/redirect) ---
@@ -307,50 +362,89 @@ def sync_data_incremental():
     try:
         sync_ts = to_timestamp(last_sync)
 
-        # 1-query probe από sync_watermark
-        watermark_iso = get_sync_watermark_time()
+        watermark = get_sync_watermark_payload()
         used_legacy_probe = False
 
-        if watermark_iso:
-            newest_signal_ts = to_timestamp(watermark_iso)
-            activity_signal_ts = 0.0
+        query_delta_for_tables = set(tables_to_sync)
+        fetch_deleted_records = True
+        activity_signal_ts = 0.0
+
+        if watermark and watermark.get("last_change_at"):
+            newest_signal_ts = to_timestamp(watermark.get("last_change_at"))
+
+            # Γρήγορο early exit
+            if newest_signal_ts <= sync_ts:
+                return
+
+            # Ελέγχουμε αν υπάρχουν usable per-table watermarks.
+            has_usable_per_table_watermarks = any(
+                watermark.get(PROBE_WATERMARK_COLUMNS[t]) for t in PROBE_TABLES
+            )
+
+            if has_usable_per_table_watermarks:
+                changed_business_tables = {
+                    t for t in tables_to_sync if _changed_after_sync(watermark, t, sync_ts)
+                }
+                deleted_table_changed = _changed_after_sync(watermark, "deleted_records", sync_ts)
+
+                # Αν άλλαξε μόνο activity_logs (ή noise εκτός business/deleted), δεν χρειάζεται delta sync.
+                if not changed_business_tables and not deleted_table_changed:
+                    st.session_state.last_sync_time = iso_with_safety_lag(
+                        watermark.get("last_change_at"),
+                        seconds=30
+                    )
+                    st.session_state.force_full_sync_once = False
+                    return
+
+                query_delta_for_tables = changed_business_tables
+                fetch_deleted_records = deleted_table_changed
+
         else:
-            # Fallback για παλιές εγκαταστάσεις που δεν έχουν ακόμα το SQL migration.
+            # Fallback για παλιές εγκαταστάσεις χωρίς watermark setup
             used_legacy_probe = True
             newest_signal_ts, activity_signal_ts = _legacy_probe_signals(tables_to_sync)
 
-        # Αν δεν υπάρχει τίποτα νεότερο από το last_sync, σταματάμε.
-        if newest_signal_ts <= sync_ts:
-            return
+            if newest_signal_ts <= sync_ts:
+                return
 
-        # 2) Ανακτούμε διαγραφές μετά το last_sync
-        deleted_res = (
-            supabase.table("deleted_records")
-            .select("table_name, record_id")
-            .gte("deleted_at", last_sync)
-            .execute()
-        )
-        deletions = deleted_res.data or []
-
+        # 2) Ανακτούμε διαγραφές μόνο αν χρειάζεται
         deleted_by_table = {}
-        for d in deletions:
-            t = d["table_name"]
-            if t not in deleted_by_table:
-                deleted_by_table[t] = set()
-            deleted_by_table[t].add(str(d["record_id"]))
+        if fetch_deleted_records:
+            deleted_res = (
+                supabase.table("deleted_records")
+                .select("table_name, record_id")
+                .gte("deleted_at", last_sync)
+                .execute()
+            )
+            deletions = deleted_res.data or []
+
+            for d in deletions:
+                t = d["table_name"]
+                if t not in deleted_by_table:
+                    deleted_by_table[t] = set()
+                deleted_by_table[t].add(str(d["record_id"]))
+
+        # Πίνακες που πρέπει όντως να επεξεργαστούμε
+        tables_to_process = [
+            t for t in tables_to_sync
+            if (t in query_delta_for_tables) or (t in deleted_by_table)
+        ]
 
         # 3) Incremental sync ανά πίνακα
         changes_detected = False
 
-        for table in tables_to_sync:
-            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
-            delta_records = delta_res.data or []
+        for table in tables_to_process:
+            delta_records = []
+
+            if table in query_delta_for_tables:
+                delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
+                delta_records = delta_res.data or []
+
             table_deleted_ids = deleted_by_table.get(table, set())
 
             if delta_records or table_deleted_ids:
                 changes_detected = True
 
-                # Ασφαλής μετάφραση ημερομηνιών
                 if delta_records:
                     _normalize_dates_for_table(table, delta_records)
 
@@ -361,22 +455,21 @@ def sync_data_incremental():
                     table_deleted_ids
                 )
 
-        # Fallback ασφάλειας:
-        # - Σε legacy probe κρατάμε την παλιά λογική για activity_logs.
-        # - Σε watermark probe ΔΕΝ κάνουμε full fetch όταν δεν υπάρχει πραγματικό delta,
-        #   γιατί αυτό συνήθως σημαίνει "noise" από logs και όχι αλλαγή στα business δεδομένα.
-        if not changes_detected:
-            if used_legacy_probe and activity_signal_ts > sync_ts:
-                current_db_time = get_db_current_time()
-                _full_fetch_all_tables(current_db_time)
-                return
+        # Fallback ασφάλειας μόνο για legacy probe.
+        if not changes_detected and used_legacy_probe and activity_signal_ts > sync_ts:
+            current_db_time = get_db_current_time()
+            _full_fetch_all_tables(current_db_time)
+            return
 
         if changes_detected:
             utils.mark_data_changed()
 
-        # Ενημέρωση last_sync χωρίς extra query όταν έχουμε watermark timestamp.
-        if watermark_iso and not used_legacy_probe:
-            st.session_state.last_sync_time = iso_with_safety_lag(watermark_iso, seconds=30)
+        # Ενημέρωση last_sync
+        if watermark and watermark.get("last_change_at") and not used_legacy_probe:
+            st.session_state.last_sync_time = iso_with_safety_lag(
+                watermark.get("last_change_at"),
+                seconds=30
+            )
         else:
             current_db_time = get_db_current_time()
             st.session_state.last_sync_time = iso_with_safety_lag(current_db_time, seconds=30)
