@@ -113,7 +113,7 @@ def get_sync_watermark_time():
 
 def _legacy_probe_signals(tables_to_sync):
     """
-    Legacy fallback probe (πολλαπλά queries), αν δεν υπάρχει ακόμη sync_watermark.
+    Legacy fallback probe (πολλαπλά queries), αν δεν υπάρχει ακόμα sync_watermark.
     Επιστρέφει:
       - newest_signal_ts
       - activity_signal_ts
@@ -175,17 +175,27 @@ def apply_delta_updates(table_name, local_list, delta_records, deleted_ids):
     """
     Pure Logic: Εφαρμόζει τις μερικές αλλαγές (εισαγωγές, ενημερώσεις, διαγραφές)
     στην τοπική λίστα που βρίσκεται αποθηκευμένη στο Session State του χρήστη.
+
+    Βελτιστοποίηση:
+    - Ένα μόνο πέρασμα στη local_list (αντί για 2), με ίδια ακριβώς λογική αποτελέσματος.
     """
-    # 1. Αφαίρεση των εγγραφών που έχουν διαγραφεί από άλλον χρήστη
-    if deleted_ids:
-        local_list = [r for r in local_list if str(r.get("id")) not in deleted_ids]
+    deleted_set = set(deleted_ids or [])
+    updated_set = {str(r["id"]) for r in delta_records}
 
-    # 2. Αντικατάσταση των παλιών εγγραφών με τις νέες/ενημερωμένες
-    updated_ids = {str(r["id"]) for r in delta_records}
-    local_list = [r for r in local_list if str(r.get("id")) not in updated_ids]
-    local_list.extend(delta_records)
+    if not deleted_set and not updated_set:
+        return local_list
 
-    return local_list
+    merged = []
+    for r in local_list:
+        rid = str(r.get("id"))
+        if rid in deleted_set or rid in updated_set:
+            continue
+        merged.append(r)
+
+    # Κρατάμε ακριβώς τη συμπεριφορά του αρχικού κώδικα:
+    # τα νέα/ενημερωμένα records μπαίνουν στο τέλος.
+    merged.extend(delta_records)
+    return merged
 
 
 def track_deletion(table_name, record_id):
@@ -206,6 +216,35 @@ def track_deletion(table_name, record_id):
         print(f"Error logging deletion: {e}")
 
 
+def _normalize_dates_for_table(table_name, records):
+    """
+    In-place μετατροπή string ημερομηνιών σε date όπου χρειάζεται.
+    """
+    if not records:
+        return
+
+    if table_name == "assignments":
+        for r in records:
+            d = utils.safe_date_parse(r.get("date"))
+            if d:
+                r["date"] = d
+
+    elif table_name == "leaves":
+        for r in records:
+            sd = utils.safe_date_parse(r.get("startDate"))
+            if sd:
+                r["startDate"] = sd
+            ed = utils.safe_date_parse(r.get("endDate"))
+            if ed:
+                r["endDate"] = ed
+
+    elif table_name == "recurring_patterns":
+        for r in records:
+            sd = utils.safe_date_parse(r.get("startDate"))
+            if sd:
+                r["startDate"] = sd
+
+
 def _full_fetch_all_tables(current_db_time):
     """
     Κάνει πλήρες fetch όλων των βασικών πινάκων.
@@ -217,27 +256,15 @@ def _full_fetch_all_tables(current_db_time):
         st.session_state.projects = utils.fetch_paginated("projects")
 
         assigns = utils.fetch_paginated("assignments")
-        for a in assigns:
-            d = utils.safe_date_parse(a.get("date"))
-            if d:
-                a["date"] = d
+        _normalize_dates_for_table("assignments", assigns)
         st.session_state.assignments = assigns
 
         leaves = utils.fetch_paginated("leaves")
-        for l in leaves:
-            sd = utils.safe_date_parse(l.get("startDate"))
-            if sd:
-                l["startDate"] = sd
-            ed = utils.safe_date_parse(l.get("endDate"))
-            if ed:
-                l["endDate"] = ed
+        _normalize_dates_for_table("leaves", leaves)
         st.session_state.leaves = leaves
 
         patterns = utils.fetch_paginated("recurring_patterns")
-        for p in patterns:
-            sd = utils.safe_date_parse(p.get("startDate"))
-            if sd:
-                p["startDate"] = sd
+        _normalize_dates_for_table("recurring_patterns", patterns)
         st.session_state.recurring_patterns = patterns
 
         try:
@@ -309,8 +336,8 @@ def sync_data_incremental():
         for d in deletions:
             t = d["table_name"]
             if t not in deleted_by_table:
-                deleted_by_table[t] = []
-            deleted_by_table[t].append(str(d["record_id"]))
+                deleted_by_table[t] = set()
+            deleted_by_table[t].add(str(d["record_id"]))
 
         # 3) Incremental sync ανά πίνακα
         changes_detected = False
@@ -318,30 +345,14 @@ def sync_data_incremental():
         for table in tables_to_sync:
             delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
             delta_records = delta_res.data or []
-            table_deleted_ids = deleted_by_table.get(table, [])
+            table_deleted_ids = deleted_by_table.get(table, set())
 
             if delta_records or table_deleted_ids:
                 changes_detected = True
 
                 # Ασφαλής μετάφραση ημερομηνιών
-                if table == "assignments":
-                    for r in delta_records:
-                        d = utils.safe_date_parse(r.get("date"))
-                        if d:
-                            r["date"] = d
-                elif table == "leaves":
-                    for r in delta_records:
-                        sd = utils.safe_date_parse(r.get("startDate"))
-                        if sd:
-                            r["startDate"] = sd
-                        ed = utils.safe_date_parse(r.get("endDate"))
-                        if ed:
-                            r["endDate"] = ed
-                elif table == "recurring_patterns":
-                    for r in delta_records:
-                        sd = utils.safe_date_parse(r.get("startDate"))
-                        if sd:
-                            r["startDate"] = sd
+                if delta_records:
+                    _normalize_dates_for_table(table, delta_records)
 
                 st.session_state[table] = apply_delta_updates(
                     table,
