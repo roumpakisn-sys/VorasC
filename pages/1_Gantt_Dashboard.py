@@ -67,8 +67,6 @@ if "last_clicked_safe_id" not in st.session_state:
     st.session_state.last_clicked_safe_id = ""
 if "reset_edit_bar_select_next_run" not in st.session_state:
     st.session_state.reset_edit_bar_select_next_run = False
-if "detector_version" not in st.session_state:
-    st.session_state.detector_version = 0
 
 # --- ΜΗΧΑΝΙΣΜΟΣ ΗΜΕΡΟΜΗΝΙΑΣ ΚΑΙ ΕΚΚΑΘΑΡΙΣΗ ΚΛΙΚ ---
 if "view_week_date" not in st.session_state:
@@ -80,7 +78,6 @@ def clear_bar_selection():
     st.session_state.trigger_scroll = False
     st.session_state.last_clicked_safe_id = ""
     st.session_state.reset_edit_bar_select_next_run = True
-    st.session_state.detector_version = st.session_state.get("detector_version", 0) + 1
 
 
 def sync_from_widget():
@@ -518,6 +515,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       s.addEventListener('scroll', onScroll);
       s.addEventListener('mousedown', onMouseDown, true);
       s.addEventListener('mousemove', onMouseMoveLocal, true);
+
       window.addEventListener('mousemove', onMouseMoveWin, true);
       s.addEventListener('mouseup', onMouseUp, true);
       s.addEventListener('mouseleave', onMouseLeave, true);
@@ -560,7 +558,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id)
-clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
+clicked_safe_id = click_detector(html_chart, key="gantt_detector_main")
 
 if clicked_safe_id:
     real_clicked_key = safe_mapping.get(clicked_safe_id, None)
