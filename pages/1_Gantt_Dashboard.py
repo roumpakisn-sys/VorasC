@@ -45,6 +45,24 @@ def get_local_today():
         return (datetime.utcnow() + timedelta(hours=3)).date()
 
 
+def normalize_id_list(values):
+    """Κρατάει σειρά και αφαιρεί κενά/διπλότυπα ids για ασφαλείς συγκρίσεις."""
+    clean = []
+    for value in values or []:
+        if not value:
+            continue
+        if value not in clean:
+            clean.append(value)
+    return clean
+
+
+def clean_conflict_leave_notes(notes):
+    """Αφαιρεί τεχνικές σημειώσεις [Άδεια: ...] / [Εμπλοκή: ...] από το κείμενο."""
+    clean = re.sub(r"\[(?:Άδεια|Εμπλοκή):.*?\]", "", notes or "")
+    clean = re.sub(r"\s*\|\s*", " ", clean).strip()
+    return clean
+
+
 utils.init_data_and_sync()
 
 total_indexed = sum(len(v) for v in st.session_state.get("assignments_by_date", {}).values())
@@ -827,7 +845,10 @@ if not presentation_mode:
                         new_assigns, old_assigns = [], []
 
                         for a_id in target_group["AssignmentIds"]:
-                            orig_a = next(a for a in st.session_state.assignments if a["id"] == a_id)
+                            orig_a = next((a for a in st.session_state.assignments if a["id"] == a_id), None)
+                            if not orig_a:
+                                continue
+
                             new_a = dict(orig_a)
                             if delta_days != 0:
                                 new_a["date"] = orig_a["date"] + timedelta(days=delta_days)
@@ -845,7 +866,12 @@ if not presentation_mode:
                                 new_a["endTime"] = new_e_dt.strftime("%H:%M")
                                 if orig_a.get("arrivalTime"):
                                     arr_dt = datetime.combine(dummy_date, datetime.strptime(str(orig_a["arrivalTime"])[:5], "%H:%M").time())
-                                    new_a["arrivalTime"] = (arr_dt + timedelta(hours=delta_hours)).strftime("%H:%M")
+                                    new_arr_dt = arr_dt + timedelta(hours=delta_hours)
+                                    if new_arr_dt.date() != dummy_date.date():
+                                        st.error("Η αλλαγή ώρας προσέλευσης ξεπερνάει τα όρια της ημέρας.")
+                                        has_error = True
+                                        break
+                                    new_a["arrivalTime"] = new_arr_dt.strftime("%H:%M")
 
                             if new_a["employeeId"]:
                                 emp_name = utils.get_employee_name(new_a["employeeId"])
@@ -873,7 +899,7 @@ if not presentation_mode:
                             old_assigns.append(orig_a)
                             new_assigns.append(new_a)
 
-                        if not has_error:
+                        if not has_error and old_assigns:
                             for old_a, new_a in zip(old_assigns, new_assigns):
                                 utils.db_update("assignments", new_a["id"], new_a, old_data=old_a, track=False)
                             st.session_state.assignments = [a for a in st.session_state.assignments if a["id"] not in target_group["AssignmentIds"]]
@@ -893,7 +919,11 @@ if not presentation_mode:
                         )
                         edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
 
-                        valid_emp_ids = [eid for eid in target_group["EmployeeIds"] if eid]
+                        # Μόνο οι πραγματικά τοποθετημένοι υπάλληλοι μπαίνουν ως προεπιλογή.
+                        # Όσοι αναφέρονται μέσα σε notes τύπου [Άδεια: ...] / [Εμπλοκή: ...]
+                        # μπαίνουν μόνο ως διαθέσιμες επιλογές, όχι ως ήδη επιλεγμένοι.
+                        valid_emp_ids = normalize_id_list([eid for eid in target_group["EmployeeIds"] if eid])
+                        note_emp_ids = []
 
                         for note in target_group.get("Notes_List", []):
                             matches = re.findall(r"\[(?:Άδεια|Εμπλοκή):\s*(.*?)\]", note)
@@ -901,11 +931,11 @@ if not presentation_mode:
                                 name_to_find = match.strip()
                                 for emp in st.session_state.employees:
                                     if emp["name"].strip() == name_to_find:
-                                        if emp["id"] not in valid_emp_ids:
-                                            valid_emp_ids.append(emp["id"])
+                                        if emp["id"] not in note_emp_ids:
+                                            note_emp_ids.append(emp["id"])
                                         break
 
-                        edit_options = list(set(active_employee_ids + valid_emp_ids))
+                        edit_options = normalize_id_list(active_employee_ids + valid_emp_ids + note_emp_ids)
                         edit_emps = st.multiselect(
                             "Αλλαγή Προσωπικού (Προαιρετικό)",
                             options=edit_options,
@@ -918,9 +948,8 @@ if not presentation_mode:
                             default_color_idx = list(config.BASIC_COLORS.keys()).index(target_group["ColorName"]) if target_group["ColorName"] in config.BASIC_COLORS else 0
                             edit_color = st.selectbox("Αλλαγή Χρώματος", options=list(config.BASIC_COLORS.keys()), index=default_color_idx)
                         with e_notes_col:
-                            clean_note = re.sub(r"\[(?:Άδεια|Εμπλοκή):.*?\]", "", target_group.get("Notes", ""))
-                            clean_note = re.sub(r"\s*\|\s*", " ", clean_note).strip()
-                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=clean_note)
+                            target_clean_note = clean_conflict_leave_notes(target_group.get("Notes", ""))
+                            edit_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", value=target_clean_note)
 
                         e_arr, e_start, e_end = st.columns(3)
                         existing_arr = target_group.get("ArrivalTime", "")
@@ -959,11 +988,58 @@ if not presentation_mode:
                             str_arrival = new_t_arrival.strftime("%H:%M") if use_arr_edit else ""
                             str_start = new_t_start.strftime("%H:%M")
                             str_end = new_t_end.strftime("%H:%M")
+
                             if str_start >= str_end:
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                             else:
-                                emps_to_process = edit_emps if edit_emps else [""]
+                                # Υπολογισμός έργου ΠΡΙΝ από conflict check και ΠΡΙΝ από delete/insert.
+                                pending_new_project = None
+                                if edit_custom_proj_name.strip():
+                                    c_name = edit_custom_proj_name.strip()
+                                    existing_p = next(
+                                        (p for p in st.session_state.projects if p["name"].strip().lower() == c_name.lower()),
+                                        None,
+                                    )
+                                    if existing_p:
+                                        final_edit_proj_id = existing_p["id"]
+                                    else:
+                                        final_edit_proj_id = str(uuid.uuid4())
+                                        pending_new_project = {"id": final_edit_proj_id, "name": c_name, "color": config.BASIC_COLORS[edit_color]}
+                                else:
+                                    final_edit_proj_id = edit_proj
+
+                                selected_emp_ids = normalize_id_list(edit_emps)
+                                original_emp_ids = normalize_id_list(valid_emp_ids)
+                                normalized_cancel_reason = e_cancel_reason if e_is_cancelled else ""
+                                target_cancel_reason = target_group.get("cancel_reason", "") if target_group.get("is_cancelled", False) else ""
+
+                                # Αν ο χρήστης απλώς πάτησε Αποθήκευση χωρίς πραγματική αλλαγή,
+                                # δεν κάνουμε ούτε delete ούτε insert. Έτσι δεν γεννιούνται δεύτερες μπάρες.
+                                is_noop_save = (
+                                    not edit_custom_proj_name.strip()
+                                    and edit_date == target_group["Date"]
+                                    and final_edit_proj_id == target_group["ProjectId"]
+                                    and str_arrival == target_group.get("ArrivalTime", "")
+                                    and str_start == str(target_group["StartTime"])[:5]
+                                    and str_end == str(target_group["EndTime"])[:5]
+                                    and edit_color == target_group["ColorName"]
+                                    and edit_notes == target_clean_note
+                                    and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
+                                    and normalized_cancel_reason == target_cancel_reason
+                                    and selected_emp_ids == original_emp_ids
+                                )
+
+                                if is_noop_save:
+                                    clear_bar_selection()
+                                    st.rerun()
+
+                                if pending_new_project:
+                                    st.session_state.projects.append(pending_new_project)
+                                    utils.db_insert("projects", pending_new_project, track=False)
+
+                                emps_to_process = selected_emp_ids if selected_emp_ids else [""]
                                 valid_assignments = []
+
                                 for eid in emps_to_process:
                                     if eid:
                                         emp_name = utils.get_employee_name(eid)
@@ -982,22 +1058,6 @@ if not presentation_mode:
                                                 valid_assignments.append({"eid": eid, "start": adj_start, "end": adj_end, "msg": msg, "emp_name": emp_name})
                                     else:
                                         valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": "", "emp_name": ""})
-
-                                if edit_custom_proj_name.strip():
-                                    c_name = edit_custom_proj_name.strip()
-                                    existing_p = next(
-                                        (p for p in st.session_state.projects if p["name"].strip().lower() == c_name.lower()),
-                                        None,
-                                    )
-                                    if existing_p:
-                                        final_edit_proj_id = existing_p["id"]
-                                    else:
-                                        final_edit_proj_id = str(uuid.uuid4())
-                                        new_p = {"id": final_edit_proj_id, "name": c_name, "color": config.BASIC_COLORS[edit_color]}
-                                        st.session_state.projects.append(new_p)
-                                        utils.db_insert("projects", new_p, track=False)
-                                else:
-                                    final_edit_proj_id = edit_proj
 
                                 old_assigns = [a for a in st.session_state.assignments if a["id"] in target_group["AssignmentIds"]]
                                 st.session_state.assignments = [a for a in st.session_state.assignments if a["id"] not in target_group["AssignmentIds"]]
@@ -1024,11 +1084,12 @@ if not presentation_mode:
                                         "colorHex": config.BASIC_COLORS[edit_color],
                                         "notes": c_notes,
                                         "is_cancelled": e_is_cancelled,
-                                        "cancel_reason": e_cancel_reason if e_is_cancelled else "",
+                                        "cancel_reason": normalized_cancel_reason,
                                         "recurring_id": target_group.get("RecurringId"),
                                     }
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
+
                                 utils.db_insert("assignments", new_assigns, track=False)
                                 clear_bar_selection()
                                 st.rerun()
