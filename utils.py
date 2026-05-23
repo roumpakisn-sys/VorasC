@@ -816,6 +816,9 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
         border-right: 1px solid #e2e8f0 !important;
     }
+    [data-testid="stSidebarNav"] {
+        display: none !important; /* κρύβει το default multipage nav */
+    }
     .stPlotlyChart { border: 1px solid #cbd5e1; border-radius: 8px; }
     .leave-conflict-box {
         padding: 12px; border-radius: 8px; background-color: #fee2e2;
@@ -823,6 +826,39 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
     .hidden-btn-container {
         display: none !important;
+    }
+
+    /* Custom HTML sidebar nav (οπτικά κοντά στο native Streamlit menu) */
+    .staffpro-page-nav {
+        margin: 0.15rem 0 0.35rem 0;
+    }
+    .staffpro-page-nav .staffpro-page-nav-title {
+        color: rgba(49, 51, 63, 0.65);
+        font-size: 0.9rem;
+        font-weight: 400;
+        margin: 0 0 0.25rem 0.45rem;
+        line-height: 1.2;
+    }
+    .staffpro-page-nav .staffpro-page-link {
+        display: block;
+        margin: 0.08rem 0.25rem;
+        padding: 0.38rem 0.62rem;
+        border-radius: 0.45rem;
+        color: rgb(49, 51, 63);
+        text-decoration: none;
+        font-size: 0.98rem;
+        line-height: 1.35;
+        transition: background-color 0.12s ease-in-out;
+    }
+    .staffpro-page-nav .staffpro-page-link:hover {
+        background: rgba(49, 51, 63, 0.08);
+        color: rgb(49, 51, 63);
+        text-decoration: none;
+    }
+    .staffpro-page-nav .staffpro-page-link.active {
+        background: rgba(151, 166, 195, 0.28);
+        color: rgb(49, 51, 63);
+        font-weight: 600;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -862,7 +898,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     updateClock();
     setInterval(updateClock, 1000);
 
-    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας (Σκούπα, Φαράσι, Σαπούνι, Σφουγγαρίστρα)
+    // 2. Εναλλασσόμενα Εικονίδια Καθαριότητας
     let loaderDiv = doc.getElementById("staff_pro_cleaner");
     if (!loaderDiv) {
         loaderDiv = doc.createElement("div");
@@ -888,9 +924,44 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         }
     }, 150);
 
+    // Highlight active page στο custom HTML nav
+    function setActiveStaffProPage() {
+        try {
+            const navRoot = doc.getElementById("staff_pro_html_nav");
+            if (!navRoot) return;
+
+            const path = (window.parent.location && window.parent.location.pathname ? window.parent.location.pathname : "").toLowerCase();
+            const links = navRoot.querySelectorAll(".staffpro-page-link");
+            links.forEach((lnk) => lnk.classList.remove("active"));
+
+            let activeKey = "gantt_dashboard";
+            if (path.includes("/management")) activeKey = "management";
+            else if (path.includes("/viber_export")) activeKey = "viber_export";
+            else if (path.includes("/gantt_dashboard")) activeKey = "gantt_dashboard";
+
+            const activeNode = navRoot.querySelector(`.staffpro-page-link[data-page="${activeKey}"]`);
+            if (activeNode) activeNode.classList.add("active");
+        } catch (e) {}
+    }
+    setActiveStaffProPage();
+
     """ + polling_js + """
     </script>
     """, height=0, width=0)
+
+    # Custom HTML Page Navigation (αντικαθιστά το default stSidebarNav)
+    st.sidebar.markdown(
+        """
+        <div id="staff_pro_html_nav" class="staffpro-page-nav">
+            <div class="staffpro-page-nav-title">streamlit app</div>
+            <a class="staffpro-page-link" data-page="gantt_dashboard" href="/Gantt_Dashboard" target="_self">Gantt Dashboard</a>
+            <a class="staffpro-page-link" data-page="management" href="/Management" target="_self">Management</a>
+            <a class="staffpro-page-link" data-page="viber_export" href="/Viber_Export" target="_self">Viber Export</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.sidebar.write("---")
 
     st.sidebar.title("STAFF.PRO")
     st.sidebar.write("---")
