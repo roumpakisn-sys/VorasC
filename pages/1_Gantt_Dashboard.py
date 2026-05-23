@@ -161,6 +161,46 @@ def apply_html_sidebar_skin():
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
         }
 
+        /* Το εσωτερικό μενού Management είναι st.radio· το ντύνουμε σαν HTML buttons. */
+        [data-testid="stSidebar"] div[role="radiogroup"] {
+            gap: 0.35rem !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label {
+            background: #ffffff !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 9px !important;
+            padding: 0.55rem 0.65rem !important;
+            margin: 0.05rem 0 !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
+            cursor: pointer !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            background: #f1f5f9 !important;
+            border-color: #94a3b8 !important;
+            transform: translateX(2px) !important;
+            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+            background: #e2e8f0 !important;
+            border-color: #94a3b8 !important;
+            box-shadow: inset 3px 0 0 #334155, 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
+            color: #0f172a !important;
+            font-weight: 700 !important;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] input {
+            display: none !important;
+        }
+
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] span,
         [data-testid="stSidebar"] label {
