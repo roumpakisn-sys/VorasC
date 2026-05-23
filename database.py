@@ -362,12 +362,11 @@ def sync_data_incremental():
                 )
 
         # Fallback ασφάλειας:
-        # Αν το probe είπε "υπάρχει αλλαγή", αλλά δεν φάνηκε καθαρό delta,
-        # κάνουμε full fetch για να μη χαθεί συγχρονισμός.
+        # - Σε legacy probe κρατάμε την παλιά λογική για activity_logs.
+        # - Σε watermark probe ΔΕΝ κάνουμε full fetch όταν δεν υπάρχει πραγματικό delta,
+        #   γιατί αυτό συνήθως σημαίνει "noise" από logs και όχι αλλαγή στα business δεδομένα.
         if not changes_detected:
-            # Legacy behavior: αν υπήρχε activity σήμα, κάναμε full fetch.
-            # Νέο behavior με watermark: επίσης full fetch για 100% ασφάλεια.
-            if (used_legacy_probe and activity_signal_ts > sync_ts) or (not used_legacy_probe):
+            if used_legacy_probe and activity_signal_ts > sync_ts:
                 current_db_time = get_db_current_time()
                 _full_fetch_all_tables(current_db_time)
                 return
