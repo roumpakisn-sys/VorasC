@@ -63,6 +63,115 @@ def clean_conflict_leave_notes(notes):
     return clean
 
 
+def apply_html_sidebar_skin():
+    """HTML/CSS μορφοποίηση της πλευρικής στήλης χωρίς αλλαγή λειτουργικότητας."""
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            background: #f8fafc !important;
+            border-right: 1px solid #e2e8f0 !important;
+            box-shadow: 8px 0 24px rgba(15, 23, 42, 0.08) !important;
+        }
+
+        [data-testid="stSidebar"] > div:first-child {
+            padding-top: 1.1rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+
+        [data-testid="stSidebarNav"] {
+            padding-top: 0.3rem !important;
+            padding-bottom: 0.8rem !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+            margin-bottom: 1rem !important;
+        }
+
+        [data-testid="stSidebarNav"] ul {
+            padding-left: 0 !important;
+            gap: 0.25rem !important;
+        }
+
+        [data-testid="stSidebarNav"] li {
+            margin: 0.15rem 0 !important;
+        }
+
+        [data-testid="stSidebarNav"] a {
+            border-radius: 8px !important;
+            padding: 0.45rem 0.55rem !important;
+            color: #334155 !important;
+            font-weight: 500 !important;
+            text-decoration: none !important;
+            transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease !important;
+        }
+
+        [data-testid="stSidebarNav"] a:hover {
+            background: #e2e8f0 !important;
+            color: #0f172a !important;
+            transform: translateX(2px) !important;
+        }
+
+        [data-testid="stSidebarNav"] a[aria-current="page"] {
+            background: #e2e8f0 !important;
+            color: #0f172a !important;
+            font-weight: 700 !important;
+        }
+
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3 {
+            color: #1e293b !important;
+            letter-spacing: 0.02em !important;
+        }
+
+        [data-testid="stSidebar"] hr {
+            margin: 1rem 0 !important;
+            border-color: #e2e8f0 !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button {
+            width: 100% !important;
+            border-radius: 8px !important;
+            border: 1px solid #cbd5e1 !important;
+            background: #ffffff !important;
+            color: #334155 !important;
+            font-weight: 600 !important;
+            min-height: 2.35rem !important;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
+            background: #f1f5f9 !important;
+            border-color: #94a3b8 !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button:disabled {
+            opacity: 0.45 !important;
+            background: #f8fafc !important;
+            color: #94a3b8 !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stAlert"] {
+            border-radius: 10px !important;
+            border: 1px solid rgba(148, 163, 184, 0.35) !important;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+        }
+
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] label {
+            color: #334155;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 utils.init_data_and_sync()
 
 total_indexed = sum(len(v) for v in st.session_state.get("assignments_by_date", {}).values())
@@ -71,6 +180,7 @@ if total_indexed != len(st.session_state.get("assignments", [])):
     utils.init_data_and_sync()
 
 utils.setup_shared_ui()
+apply_html_sidebar_skin()
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
 active_employee_ids = [e["id"] for e in st.session_state.employees if e.get("status", "Ενεργός") == "Ενεργός"]
