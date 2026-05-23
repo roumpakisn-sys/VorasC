@@ -828,55 +828,46 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         display: none !important;
     }
 
-    /* κρύβουμε τα native page_link στοιχεία οπτικά */
-    a[data-testid="stPageLink"],
-    [data-testid="stPageLink"] {
-        display: none !important;
+    /* Custom HTML sidebar nav (οπτικά κοντά στο native Streamlit menu) */
+    .staffpro-page-nav {
+        margin: 0.15rem 0 0.35rem 0;
     }
-
-    /* τίτλος custom menu */
-    .staffpro-page-nav-title {
+    .staffpro-page-nav .staffpro-page-nav-title {
         color: rgba(49, 51, 63, 0.65);
         font-size: 0.9rem;
         font-weight: 400;
         margin: 0 0 0.25rem 0.45rem;
         line-height: 1.2;
     }
-
-    /* ορατό HTML nav */
-    .staffpro-page-nav {
-        margin: 0.15rem 0 0.35rem 0;
-    }
     .staffpro-page-nav .staffpro-page-link {
         display: block;
         margin: 0.08rem 0.25rem;
         padding: 0.38rem 0.62rem;
         border-radius: 0.45rem;
-        color: rgb(49, 51, 63) !important;
-        text-decoration: none !important;
+        color: rgb(49, 51, 63);
+        text-decoration: none;
         font-size: 0.98rem;
         line-height: 1.35;
         transition: background-color 0.12s ease-in-out;
-        cursor: pointer;
     }
     .staffpro-page-nav .staffpro-page-link:hover {
         background: rgba(49, 51, 63, 0.08);
-        color: rgb(49, 51, 63) !important;
-        text-decoration: none !important;
+        color: rgb(49, 51, 63);
+        text-decoration: none;
     }
     .staffpro-page-nav .staffpro-page-link.active {
         background: rgba(151, 166, 195, 0.28);
-        color: rgb(49, 51, 63) !important;
+        color: rgb(49, 51, 63);
         font-weight: 600;
     }
     </style>
     """, unsafe_allow_html=True)
-
+    
     polling_js = """
     setInterval(() => {
         const isEditing = doc.getElementById("is_editing_flag");
         if (isEditing) return;
-
+        
         const buttons = doc.querySelectorAll("button");
         for (let btn of buttons) {
             if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
@@ -886,11 +877,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         }
     }, 15000);
     """ if not show_menu else ""
-
+    
     components.html("""
     <script>
     const doc = window.parent.document;
-
+    
     // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
@@ -915,7 +906,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         doc.body.appendChild(loaderDiv);
         loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     }
-
+    
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
     let cIdx = 0;
     setInterval(() => {
@@ -933,11 +924,12 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         }
     }, 150);
 
-    // active state στο custom HTML menu
+    // Highlight active page στο custom HTML nav
     function setActiveStaffProPage() {
         try {
             const navRoot = doc.getElementById("staff_pro_html_nav");
             if (!navRoot) return;
+
             const path = (window.parent.location && window.parent.location.pathname ? window.parent.location.pathname : "").toLowerCase();
             const links = navRoot.querySelectorAll(".staffpro-page-link");
             links.forEach((lnk) => lnk.classList.remove("active"));
@@ -947,91 +939,38 @@ def setup_shared_ui(show_menu=False, menu_options=None):
             else if (path.includes("/viber_export")) activeKey = "viber_export";
             else if (path.includes("/gantt_dashboard")) activeKey = "gantt_dashboard";
 
-            const activeNode = navRoot.querySelector('.staffpro-page-link[data-page="' + activeKey + '"]');
+            const activeNode = navRoot.querySelector(`.staffpro-page-link[data-page="${activeKey}"]`);
             if (activeNode) activeNode.classList.add("active");
         } catch (e) {}
     }
-
-    // bridge: HTML click -> native st.page_link click (κρατάει session)
-    function findNativePageLinkByLabel(labelText) {
-        const anchors = doc.querySelectorAll('a[data-testid="stPageLink"], [data-testid="stPageLink"] a');
-        for (const a of anchors) {
-            const txt = (a.textContent || "").trim();
-            if (txt === labelText) return a;
-        }
-        return null;
-    }
-
-    function wireHtmlNavToNativeLinks() {
-        const navRoot = doc.getElementById("staff_pro_html_nav");
-        if (!navRoot) return;
-
-        const mapping = {
-            gantt_dashboard: "Gantt Dashboard",
-            management: "Management",
-            viber_export: "Viber Export"
-        };
-
-        const links = navRoot.querySelectorAll(".staffpro-page-link");
-        links.forEach((lnk) => {
-            if (lnk.dataset.bound === "1") return;
-            lnk.dataset.bound = "1";
-            lnk.addEventListener("click", (ev) => {
-                ev.preventDefault();
-                const key = lnk.getAttribute("data-page");
-                const label = mapping[key];
-                const nativeLink = label ? findNativePageLinkByLabel(label) : null;
-                if (nativeLink) {
-                    nativeLink.click();
-                }
-            });
-        });
-    }
-
     setActiveStaffProPage();
-    wireHtmlNavToNativeLinks();
 
     """ + polling_js + """
     </script>
     """, height=0, width=0)
 
-    # Ορατό HTML menu
+    # Custom HTML Page Navigation (αντικαθιστά το default stSidebarNav)
     st.sidebar.markdown(
         """
         <div id="staff_pro_html_nav" class="staffpro-page-nav">
             <div class="staffpro-page-nav-title">streamlit app</div>
-            <a class="staffpro-page-link" data-page="gantt_dashboard" href="#">Gantt Dashboard</a>
-            <a class="staffpro-page-link" data-page="management" href="#">Management</a>
-            <a class="staffpro-page-link" data-page="viber_export" href="#">Viber Export</a>
+            <a class="staffpro-page-link" data-page="gantt_dashboard" href="/Gantt_Dashboard" target="_self">Gantt Dashboard</a>
+            <a class="staffpro-page-link" data-page="management" href="/Management" target="_self">Management</a>
+            <a class="staffpro-page-link" data-page="viber_export" href="/Viber_Export" target="_self">Viber Export</a>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    # Native links (hidden by CSS) για ασφαλές page switch
-    if hasattr(st.sidebar, "page_link"):
-        st.sidebar.page_link("pages/1_Gantt_Dashboard.py", label="Gantt Dashboard", width="stretch")
-        st.sidebar.page_link("pages/2_Management.py", label="Management", width="stretch")
-        st.sidebar.page_link("pages/3_Viber_Export.py", label="Viber Export", width="stretch")
-    else:
-        # fallback για πολύ παλιές εκδόσεις
-        if st.sidebar.button("Gantt Dashboard", use_container_width=True, key="nav_gantt_dashboard"):
-            st.switch_page("pages/1_Gantt_Dashboard.py")
-        if st.sidebar.button("Management", use_container_width=True, key="nav_management"):
-            st.switch_page("pages/2_Management.py")
-        if st.sidebar.button("Viber Export", use_container_width=True, key="nav_viber_export"):
-            st.switch_page("pages/3_Viber_Export.py")
-
     st.sidebar.write("---")
 
     st.sidebar.title("STAFF.PRO")
     st.sidebar.write("---")
-
+    
     selected_menu = None
     if show_menu and menu_options:
         selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options)
         st.sidebar.write("---")
-
+    
     col_u, col_r = st.sidebar.columns(2)
     with col_u:
         if st.button("⏪ Undo", disabled=len(st.session_state.get('undo_stack', [])) == 0, use_container_width=True):
@@ -1041,23 +980,23 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         if st.button("⏩ Redo", disabled=len(st.session_state.get('redo_stack', [])) == 0, use_container_width=True):
             perform_redo()
             st.rerun()
-
+            
     st.sidebar.write("---")
     st.sidebar.subheader("Κατάσταση Συστήματος")
     if supabase:
         st.sidebar.success("☁️ Cloud Sync (Incremental)")
-
+        
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
             st.rerun()
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
-
+        
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            st.session_state.last_sync_time = None
+            st.session_state.last_sync_time = None 
             st.rerun()
     else:
         st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
-
+        
     if not SUPABASE_INSTALLED:
         st.sidebar.caption("⚠️ **Πρόβλημα:** Λείπει η βιβλιοθήκη 'supabase'. Κάνε Reboot την εφαρμογή.")
     elif not HAS_SECRETS:
@@ -1082,12 +1021,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 proj = get_project_info(a['projectId'])
                 proj_name = proj.get('name', "Άγνωστο Έργο") if proj else "Άγνωστο Έργο"
                 orphan_details.append(f"🔴 **{check_d.strftime('%d/%m/%Y')}** | Ώρες: {str(a.get('startTime', ''))[:5]}-{str(a.get('endTime', ''))[:5]} | Έργο: **{proj_name}**")
-
+    
     if orphan_count > 0:
         st.error(f"⚠️ **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
         with st.expander("🔍 Δείτε αναλυτικά τις ορφανές βάρδιες"):
-            for detail in orphan_details:
-                st.markdown(detail)
+            for detail in orphan_details: st.markdown(detail)
         st.write("---")
 
     return selected_menu
