@@ -332,21 +332,43 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
             label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_ext_crew)}</div>"
 
         day_groups = [g for g in wk_groups.values() if g["Date"] == curr_date]
-        lanes = []
+
+        # Οι μπλε μπάρες μπαίνουν πάντα κάτω από όλες τις άλλες μπάρες της ημέρας.
+        # Δεν αλλάζει η αποθήκευση ούτε η λογική των βαρδιών· μόνο η οπτική στοίβαξη.
+        non_blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() != "#4a86e8"]
+        blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() == "#4a86e8"]
+
         group_lanes = []
-        for g in sorted(day_groups, key=lambda x: x["StartTime"]):
+
+        non_blue_lanes = []
+        for g in sorted(non_blue_groups, key=lambda x: x["StartTime"]):
             placed = False
-            for idx, lane_end in enumerate(lanes):
+            for idx, lane_end in enumerate(non_blue_lanes):
                 if g["StartTime"] >= lane_end:
-                    lanes[idx] = g["EndTime"]
+                    non_blue_lanes[idx] = g["EndTime"]
                     group_lanes.append((g, idx))
                     placed = True
                     break
             if not placed:
-                lanes.append(g["EndTime"])
-                group_lanes.append((g, len(lanes) - 1))
+                non_blue_lanes.append(g["EndTime"])
+                group_lanes.append((g, len(non_blue_lanes) - 1))
 
-        row_height = max(1, len(lanes)) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
+        blue_lanes = []
+        blue_lane_offset = len(non_blue_lanes)
+        for g in sorted(blue_groups, key=lambda x: x["StartTime"]):
+            placed = False
+            for idx, lane_end in enumerate(blue_lanes):
+                if g["StartTime"] >= lane_end:
+                    blue_lanes[idx] = g["EndTime"]
+                    group_lanes.append((g, blue_lane_offset + idx))
+                    placed = True
+                    break
+            if not placed:
+                blue_lanes.append(g["EndTime"])
+                group_lanes.append((g, blue_lane_offset + len(blue_lanes) - 1))
+
+        total_lanes = len(non_blue_lanes) + len(blue_lanes)
+        row_height = max(1, total_lanes) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
         bg_color_row = "#eef2ff" if curr_date == get_local_today() else ("#f8fafc" if i % 2 == 1 else "#ffffff")
 
         html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;'>"
