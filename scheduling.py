@@ -16,7 +16,6 @@ def is_on_leave(employee_id, check_date, leaves_by_emp):
 def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exclude_ids=None):
     """
     Pure Function: Ελέγχει αν υπάρχει χρονική επικάλυψη (conflict) στις βάρδιες.
-    Δέχεται το employee_id, ώρες έναρξης/λήξης και τις βάρδιες ΕΚΕΙΝΗΣ της ημέρας (day_assignments).
     Επιστρέφει: (adj_start, adj_end, is_conflict, message)
     """
     if not employee_id: 
@@ -25,23 +24,30 @@ def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exc
     if exclude_ids is None: 
         exclude_ids = []
         
+    # Μετατροπή των exclude_ids σε string για απόλυτη ασφάλεια (αποφυγή UUID object mismatches)
+    safe_exclude_ids = [str(eid) for eid in exclude_ids]
+        
     new_s = str(t_start)[:5]
     new_e = str(t_end)[:5]
     
-    # Φιλτράρισμα: Κρατάμε μόνο τις βάρδιες του συγκεκριμένου υπαλλήλου, αγνοώντας όσες εξαιρούνται (π.χ. όταν κάνουμε edit)
-    emp_assigns = [a for a in day_assignments if a['employeeId'] == employee_id and a['id'] not in exclude_ids]
+    # Φιλτράρισμα: 
+    # 1. Μόνο αυτού του υπαλλήλου
+    # 2. ΑΓΝΟΟΥΜΕ τις βάρδιες που επεξεργαζόμαστε τώρα (safe_exclude_ids)
+    # 3. ΑΓΝΟΟΥΜΕ τις ακυρωμένες βάρδιες (δεν πιάνουν χώρο στον χρόνο του υπαλλήλου)
+    emp_assigns = [
+        a for a in day_assignments 
+        if str(a.get('employeeId')) == str(employee_id) 
+        and str(a.get('id')) not in safe_exclude_ids
+        and not a.get('is_cancelled', False)
+    ]
     
-    allowed_overlap = False
     for ea in emp_assigns:
-        ea_s = str(ea['startTime'])[:5]
-        ea_e = str(ea['endTime'])[:5]
+        ea_s = str(ea.get('startTime', ''))[:5]
+        ea_e = str(ea.get('endTime', ''))[:5]
         
-        # Έλεγχος χρονικής επικάλυψης
+        # ΑΥΣΤΗΡΟΣ - ΣΥΜΜΕΤΡΙΚΟΣ Έλεγχος χρονικής επικάλυψης
+        # Αν η νέα έναρξη είναι πριν την παλιά λήξη ΚΑΙ η νέα λήξη είναι μετά την παλιά έναρξη = ΕΠΙΚΑΛΥΨΗ
         if new_s < ea_e and new_e > ea_s:
-            if new_e > ea_e:
-                # Επιτρέπεται μόνο αν η νέα βάρδια τελειώνει πιο αργά από την παλιά
-                allowed_overlap = True
-            else:
-                return t_start, t_end, True, "Πλήρης επικάλυψη με υπάρχουσα βάρδια (δεν τελειώνει αργότερα)"
+            return t_start, t_end, True, "Υπάρχει χρονική επικάλυψη με άλλη βάρδια του υπαλλήλου."
                 
-    return t_start, t_end, False, "Allowed Overlap" if allowed_overlap else ""
+    return t_start, t_end, False, ""
