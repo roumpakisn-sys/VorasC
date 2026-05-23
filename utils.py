@@ -812,15 +812,171 @@ def init_data_and_sync():
 def setup_shared_ui(show_menu=False, menu_options=None):
     st.markdown("""
     <style>
+    /* =========================================================
+       STAFF.PRO sidebar HTML/CSS skin
+       Αλλάζει μόνο εμφάνιση. Δεν αλλάζει καθόλου λειτουργικότητα.
+       ========================================================= */
+
     [data-testid="stSidebar"] {
-        box-shadow: 5px 0px 20px rgba(0, 0, 0, 0.15) !important;
+        background: #f8fafc !important;
         border-right: 1px solid #e2e8f0 !important;
+        box-shadow: 8px 0 24px rgba(15, 23, 42, 0.08) !important;
     }
-    .stPlotlyChart { border: 1px solid #cbd5e1; border-radius: 8px; }
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 1.1rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    /* Streamlit multipage menu:
+       streamlit app / Gantt Dashboard / Management / Viber Export */
+    [data-testid="stSidebarNav"] {
+        padding-top: 0.3rem !important;
+        padding-bottom: 0.8rem !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        margin-bottom: 1rem !important;
+    }
+
+    [data-testid="stSidebarNav"] ul {
+        padding-left: 0 !important;
+        gap: 0.25rem !important;
+    }
+
+    [data-testid="stSidebarNav"] li {
+        margin: 0.15rem 0 !important;
+    }
+
+    [data-testid="stSidebarNav"] a {
+        border-radius: 9px !important;
+        padding: 0.50rem 0.60rem !important;
+        color: #334155 !important;
+        font-weight: 600 !important;
+        text-decoration: none !important;
+        transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
+    }
+
+    [data-testid="stSidebarNav"] a:hover {
+        background: #e2e8f0 !important;
+        color: #0f172a !important;
+        transform: translateX(2px) !important;
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    [data-testid="stSidebarNav"] a[aria-current="page"] {
+        background: #e2e8f0 !important;
+        color: #0f172a !important;
+        font-weight: 800 !important;
+        box-shadow: inset 3px 0 0 #334155, 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    /* Management εσωτερικό menu: st.sidebar.radio σαν HTML menu buttons */
+    [data-testid="stSidebar"] div[role="radiogroup"] {
+        gap: 0.35rem !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] label {
+        background: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 9px !important;
+        padding: 0.55rem 0.65rem !important;
+        margin: 0.05rem 0 !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
+        cursor: pointer !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background: #f1f5f9 !important;
+        border-color: #94a3b8 !important;
+        transform: translateX(2px) !important;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+        background: #e2e8f0 !important;
+        border-color: #94a3b8 !important;
+        box-shadow: inset 3px 0 0 #334155, 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
+        color: #0f172a !important;
+        font-weight: 800 !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] input {
+        display: none !important;
+    }
+
+    /* Sidebar titles / text */
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        color: #1e293b !important;
+        letter-spacing: 0.02em !important;
+    }
+
+    [data-testid="stSidebar"] hr {
+        margin: 1rem 0 !important;
+        border-color: #e2e8f0 !important;
+    }
+
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label {
+        color: #334155;
+    }
+
+    /* Streamlit buttons μέσα στη sidebar: Undo / Redo / Refresh / Logout */
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100% !important;
+        border-radius: 9px !important;
+        border: 1px solid #cbd5e1 !important;
+        background: #ffffff !important;
+        color: #334155 !important;
+        font-weight: 700 !important;
+        min-height: 2.35rem !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
+        background: #f1f5f9 !important;
+        border-color: #94a3b8 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:disabled {
+        opacity: 0.45 !important;
+        background: #f8fafc !important;
+        color: #94a3b8 !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stAlert"] {
+        border-radius: 10px !important;
+        border: 1px solid rgba(148, 163, 184, 0.35) !important;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+    }
+
+    .stPlotlyChart {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+    }
+
     .leave-conflict-box {
-        padding: 12px; border-radius: 8px; background-color: #fee2e2;
-        border: 1px solid #ef4444; margin-bottom: 8px; color: #b91c1c; font-weight: 500;
+        padding: 12px;
+        border-radius: 8px;
+        background-color: #fee2e2;
+        border: 1px solid #ef4444;
+        margin-bottom: 8px;
+        color: #b91c1c;
+        font-weight: 500;
     }
+
     .hidden-btn-container {
         display: none !important;
     }
@@ -862,7 +1018,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     updateClock();
     setInterval(updateClock, 1000);
 
-    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας (Σκούπα, Φαράσι, Σαπούνι, Σφουγγαρίστρα)
+    // 2. Εναλλασσόμενα Εικονίδια Καθαριότητας
     let loaderDiv = doc.getElementById("staff_pro_cleaner");
     if (!loaderDiv) {
         loaderDiv = doc.createElement("div");
@@ -878,7 +1034,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         cIdx = (cIdx + 1) % cleaningIcons.length;
     }, 400);
 
-    // Εντοπισμός λειτουργίας Streamlit και εμφάνιση εικονιδίων
     setInterval(() => {
         const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
         if (isRunning) {
@@ -954,7 +1109,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     if orphan_count > 0:
         st.error(f"⚠️ **Προσοχή: {orphan_count} βάρδια/ες τις επόμενες 7 ημέρες έμειναν ορφανές (χωρίς προσωπικό)!**")
         with st.expander("🔍 Δείτε αναλυτικά τις ορφανές βάρδιες"):
-            for detail in orphan_details: st.markdown(detail)
+            for detail in orphan_details:
+                st.markdown(detail)
         st.write("---")
 
     return selected_menu
