@@ -137,7 +137,12 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
             edit_proj = st.selectbox("Αλλαγή Έργου (Από Λίστα)", options=proj_ids, index=default_proj_idx, format_func=utils.get_project_name)
             edit_custom_proj_name = st.text_input("Ή πληκτρολογήστε Νέο Έργο (προαιρετικό)")
             
+            # Μόνο το πραγματικά τοποθετημένο προσωπικό μπαίνει ως προεπιλογή.
+            # Τα ονόματα που υπάρχουν μέσα σε σημειώσεις τύπου [Άδεια: ...] / [Εμπλοκή: ...]
+            # προστίθενται μόνο ως διαθέσιμες επιλογές, όχι ως επιλεγμένα άτομα.
+            # Έτσι το απλό "Αποθήκευση" δεν ξαναδημιουργεί ψευδή διπλοκράτηση.
             valid_emp_ids = [eid for eid in target_group['EmployeeIds'] if eid]
+            note_emp_ids = []
             
             for note in target_group.get('Notes_List', []):
                 matches = re.findall(r'\[(?:Άδεια|Εμπλοκή):\s*(.*?)\]', note)
@@ -145,11 +150,11 @@ def render_edit_form(wk_groups, clicked_key, active_employee_ids):
                     name_to_find = match.strip()
                     for emp in st.session_state.employees:
                         if emp['name'].strip() == name_to_find:
-                            if emp['id'] not in valid_emp_ids:
-                                valid_emp_ids.append(emp['id'])
+                            if emp['id'] not in note_emp_ids:
+                                note_emp_ids.append(emp['id'])
                             break
 
-            edit_options = list(set(active_employee_ids + valid_emp_ids))
+            edit_options = list(dict.fromkeys(active_employee_ids + valid_emp_ids + note_emp_ids))
             edit_emps = st.multiselect("Αλλαγή Προσωπικού (Προαιρετικό)", options=edit_options, default=valid_emp_ids, format_func=utils.get_employee_name)
             
             e_color_col, e_notes_col = st.columns(2)
