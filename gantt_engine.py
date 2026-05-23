@@ -322,4 +322,28 @@ def generate_gantt_chart(start_of_week, zoom_factor, presentation_mode, data_ver
     fig.update_yaxes(
         categoryorder='array', categoryarray=ordered_categories,
         tickmode='array', tickvals=ordered_categories,
-        ticktext=[tickvals_map[v] for
+        ticktext=[tickvals_map[v] for v in ordered_categories],
+        showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1,
+        automargin=True, range=y_range, fixedrange=y_fixed
+    )
+    fig.update_traces(
+        textposition='inside', insidetextanchor='middle',
+        textfont=dict(color='black', size=max(8, int(9*zoom_factor)), family="Arial Black, Arial, sans-serif"),
+        marker=dict(line=dict(color='black', width=1)), textangle=0, constraintext='none',
+        hoverinfo='none', hovertemplate=None,
+        selected=dict(marker=dict(opacity=1)), unselected=dict(marker=dict(opacity=1))
+    )
+    fig.update_layout(
+        bargap=0.02, showlegend=False, plot_bgcolor='#dbece8', paper_bgcolor='rgba(0,0,0,0)',
+        height=dyn_h, margin=dict(l=0, r=0, t=50, b=10),
+        annotations=empty_shift_annotations, dragmode="pan", clickmode="event+select",
+        uirevision="constant",
+        xaxis=dict(
+            side='top', tickmode='linear', tick0="1970-01-01 00:00:00", dtick=3600000, # 1 hour ticks
+            tickformat="%H:%M", showgrid=True, gridcolor='black', gridwidth=1,
+            autorange=False, range=["1970-01-01 06:00:00", "1970-01-01 16:00:00"], # ΑΠΟΛΥΤΟ ΠΡΟΕΠΙΛΕΓΜΕΝΟ ΕΥΡΟΣ!
+            title="", tickfont=dict(size=max(8, int(11*zoom_factor)), color="black", family="Arial"),
+            fixedrange=False, rangeslider=dict(visible=False) # ΕΠΙΤΡΕΠΕΙ ΟΡΙΖΟΝΤΙΟ DRAG!
+        )
+    )
+    return fig, wk_groups, export_data
