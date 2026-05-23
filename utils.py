@@ -9,7 +9,6 @@ import threading
 import re
 import ast
 import time
-from functools import lru_cache
 import config
 import scheduling
 
@@ -79,16 +78,6 @@ def serialize_dates(data):
         return {k: (v.isoformat() if isinstance(v, (datetime, date)) else v) for k, v in data.items()}
     return data
 
-@lru_cache(maxsize=8192)
-def _safe_date_parse_str(s):
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
 def safe_date_parse(d_val):
     if isinstance(d_val, date) and not isinstance(d_val, datetime):
         return d_val
@@ -96,94 +85,58 @@ def safe_date_parse(d_val):
         return d_val.date()
     if isinstance(d_val, str):
         s = d_val.split("T")[0][:10]
-        if not s:
-            return None
-        return _safe_date_parse_str(s)
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
     return None
 
 def format_log_details(table_name, records):
-    if not records:
-        return "Καμία εγγραφή"
-    if isinstance(records, dict):
-        records = [records]
-    if isinstance(records, str):
-        return records
-
-    employees = st.session_state.get('employees', [])
-    projects = st.session_state.get('projects', [])
-    emp_map = st.session_state.get('emp_map') or {
-        e.get('id'): e for e in employees if isinstance(e, dict) and e.get('id')
-    }
-    proj_map = st.session_state.get('proj_map') or {
-        p.get('id'): p for p in projects if isinstance(p, dict) and p.get('id')
-    }
-
+    if not records: return "Καμία εγγραφή"
+    if isinstance(records, dict): records = [records]
+    if isinstance(records, str): return records
     lines = []
     for r in records:
-        if not isinstance(r, dict):
-            continue
-
+        if not isinstance(r, dict): continue
         if table_name == 'employees':
             lines.append(f"{r.get('name', 'Άγνωστος')}")
-
         elif table_name == 'projects':
             lines.append(f"'{r.get('name', 'Άγνωστο Έργο')}'")
-
         elif table_name == 'assignments':
             emp_id = r.get('employeeId')
             emp_name = "Χαμηλό / Χωρίς Προσωπικό"
-            if emp_id:
-                e_info = emp_map.get(emp_id)
-                if e_info:
-                    emp_name = e_info.get('name', emp_name)
-
+            if emp_id and 'employees' in st.session_state:
+                e_info = next((e for e in st.session_state.get('employees', []) if e.get('id') == emp_id), None)
+                if e_info: emp_name = e_info.get('name', emp_name)
             proj_id = r.get('projectId')
             proj_name = "Άγνωστο Έργο"
-            if proj_id:
-                p_info = proj_map.get(proj_id)
-                if p_info:
-                    proj_name = p_info.get('name', proj_name)
-
+            if proj_id and 'projects' in st.session_state:
+                p_info = next((p for p in st.session_state.get('projects', []) if p.get('id') == proj_id), None)
+                if p_info: proj_name = p_info.get('name', proj_name)
             d = r.get('date', "")
-            if isinstance(d, date):
-                d = d.strftime('%d/%m/%Y')
-            elif isinstance(d, str) and "T" in d:
-                d = d.split("T")[0]
+            if isinstance(d, date): d = d.strftime('%d/%m/%Y')
+            elif isinstance(d, str) and "T" in d: d = d.split("T")[0]
             lines.append(f"Βάρδια: {emp_name} στο '{proj_name}' ({d})")
-
         elif table_name == 'leaves':
             emp_id = r.get('employeeId')
-            e_info = emp_map.get(emp_id) if emp_id else None
-            emp_name = e_info.get('name', 'Άγνωστος') if e_info else 'Άγνωστος'
-
+            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
             sd = r.get('startDate', "")
             ed = r.get('endDate', "")
-            if isinstance(sd, date):
-                sd = sd.strftime('%d/%m/%Y')
-            if isinstance(ed, date):
-                ed = ed.strftime('%d/%m/%Y')
-
+            if isinstance(sd, date): sd = sd.strftime('%d/%m/%Y')
+            if isinstance(ed, date): ed = ed.strftime('%d/%m/%Y')
             sub_id = r.get('substituteId')
-            sub_info = emp_map.get(sub_id) if sub_id else None
-            sub_name = sub_info.get('name', 'Άγνωστος') if sub_info else 'Άγνωστος'
-            sub_str = f" [Αντικατ: {sub_name}]" if sub_id else ""
-
+            sub_str = f" [Αντικατ: {next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == sub_id), 'Άγνωστος')}]" if sub_id else ""
             lines.append(f"Άδεια: {emp_name} ({sd} - {ed}){sub_str}")
-
         elif table_name == 'evaluations':
             emp_id = r.get('employeeId')
-            e_info = emp_map.get(emp_id) if emp_id else None
-            emp_name = e_info.get('name', 'Άγνωστος') if e_info else 'Άγνωστος'
+            emp_name = next((e.get('name', 'Άγνωστος') for e in st.session_state.get('employees', []) if e.get('id') == emp_id), "Άγνωστος")
             lines.append(f"Αξιολόγηση: {emp_name} ({r.get('month')}/{r.get('year')})")
-
         elif table_name == 'recurring_patterns':
             lines.append(f"Επαναλαμβανόμενη σειρά: {r.get('type')}")
-
         else:
             lines.append("Εγγραφή")
-
-    if not lines:
-        return "Λεπτομέρειες μη διαθέσιμες"
+    if not lines: return "Λεπτομέρειες μη διαθέσιμες"
     if len(lines) > 5:
         return " | ".join(lines[:5]) + f" ...και άλλες {len(lines)-5} εγγραφές"
     return " | ".join(lines)
@@ -222,6 +175,10 @@ def log_activity(action_type, table_name, details_raw):
     except Exception as e:
         print(f"Log Error: {e}")
 
+# ==========================================
+# ΕΝΣΩΜΑΤΩΣΗ ΛΟΓΙΚΗΣ ΣΥΓΧΡΟΝΙΣΜΟΥ (ΑΠΟΦΥΓΗ CIRCULAR IMPORTS)
+# ==========================================
+
 def inject_silent_refresh_css():
     st.markdown(
         """
@@ -232,7 +189,7 @@ def inject_silent_refresh_css():
             display: none !important; 
         }
         
-        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" */
+        /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" (αφαίρεση του veil effect) */
         [data-testid="stAppViewContainer"], 
         [data-testid="stMainBlockContainer"],
         [data-testid="stAppViewBlockContainer"],
@@ -278,9 +235,102 @@ def track_deletion(table_name, record_id):
     try: supabase.table("deleted_records").insert(deletion_log).execute()
     except Exception: pass
 
+def sync_data_incremental():
+    inject_silent_refresh_css()
+    if not supabase: return
+
+    last_sync = st.session_state.get("last_sync_time", None)
+    current_db_time = get_db_current_time()
+
+    if not last_sync:
+        with st.spinner("Φόρτωση δεδομένων..."):
+            st.session_state.employees = fetch_paginated("employees")
+            st.session_state.projects = fetch_paginated("projects")
+            
+            assigns = fetch_paginated("assignments")
+            for a in assigns:
+                d = safe_date_parse(a.get('date'))
+                if d: a['date'] = d
+            st.session_state.assignments = assigns
+            
+            leaves = fetch_paginated("leaves")
+            for l in leaves:
+                sd = safe_date_parse(l.get('startDate'))
+                if sd: l['startDate'] = sd
+                ed = safe_date_parse(l.get('endDate'))
+                if ed: l['endDate'] = ed
+            st.session_state.leaves = leaves
+            
+            patterns = fetch_paginated("recurring_patterns")
+            for p in patterns:
+                sd = safe_date_parse(p.get('startDate'))
+                if sd: p['startDate'] = sd
+            st.session_state.recurring_patterns = patterns
+            
+            try: st.session_state.evaluations = fetch_paginated("evaluations")
+            except Exception: st.session_state.evaluations = []
+                
+            st.session_state.last_sync_time = current_db_time
+            mark_data_changed()
+            return
+
+    try:
+        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
+        if res_logs.data:
+            latest_ts = to_timestamp(res_logs.data[0]['timestamp'])
+            sync_ts = to_timestamp(last_sync)
+            if (latest_ts + 30.0) <= sync_ts: return
+
+        deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
+        deletions = deleted_res.data or []
+        
+        deleted_by_table = {}
+        for d in deletions:
+            t = d['table_name']
+            if t not in deleted_by_table: deleted_by_table[t] = []
+            deleted_by_table[t].append(str(d['record_id']))
+
+        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
+        changes_detected = False
+
+        for table in tables_to_sync:
+            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
+            delta_records = delta_res.data or []
+            table_deleted_ids = deleted_by_table.get(table, [])
+            
+            if delta_records or table_deleted_ids:
+                changes_detected = True
+                if table == "assignments":
+                    for r in delta_records:
+                        d = safe_date_parse(r.get('date'))
+                        if d: r['date'] = d
+                elif table == "leaves":
+                    for r in delta_records:
+                        sd = safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
+                        ed = safe_date_parse(r.get('endDate'))
+                        if ed: r['endDate'] = ed
+                elif table == "recurring_patterns":
+                    for r in delta_records:
+                        sd = safe_date_parse(r.get('startDate'))
+                        if sd: r['startDate'] = sd
+
+                st.session_state[table] = apply_delta_updates(
+                    table, st.session_state.get(table, []), delta_records, table_deleted_ids
+                )
+
+        if changes_detected: mark_data_changed()
+        st.session_state.last_sync_time = current_db_time
+
+    except Exception as e:
+        print(f"Incremental Sync Error: {e}")
+
+# ==========================================
+# ΣΥΝΕΧΕΙΑ ΛΕΙΤΟΥΡΓΙΩΝ ΒΑΣΗΣ
+# ==========================================
+
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
-    current_user = st.session_state.get("current_user", "Σύστημα (Παρασκήνιο)")
     
     def _thread_task():
         chunk_size = 500
@@ -295,14 +345,13 @@ def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗ
             log_entry = {
                 "id": str(uuid.uuid4()),
                 "timestamp": now_utc,
-                "username": current_user,
+                "username": st.session_state.get("current_user", "Σύστημα (Παρασκήνιο)"),
                 "action_type": log_action,
                 "table_name": table,
                 "details": log_details or f"Προστέθηκαν {len(data)} εγγραφές"
             }
             supabase.table("activity_logs").insert(log_entry).execute()
-        except Exception:
-            pass
+        except: pass
 
     threading.Thread(target=_thread_task, daemon=True).start()
 
@@ -567,6 +616,7 @@ def auto_extend_recurring_patterns():
         db_insert_bulk_background('assignments', new_assignments_batch, "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ", f"Επεκτάθηκαν {len(new_assignments_batch)} βάρδιες στο παρασκήνιο")
 
 def cleanup_duplicates():
+    """Ο Σιωπηλός Καθαριστής: Εξολοθρεύει τα 'Φαντάσματα' με 100% ασφάλεια τύπων (TypeError Proof)."""
     if not st.session_state.get('assignments'): return
     
     seen_signatures = set()
@@ -604,6 +654,7 @@ def cleanup_duplicates():
                         for rec_id in chunk:
                             track_deletion('assignments', rec_id)
                     except: pass
+                
                 try:
                     now_utc = datetime.utcnow().isoformat() + "Z"
                     log_entry = {
@@ -619,6 +670,7 @@ def cleanup_duplicates():
             threading.Thread(target=delete_ghosts, daemon=True).start()
 
 def cleanup_projects():
+    """Συγχωνεύει τα διπλά έργα με 100% προστασία από None (AttributeError Proof)."""
     if not st.session_state.get('projects'): return
     
     name_map = {}
@@ -683,6 +735,7 @@ def cleanup_projects():
                         for rec_id in chunk:
                             track_deletion('projects', rec_id)
                     except: pass
+                
                 try:
                     now_utc = datetime.utcnow().isoformat() + "Z"
                     log_entry = {
@@ -700,14 +753,6 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
-    # --- ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ΠΑΝΤΟΥ (Prevent AttributeError on Refresh) ---
-    if "employees" not in st.session_state: st.session_state.employees = []
-    if "projects" not in st.session_state: st.session_state.projects = []
-    if "assignments" not in st.session_state: st.session_state.assignments = []
-    if "leaves" not in st.session_state: st.session_state.leaves = []
-    if "recurring_patterns" not in st.session_state: st.session_state.recurring_patterns = []
-    if "evaluations" not in st.session_state: st.session_state.evaluations = []
-    
     try:
         import database
         database.sync_data_incremental()
@@ -717,19 +762,6 @@ def init_data_and_sync():
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
 
-    # --- ΝΕΟ: ΕΞΥΠΝΟΣ ΦΥΛΑΚΑΣ ΕΠΙΤΑΧΥΝΣΗΣ (CACHE GUARD) ---
-    # Αποτρέπει το βαρύ χτίσιμο ευρετηρίων σε κάθε κλικ αν δεν υπάρχουν αλλαγές!
-    current_version = st.session_state.get('local_gantt_version', 0)
-    last_processed = st.session_state.get('last_processed_version', -1)
-    
-    if current_version == last_processed and 'emp_map' in st.session_state:
-        # Αν δεν άλλαξε η βάση, εκτελούμε μόνο τον ελαφρύ έλεγχο επεκτάσεων (1 φορά την ώρα)
-        if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
-            auto_extend_recurring_patterns()
-            st.session_state.last_auto_extend_check = time.time()
-        return
-
-    # --- ΒΑΡΥΣ ΥΠΟΛΟΓΙΣΜΟΣ & ΕΚΚΑΘΑΡΙΣΗ (Εκτελείται ΜΟΝΟ όταν υπάρχουν αλλαγές) ---
     valid_assignments = []
     for a in st.session_state.get('assignments', []):
         if isinstance(a, dict):
@@ -772,9 +804,6 @@ def init_data_and_sync():
     st.session_state.leaves_by_emp = leaves_by_emp
     
     st.session_state.data_dirty = False
-    
-    # Ενημερώνουμε την έκδοση που μόλις επεξεργαστήκαμε!
-    st.session_state.last_processed_version = st.session_state.get('local_gantt_version', 0)
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
         auto_extend_recurring_patterns()
@@ -817,14 +846,14 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     <script>
     const doc = window.parent.document;
     
+    // 1. Ψηφιακό Ρολόι
     let clockDiv = doc.getElementById("staff_pro_clock");
     if (!clockDiv) {
         clockDiv = doc.createElement("div");
         clockDiv.id = "staff_pro_clock";
         doc.body.appendChild(clockDiv);
+        clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
     }
-    clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
-    
     function updateClock() {
         const now = new Date();
         const dateOptions = { day: 'numeric', month: 'long', year: 'numeric' };
@@ -833,21 +862,23 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     updateClock();
     setInterval(updateClock, 1000);
 
+    // 2. ΝΕΟ: Εναλλασσόμενα Εικονίδια Καθαριότητας (Σκούπα, Φαράσι, Σαπούνι, Σφουγγαρίστρα)
     let loaderDiv = doc.getElementById("staff_pro_cleaner");
     if (!loaderDiv) {
         loaderDiv = doc.createElement("div");
         loaderDiv.id = "staff_pro_cleaner";
         doc.body.appendChild(loaderDiv);
+        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     }
-    loaderDiv.style.cssText = "position: fixed; top: 12px; right: 680px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
     
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
     let cIdx = 0;
     setInterval(() => {
-        loaderDiv.innerText = "καθαρίζω... " + cleaningIcons[cIdx];
+        loaderDiv.innerText = "Ανανέωση " + cleaningIcons[cIdx];
         cIdx = (cIdx + 1) % cleaningIcons.length;
     }, 400);
 
+    // Εντοπισμός λειτουργίας Streamlit και εμφάνιση εικονιδίων
     setInterval(() => {
         const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
         if (isRunning) {
