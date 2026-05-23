@@ -258,7 +258,7 @@ def sync_data_incremental():
                 sd = safe_date_parse(l.get('startDate'))
                 if sd: l['startDate'] = sd
                 ed = safe_date_parse(l.get('endDate'))
-                                if ed: l['endDate'] = ed
+                if ed: l['endDate'] = ed
             st.session_state.leaves = leaves
             
             patterns = fetch_paginated("recurring_patterns")
@@ -518,7 +518,7 @@ def auto_extend_recurring_patterns():
             weekdays_raw = pat.get('weekdays', [])
             if isinstance(weekdays_raw, str):
                 try: selected_weekdays = ast.literal_eval(weekdays_raw)
-                                    except: selected_weekdays = []
+                except: selected_weekdays = []
             else:
                 selected_weekdays = weekdays_raw
                 
@@ -778,7 +778,7 @@ def init_data_and_sync():
             ed = safe_date_parse(l.get('endDate'))
             if sd: l['startDate'] = sd
             if ed: l['endDate'] = ed
-                            valid_leaves.append(l)
+            valid_leaves.append(l)
     st.session_state.leaves = valid_leaves
 
     cleanup_duplicates()
