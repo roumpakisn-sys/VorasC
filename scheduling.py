@@ -13,6 +13,7 @@ def is_on_leave(employee_id, check_date, leaves_by_emp):
             
     return False
 
+
 def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exclude_ids=None):
     """
     Pure Function: Ελέγχει αν υπάρχει χρονική επικάλυψη (conflict) στις βάρδιες.
@@ -21,33 +22,47 @@ def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exc
     if not employee_id: 
         return t_start, t_end, False, ""
         
+    # 1. Απόλυτα ασφαλής μετατροπή του exclude_ids σε καθαρή λίστα πεζών strings
     if exclude_ids is None: 
-        exclude_ids = []
+        safe_exclude_ids = []
+    elif isinstance(exclude_ids, str):
+        safe_exclude_ids = [exclude_ids.strip().lower()]
+    else:
+        safe_exclude_ids = [str(eid).strip().lower() for eid in exclude_ids]
         
-    # Μετατροπή των exclude_ids σε string για απόλυτη ασφάλεια (αποφυγή UUID object mismatches)
-    safe_exclude_ids = [str(eid) for eid in exclude_ids]
-        
-    new_s = str(t_start)[:5]
-    new_e = str(t_end)[:5]
+    # 2. Ακριβής μετατροπή ώρας σε λεπτά (για να διαβάζει σωστά τα μεσάνυχτα/βράδια)
+    def get_mins(t_str):
+        try:
+            h, m = map(int, str(t_str).strip()[:5].split(':'))
+            # Αν η βάρδια είναι μέχρι τις 03:59, θεωρείται τμήμα της 24ωρης Gantt ημέρας
+            if h < 4: 
+                h += 24
+            return h * 60 + m
+        except:
+            return 0
+            
+    new_s_mins = get_mins(t_start)
+    new_e_mins = get_mins(t_end)
     
-    # Φιλτράρισμα: 
-    # 1. Μόνο αυτού του υπαλλήλου
-    # 2. ΑΓΝΟΟΥΜΕ τις βάρδιες που επεξεργαζόμαστε τώρα (safe_exclude_ids)
-    # 3. ΑΓΝΟΟΥΜΕ τις ακυρωμένες βάρδιες (δεν πιάνουν χώρο στον χρόνο του υπαλλήλου)
+    # 3. Φιλτράρισμα Βαρδιών
     emp_assigns = [
         a for a in day_assignments 
-        if str(a.get('employeeId')) == str(employee_id) 
-        and str(a.get('id')) not in safe_exclude_ids
+        if str(a.get('employeeId')).strip() == str(employee_id).strip()
+        and str(a.get('id', '')).strip().lower() not in safe_exclude_ids
         and not a.get('is_cancelled', False)
     ]
     
     for ea in emp_assigns:
-        ea_s = str(ea.get('startTime', ''))[:5]
-        ea_e = str(ea.get('endTime', ''))[:5]
+        ea_s_mins = get_mins(ea.get('startTime', ''))
+        ea_e_mins = get_mins(ea.get('endTime', ''))
         
-        # ΑΥΣΤΗΡΟΣ - ΣΥΜΜΕΤΡΙΚΟΣ Έλεγχος χρονικής επικάλυψης
-        # Αν η νέα έναρξη είναι πριν την παλιά λήξη ΚΑΙ η νέα λήξη είναι μετά την παλιά έναρξη = ΕΠΙΚΑΛΥΨΗ
-        if new_s < ea_e and new_e > ea_s:
-            return t_start, t_end, True, "Υπάρχει χρονική επικάλυψη με άλλη βάρδια του υπαλλήλου."
+        # 4. Έλεγχος Επικάλυψης με απόλυτα νούμερα (λεπτά) αντί για strings
+        if new_s_mins < ea_e_mins and new_e_mins > ea_s_mins:
+            # Επαναφορά της αρχικής σου λογικής: Επιτρέπει την επικάλυψη 
+            # ΜΟΝΟ αν η νέα βάρδια λήγει ΜΕΤΑ την παλιά (χρήσιμο για handovers/αλλαγές)
+            if new_e_mins > ea_e_mins:
+                return t_start, t_end, False, "Allowed Overlap"
+            else:
+                return t_start, t_end, True, "Υπάρχει πλήρης χρονική επικάλυψη με άλλη βάρδια."
                 
     return t_start, t_end, False, ""
