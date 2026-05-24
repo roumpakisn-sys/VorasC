@@ -1057,31 +1057,57 @@ if not presentation_mode:
                                     clear_bar_selection()
                                     st.rerun()
 
-                                if pending_new_project:
-                                    st.session_state.projects.append(pending_new_project)
-                                    utils.db_insert("projects", pending_new_project, track=False)
-
-                                emps_to_process = selected_emp_ids if selected_emp_ids else [""]
+                                                               emps_to_process = selected_emp_ids if selected_emp_ids else [""]
                                 valid_assignments = []
+                                has_blocking_error = False
 
                                 for eid in emps_to_process:
                                     if eid:
                                         emp_name = utils.get_employee_name(eid)
+
                                         if scheduling.is_on_leave(eid, edit_date, st.session_state.leaves_by_emp):
-                                            valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": f"[Άδεια: {emp_name}]", "emp_name": emp_name})
-                                            st.toast(f"Ο/Η {emp_name} έχει άδεια. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
-                                        else:
-                                            day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
-                                            adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                                eid, str_start, str_end, day_assigns, exclude_ids=target_group["AssignmentIds"]
-                                            )
-                                            if is_conflict:
-                                                valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": f"[Εμπλοκή: {emp_name}]", "emp_name": emp_name})
-                                                st.toast(f"Διπλοκράτηση {emp_name}. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.", icon="⚠️")
-                                            else:
-                                                valid_assignments.append({"eid": eid, "start": adj_start, "end": adj_end, "msg": msg, "emp_name": emp_name})
+                                            st.error(f"Δεν έγινε αποθήκευση: Ο/Η {emp_name} έχει άδεια σε αυτή την ημερομηνία.")
+                                            st.toast(f"Ακύρωση αποθήκευσης: Ο/Η {emp_name} έχει άδεια.", icon="⚠️")
+                                            has_blocking_error = True
+                                            break
+
+                                        day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
+                                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
+                                            eid,
+                                            str_start,
+                                            str_end,
+                                            day_assigns,
+                                            exclude_ids=target_group["AssignmentIds"],
+                                        )
+
+                                        if is_conflict:
+                                            st.error(f"Δεν έγινε αποθήκευση: Διπλοκράτηση για {emp_name}.")
+                                            st.toast(f"Ακύρωση αποθήκευσης: Διπλοκράτηση {emp_name}.", icon="⚠️")
+                                            has_blocking_error = True
+                                            break
+
+                                        valid_assignments.append({
+                                            "eid": eid,
+                                            "start": adj_start,
+                                            "end": adj_end,
+                                            "msg": msg,
+                                            "emp_name": emp_name,
+                                        })
                                     else:
-                                        valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": "", "emp_name": ""})
+                                        valid_assignments.append({
+                                            "eid": "",
+                                            "start": str_start,
+                                            "end": str_end,
+                                            "msg": "",
+                                            "emp_name": "",
+                                        })
+
+                                if has_blocking_error:
+                                    st.stop()
+
+                                if pending_new_project:
+                                    st.session_state.projects.append(pending_new_project)
+                                    utils.db_insert("projects", pending_new_project, track=False)
 
                                 old_assigns = [a for a in st.session_state.assignments if a["id"] in target_group["AssignmentIds"]]
                                 st.session_state.assignments = [a for a in st.session_state.assignments if a["id"] not in target_group["AssignmentIds"]]
