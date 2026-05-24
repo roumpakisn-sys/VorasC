@@ -55,15 +55,15 @@ if not st.session_state.authenticated:
                 except BaseException:
                     pass
                 
-              if password == valid_passwords.get(username):
-    # Κάθε νέο login ξεκινά με καθαρό full sync,
-    # ώστε ο χρήστης να δει αμέσως όλες τις αλλαγές που έγιναν πριν μπει.
-    st.session_state.authenticated = True
-    st.session_state.current_user = username
-    st.session_state.last_sync_time = None
-    st.session_state.local_gantt_version = st.session_state.get("local_gantt_version", 0) + 1
-    st.switch_page("pages/1_Gantt_Dashboard.py")
-else:
-    st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
+                             if password == valid_passwords.get(username):
+                    # Κάθε νέο login ξεκινά με καθαρό full sync,
+                    # ώστε ο χρήστης να δει αμέσως όλες τις αλλαγές που έγιναν πριν μπει.
+                    st.session_state.authenticated = True
+                    st.session_state.current_user = username
+                    st.session_state.last_sync_time = None
+                    st.session_state.local_gantt_version = st.session_state.get("local_gantt_version", 0) + 1
+                    st.switch_page("pages/1_Gantt_Dashboard.py")
+                else:
+                    st.error("Λάθος κωδικός πρόσβασης. Δοκιμάστε ξανά.")
 else:
     st.switch_page("pages/1_Gantt_Dashboard.py")
