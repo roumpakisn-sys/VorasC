@@ -13,3 +13,4 @@ BASIC_COLORS = {
     "Σκούρο Πράσινο": "#38761d",
     "Γκρι": "#999999"
 }
+BLUE_STACK_HEX = BASIC_COLORS["Μπλε"]
