@@ -1072,12 +1072,31 @@ if not presentation_mode:
                                             break
 
                                         day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
+
+                                        # Αν επεξεργαζόμαστε μεμονωμένη μπάρα από επαναλαμβανόμενη εργασία,
+                                        # αγνοούμε και τυχόν συγγενικές εγγραφές της ίδιας σειράς που αντιστοιχούν
+                                        # στην ίδια αρχική μπάρα. Έτσι η μπάρα δεν κάνει conflict με τον εαυτό της.
+                                        edit_exclude_ids = list(target_group["AssignmentIds"])
+                                        target_recurring_id = target_group.get("RecurringId")
+
+                                        if target_recurring_id:
+                                            for a in day_assigns:
+                                                if (
+                                                    a.get("recurring_id") == target_recurring_id
+                                                    and a.get("projectId") == target_group["ProjectId"]
+                                                    and str(a.get("startTime", ""))[:5] == str(target_group["StartTime"])[:5]
+                                                    and str(a.get("endTime", ""))[:5] == str(target_group["EndTime"])[:5]
+                                                    and str(a.get("arrivalTime", ""))[:5] == str(target_group.get("ArrivalTime", ""))[:5]
+                                                ):
+                                                    if a.get("id") not in edit_exclude_ids:
+                                                        edit_exclude_ids.append(a.get("id"))
+
                                         adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
                                             eid,
                                             str_start,
                                             str_end,
                                             day_assigns,
-                                            exclude_ids=target_group["AssignmentIds"],
+                                            exclude_ids=edit_exclude_ids,
                                         )
 
                                         if is_conflict:
