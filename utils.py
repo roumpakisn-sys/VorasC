@@ -753,6 +753,9 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
+    if st.session_state.pop("force_full_sync_after_login", False):
+        st.session_state.last_sync_time = None
+    
     try:
         import database
         database.sync_data_incremental()
