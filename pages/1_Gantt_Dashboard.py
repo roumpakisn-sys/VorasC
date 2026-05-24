@@ -336,8 +336,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
         # Οι μπλε μπάρες μπαίνουν πάντα κάτω από όλες τις άλλες μπάρες της ημέρας.
         # Δεν αλλάζει η αποθήκευση ούτε η λογική των βαρδιών· μόνο η οπτική στοίβαξη.
-        non_blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() != "#4a86e8"]
-        blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() == "#4a86e8"]
+        blue_stack_hex = config.BLUE_STACK_HEX.lower()
+non_blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() != blue_stack_hex]
+blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() == blue_stack_hex]
 
         group_lanes = []
 
