@@ -55,7 +55,7 @@ if not st.session_state.authenticated:
                 except BaseException:
                     pass
                 
-                             if password == valid_passwords.get(username):
+                        if password == valid_passwords.get(username):
                     # Κάθε νέο login ξεκινά με καθαρό full sync,
                     # ώστε ο χρήστης να δει αμέσως όλες τις αλλαγές που έγιναν πριν μπει.
                     st.session_state.authenticated = True
