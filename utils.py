@@ -753,9 +753,6 @@ def cleanup_projects():
 def init_data_and_sync():
     init_undo_stack()
     
-    if st.session_state.pop("force_full_sync_after_login", False):
-        st.session_state.last_sync_time = None
-    
     try:
         import database
         database.sync_data_incremental()
@@ -1092,25 +1089,9 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     st.sidebar.write("---")
     st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
     if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
-        for key in [
-            "last_sync_time",
-            "force_full_sync_after_login",
-            "employees",
-            "projects",
-            "assignments",
-            "leaves",
-            "recurring_patterns",
-            "evaluations",
-            "emp_map",
-            "proj_map",
-            "assignments_by_date",
-            "leaves_by_emp",
-       ]:
-            st.session_state.pop(key, None)
-
-       st.session_state.authenticated = False
-       st.session_state.current_user = None
-       st.switch_page("streamlit_app.py")
+        st.session_state.authenticated = False
+        st.session_state.current_user = None
+        st.switch_page("streamlit_app.py")
 
     today_date = date.today()
     orphan_count = 0
