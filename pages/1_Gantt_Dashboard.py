@@ -72,7 +72,6 @@ if total_indexed != len(st.session_state.get("assignments", [])):
     utils.init_data_and_sync()
 
 utils.setup_shared_ui()
-apply_html_sidebar_skin()
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
 active_employee_ids = [e["id"] for e in st.session_state.employees if e.get("status", "Ενεργός") == "Ενεργός"]
