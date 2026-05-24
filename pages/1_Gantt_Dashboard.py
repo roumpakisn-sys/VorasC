@@ -1057,7 +1057,7 @@ if not presentation_mode:
                                     clear_bar_selection()
                                     st.rerun()
 
-                                                               emps_to_process = selected_emp_ids if selected_emp_ids else [""]
+                                emps_to_process = selected_emp_ids if selected_emp_ids else [""]
                                 valid_assignments = []
                                 has_blocking_error = False
 
