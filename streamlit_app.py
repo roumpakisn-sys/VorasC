@@ -80,7 +80,6 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.session_state.current_user = username
                     st.session_state.last_sync_time = None
-                    st.session_state.force_full_sync_after_login = True
                     st.session_state.local_gantt_version = st.session_state.get("local_gantt_version", 0) + 1
                     st.switch_page("pages/1_Gantt_Dashboard.py")
                 else:
