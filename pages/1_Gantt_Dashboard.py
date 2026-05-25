@@ -205,8 +205,18 @@ gantt_height_px = st.slider(
     value=st.session_state.gantt_height_px,
     step=25,
     help="Αυξομείωση του κάθετου μεγέθους του παραθύρου Gantt.",
+    key="gantt_height_slider",
 )
-st.session_state.gantt_height_px = gantt_height_px
+
+# Όταν αλλάζει το ύψος, ανανεώνουμε το component key του Gantt.
+# Το st_click_detector μερικές φορές κρατάει παλιό iframe αν το key μείνει ίδιο.
+if st.session_state.get("last_gantt_height_px") != gantt_height_px:
+    st.session_state.gantt_height_px = gantt_height_px
+    st.session_state.last_gantt_height_px = gantt_height_px
+    st.session_state.suppress_next_detector_click = True
+    st.session_state.detector_version = st.session_state.get("detector_version", 0) + 1
+else:
+    st.session_state.gantt_height_px = gantt_height_px
 
 zoom_factor = zoom_level / 100.0
 
@@ -611,7 +621,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
 html_chart = build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px)
-clicked_safe_id = click_detector(html_chart, key=f"gantt_detector_{st.session_state.detector_version}")
+clicked_safe_id = click_detector(
+    html_chart,
+    key=f"gantt_detector_{st.session_state.detector_version}_{st.session_state.gantt_height_px}",
+)
 
 if st.session_state.get("suppress_next_detector_click", False):
     st.session_state.suppress_next_detector_click = False
