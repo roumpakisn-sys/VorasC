@@ -280,7 +280,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     html += (
         "<div id='gantt-master-container' "
-        "style='overflow: auto; height: calc(100vh - 8px); min-height: 360px; width: 100%; max-width: 100%; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
+        "style='overflow: auto; height: 650px; min-height: 360px; width: 100%; max-width: 100%; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
         "background: #ffffff; user-select: none; cursor: grab; "
         "box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
@@ -421,6 +421,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
         html += "</div></div>"
 
+    html += "<div id='gantt-height-resizer' title='Σύρετε πάνω/κάτω για αλλαγή ύψους' style='position: sticky; bottom: 0; left: 0; height: 18px; min-width: 100%; background: linear-gradient(90deg, #e2e8f0, #cbd5e1, #e2e8f0); border-top: 1px solid #94a3b8; cursor: ns-resize; z-index: 500; display: flex; align-items: center; justify-content: center; color: #334155; font-size: 13px; font-weight: 900; letter-spacing: 4px; user-select: none;'>↕</div>"
     html += "</div>"
 
     # --- JS Injector (Base64) ---
@@ -438,6 +439,29 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
       var savedScrollLeft = sessionStorage.getItem('ganttScrollLeft');
       var savedScrollTop = sessionStorage.getItem('ganttScrollTop');
+      var savedGanttHeight = sessionStorage.getItem('ganttFrameHeight');
+      var resizer = document.getElementById('gantt-height-resizer');
+
+      function setGanttFrameHeight(px) {
+        var h = Math.max(360, Math.min(1400, Math.round(px)));
+        s.style.height = h + 'px';
+        try {
+          if (window.frameElement) {
+            window.frameElement.style.height = (h + 30) + 'px';
+            window.frameElement.setAttribute('height', String(h + 30));
+          }
+        } catch (err) {}
+        sessionStorage.setItem('ganttFrameHeight', String(h));
+      }
+
+      if (savedGanttHeight !== null) {
+        var restoredHeight = parseInt(savedGanttHeight, 10);
+        if (!isNaN(restoredHeight)) {
+          setGanttFrameHeight(restoredHeight);
+        }
+      } else {
+        setGanttFrameHeight(650);
+      }
 
       if (savedScrollLeft !== null) {
           s.scrollLeft = parseFloat(savedScrollLeft);
@@ -450,7 +474,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       }
 
       var isDown = false;
+      var isHeightResizing = false;
       var startX = 0;
+      var resizeStartY = 0;
+      var resizeStartHeight = 650;
       var scrollLeftStart = 0;
       var moved = false;
       var DRAG_THRESHOLD = 5;
@@ -493,33 +520,79 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
         setTimeout(function(){ window.gIsDragging = false; }, 80);
       }
 
+      function startHeightResize(clientY, ev) {
+        isHeightResizing = true;
+        window.gIsDragging = true;
+        resizeStartY = clientY;
+        resizeStartHeight = s.getBoundingClientRect().height;
+        s.style.cursor = 'ns-resize';
+        if (document.body) document.body.style.userSelect = 'none';
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+      }
+
+      function moveHeightResize(clientY, ev) {
+        if (!isHeightResizing) return;
+        if (ev) ev.preventDefault();
+        var deltaY = clientY - resizeStartY;
+        setGanttFrameHeight(resizeStartHeight + deltaY);
+      }
+
+      function endHeightResize() {
+        if (!isHeightResizing) return;
+        isHeightResizing = false;
+        s.style.cursor = 'grab';
+        if (document.body) document.body.style.userSelect = '';
+        setTimeout(function(){ window.gIsDragging = false; }, 80);
+      }
+
       function onMouseDown(e) {
         if (e.button !== 0) return;
+        if (resizer && (e.target === resizer || resizer.contains(e.target))) {
+          startHeightResize(e.clientY, e);
+          return;
+        }
         startDrag(e.pageX);
       }
 
       function onMouseMoveLocal(e) {
+        if (isHeightResizing) {
+          moveHeightResize(e.clientY, e);
+          return;
+        }
         moveDrag(e.pageX, e);
       }
 
       function onMouseMoveWin(e) {
+        if (isHeightResizing) {
+          moveHeightResize(e.clientY, e);
+          return;
+        }
         moveDrag(e.pageX, e);
       }
 
       function onMouseUp() {
+        endHeightResize();
         endDrag();
       }
 
       function onMouseLeave() {
-        endDrag();
+        if (!isHeightResizing) endDrag();
       }
 
       function onBlur() {
+        endHeightResize();
         endDrag();
       }
 
       function onTouchStart(e) {
         if (!e.touches || !e.touches[0]) return;
+        if (resizer && (e.target === resizer || resizer.contains(e.target))) {
+          startHeightResize(e.touches[0].clientY, e);
+          return;
+        }
         isDown = true;
         moved = false;
         window.gIsDragging = false;
@@ -528,7 +601,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       }
 
       function onTouchMove(e) {
-        if (!isDown || !e.touches || !e.touches[0]) return;
+        if (!e.touches || !e.touches[0]) return;
+        if (isHeightResizing) {
+          moveHeightResize(e.touches[0].clientY, e);
+          return;
+        }
+        if (!isDown) return;
         var walk = (e.touches[0].pageX - s.offsetLeft) - startX;
         if (Math.abs(walk) > DRAG_THRESHOLD) {
           moved = true;
@@ -538,6 +616,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
       }
 
       function onTouchEnd() {
+        endHeightResize();
         endDrag();
       }
 
@@ -603,11 +682,10 @@ st.markdown(
     """
 <style>
 iframe[title*="st_click_detector"] {
-    height: 650px !important;
-    min-height: 360px !important;
-    max-height: 1400px !important;
-    resize: vertical !important;
-    overflow: auto !important;
+    height: 680px !important;
+    min-height: 390px !important;
+    max-height: 1430px !important;
+    overflow: hidden !important;
     border-radius: 12px !important;
 }
 </style>
@@ -636,7 +714,7 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες. **4)** Πιάστε την κάτω δεξιά άκρη του συνολικού πλαισίου Gantt και σύρετε κάθετα για αλλαγή ύψους."
+hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες. **4)** Πιάστε την κάτω μπάρα με το ↕ και σύρετε πάνω/κάτω για αλλαγή ύψους."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint:
