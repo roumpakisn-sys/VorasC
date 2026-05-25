@@ -752,6 +752,14 @@ def cleanup_projects():
 
 def init_data_and_sync():
     init_undo_stack()
+
+    # Full sync μία φορά ανά χρήστη/session.
+    # Καλύπτει και περιπτώσεις όπου ο χρήστης μπαίνει από ήδη ανοιχτό tab
+    # και δεν περνά ξανά από το login form.
+    current_user = st.session_state.get("current_user")
+    if current_user and st.session_state.get("full_sync_done_for_user") != current_user:
+        st.session_state.last_sync_time = None
+        st.session_state.full_sync_done_for_user = current_user
     
     try:
         import database
@@ -1089,6 +1097,25 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     st.sidebar.write("---")
     st.sidebar.markdown(f"👤 Συνδεδεμένος ως: **{st.session_state.get('current_user', 'Άγνωστος')}**")
     if st.sidebar.button("🚪 Αποσύνδεση", use_container_width=True):
+        # Καθαρό logout: δεν αφήνουμε cached δεδομένα/χρόνους sync
+        # να περάσουν στον επόμενο χρήστη στο ίδιο browser/session.
+        for key in [
+            "last_sync_time",
+            "full_sync_done_for_user",
+            "employees",
+            "projects",
+            "assignments",
+            "leaves",
+            "recurring_patterns",
+            "evaluations",
+            "emp_map",
+            "proj_map",
+            "assignments_by_date",
+            "leaves_by_emp",
+            "data_dirty",
+        ]:
+            st.session_state.pop(key, None)
+
         st.session_state.authenticated = False
         st.session_state.current_user = None
         st.switch_page("streamlit_app.py")
