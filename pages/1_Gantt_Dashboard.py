@@ -280,7 +280,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
 
     html += (
         "<div id='gantt-master-container' "
-        "style='overflow: auto; height: 640px; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
+        "style='overflow: auto; resize: both; height: 640px; min-height: 360px; min-width: 600px; max-width: 100%; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
         "background: #ffffff; user-select: none; cursor: grab; "
         "box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
@@ -493,8 +493,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id):
         setTimeout(function(){ window.gIsDragging = false; }, 80);
       }
 
+      function isResizeZone(e) {
+        var rect = s.getBoundingClientRect();
+        var zone = 22;
+        var nearRight = e.clientX >= rect.right - zone;
+        var nearBottom = e.clientY >= rect.bottom - zone;
+        return nearRight || nearBottom;
+      }
+
       function onMouseDown(e) {
         if (e.button !== 0) return;
+        if (isResizeZone(e)) return;
         startDrag(e.pageX);
       }
 
@@ -618,7 +627,7 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag οπουδήποτε μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες."
+hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες. **4)** Πιάστε τη δεξιά/κάτω άκρη του πλαισίου για αλλαγή μεγέθους."
 if export_data:
     col_hint, col_btn = st.columns([3, 1])
     with col_hint:
