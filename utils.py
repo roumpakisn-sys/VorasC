@@ -357,15 +357,22 @@ def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗ
 
 def db_insert(table, data, track=True):
     mark_data_changed()
+
     if track:
         records = data if isinstance(data, list) else [data]
         add_transaction([{'type': 'insert', 'table': table, 'records': records}])
-    if supabase:
-        try:
-            supabase.table(table).insert(serialize_dates(data)).execute()
-            log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
-        except Exception as e:
-            st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
+
+    # Αν δεν υπάρχει Supabase, θεωρούμε επιτυχία για τοπική/δοκιμαστική χρήση.
+    if not supabase:
+        return True
+
+    try:
+        supabase.table(table).insert(serialize_dates(data)).execute()
+        log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
+        return True
+    except Exception as e:
+        st.error(f"Σφάλμα αποθήκευσης στη βάση: {e}")
+        return False
 
 def db_delete(table, column, value, deleted_records=None, track=True):
     mark_data_changed()
