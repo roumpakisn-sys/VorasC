@@ -809,18 +809,21 @@ if not presentation_mode:
                                     "recurring_id": None,
                                 }
                                 new_assigns.append(new_assign)
-                                st.session_state.assignments.append(new_assign)
 
-                        utils.db_insert("assignments", new_assigns, track=False)
+                        insert_ok = utils.db_insert("assignments", new_assigns, track=False)
 
-                        st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
-                        time.sleep(0.4)
-                        utils.mark_data_changed()
-                        utils.init_data_and_sync()
+                        if insert_ok:
+                            st.session_state.assignments.extend(new_assigns)
+                            st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
+                            time.sleep(0.4)
+                            utils.mark_data_changed()
+                            utils.init_data_and_sync()
 
-                        st.session_state.qa_rc += 1
-                        clear_bar_selection()
-                        st.rerun()
+                            st.session_state.qa_rc += 1
+                            clear_bar_selection()
+                            st.rerun()
+                        else:
+                            st.error("Δεν έγινε αποθήκευση στη βάση. Δοκιμάστε ξανά ή πατήστε Άμεση Ανανέωση πριν ξανακαταχωρήσετε.")
 
         with col_edit:
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
