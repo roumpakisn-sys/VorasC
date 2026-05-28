@@ -999,18 +999,42 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     """, unsafe_allow_html=True)
     
     polling_js = """
-    setInterval(() => {
-        const isEditing = doc.getElementById("is_editing_flag");
-        if (isEditing) return;
-        
-        const buttons = doc.querySelectorAll("button");
-        for (let btn of buttons) {
-            if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
-                btn.click();
-                break;
+    (function () {
+        if (window.staffProSmartPollingStarted) return;
+        window.staffProSmartPollingStarted = true;
+
+        function userIsWorking() {
+            const isEditing = doc.getElementById("is_editing_flag");
+            if (isEditing) return true;
+
+            if (doc.hidden) return true;
+
+            const active = doc.activeElement;
+            if (active) {
+                const tag = (active.tagName || "").toLowerCase();
+                const role = active.getAttribute ? (active.getAttribute("role") || "") : "";
+                if (["input", "textarea", "select", "button"].includes(tag)) return true;
+                if (["combobox", "listbox", "textbox", "spinbutton", "slider"].includes(role)) return true;
+                if (active.isContentEditable) return true;
+            }
+
+            return false;
+        }
+
+        function clickCheckUpdates() {
+            if (userIsWorking()) return;
+
+            const buttons = doc.querySelectorAll("button");
+            for (let btn of buttons) {
+                if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
+                    btn.click();
+                    break;
+                }
             }
         }
-    }, 15000);
+
+        setInterval(clickCheckUpdates, 30000);
+    })();
     """ if not show_menu else ""
     
     components.html("""
@@ -1049,11 +1073,21 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         cIdx = (cIdx + 1) % cleaningIcons.length;
     }, 400);
 
+    let refreshBadgeTimer = null;
     setInterval(() => {
         const isRunning = doc.querySelector('[data-testid="stStatusWidget"]');
         if (isRunning) {
-            loaderDiv.style.display = 'block';
+            if (!refreshBadgeTimer && loaderDiv.style.display !== 'block') {
+                refreshBadgeTimer = setTimeout(() => {
+                    loaderDiv.style.display = 'block';
+                    refreshBadgeTimer = null;
+                }, 900);
+            }
         } else {
+            if (refreshBadgeTimer) {
+                clearTimeout(refreshBadgeTimer);
+                refreshBadgeTimer = null;
+            }
             loaderDiv.style.display = 'none';
         }
     }, 150);
