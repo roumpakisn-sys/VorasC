@@ -236,94 +236,16 @@ def track_deletion(table_name, record_id):
     except Exception: pass
 
 def sync_data_incremental():
-    inject_silent_refresh_css()
-    if not supabase: return
+    """
+    Wrapper συγχρονισμού.
 
-    last_sync = st.session_state.get("last_sync_time", None)
-    current_db_time = get_db_current_time()
-
-    if not last_sync:
-        with st.spinner("Φόρτωση δεδομένων..."):
-            st.session_state.employees = fetch_paginated("employees")
-            st.session_state.projects = fetch_paginated("projects")
-            
-            assigns = fetch_paginated("assignments")
-            for a in assigns:
-                d = safe_date_parse(a.get('date'))
-                if d: a['date'] = d
-            st.session_state.assignments = assigns
-            
-            leaves = fetch_paginated("leaves")
-            for l in leaves:
-                sd = safe_date_parse(l.get('startDate'))
-                if sd: l['startDate'] = sd
-                ed = safe_date_parse(l.get('endDate'))
-                if ed: l['endDate'] = ed
-            st.session_state.leaves = leaves
-            
-            patterns = fetch_paginated("recurring_patterns")
-            for p in patterns:
-                sd = safe_date_parse(p.get('startDate'))
-                if sd: p['startDate'] = sd
-            st.session_state.recurring_patterns = patterns
-            
-            try: st.session_state.evaluations = fetch_paginated("evaluations")
-            except Exception: st.session_state.evaluations = []
-                
-            st.session_state.last_sync_time = current_db_time
-            mark_data_changed()
-            return
-
-    try:
-        res_logs = supabase.table("activity_logs").select("timestamp").order("timestamp", desc=True).limit(1).execute()
-        if res_logs.data:
-            latest_ts = to_timestamp(res_logs.data[0]['timestamp'])
-            sync_ts = to_timestamp(last_sync)
-            if (latest_ts + 30.0) <= sync_ts: return
-
-        deleted_res = supabase.table("deleted_records").select("table_name, record_id").gte("deleted_at", last_sync).execute()
-        deletions = deleted_res.data or []
-        
-        deleted_by_table = {}
-        for d in deletions:
-            t = d['table_name']
-            if t not in deleted_by_table: deleted_by_table[t] = []
-            deleted_by_table[t].append(str(d['record_id']))
-
-        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
-        changes_detected = False
-
-        for table in tables_to_sync:
-            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
-            delta_records = delta_res.data or []
-            table_deleted_ids = deleted_by_table.get(table, [])
-            
-            if delta_records or table_deleted_ids:
-                changes_detected = True
-                if table == "assignments":
-                    for r in delta_records:
-                        d = safe_date_parse(r.get('date'))
-                        if d: r['date'] = d
-                elif table == "leaves":
-                    for r in delta_records:
-                        sd = safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
-                        ed = safe_date_parse(r.get('endDate'))
-                        if ed: r['endDate'] = ed
-                elif table == "recurring_patterns":
-                    for r in delta_records:
-                        sd = safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
-
-                st.session_state[table] = apply_delta_updates(
-                    table, st.session_state.get(table, []), delta_records, table_deleted_ids
-                )
-
-        if changes_detected: mark_data_changed()
-        st.session_state.last_sync_time = current_db_time
-
-    except Exception as e:
-        print(f"Incremental Sync Error: {e}")
+    Το επίσημο ενεργό sync βρίσκεται στο database.py.
+    Κρατάμε αυτή τη συνάρτηση μόνο για συμβατότητα, ώστε αν κάποιο αρχείο
+    καλέσει utils.sync_data_incremental(), να χρησιμοποιεί τον ίδιο μηχανισμό
+    και να μην υπάρχουν δύο διαφορετικοί «εγκέφαλοι» συγχρονισμού.
+    """
+    import database
+    return database.sync_data_incremental()
 
 # ==========================================
 # ΣΥΝΕΧΕΙΑ ΛΕΙΤΟΥΡΓΙΩΝ ΒΑΣΗΣ
