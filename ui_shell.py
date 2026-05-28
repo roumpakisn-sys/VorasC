@@ -193,7 +193,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
             if (active) {
                 const tag = (active.tagName || "").toLowerCase();
                 const role = active.getAttribute ? (active.getAttribute("role") || "") : "";
-                if (["input", "textarea", "select", "button"].includes(tag)) return true;
+                if (["input", "textarea", "select"].includes(tag)) return true;
                 if (["combobox", "listbox", "textbox", "spinbutton", "slider"].includes(role)) return true;
                 if (active.isContentEditable) return true;
             }
@@ -301,6 +301,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
+            st.session_state.last_sync_time = None
             st.rerun()
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
         
