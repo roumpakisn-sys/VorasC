@@ -32,42 +32,55 @@ def _checkbox_key(project_id):
     return f"gantt_recurring_project_visible_{digest}"
 
 
-def _sync_selected_state_with_available_projects(recurring_project_ids):
+def _known_projects_key():
+    return "gantt_known_recurring_project_ids"
+
+
+def _selected_projects_key():
+    return "gantt_visible_recurring_project_ids"
+
+
+def _initialize_checkbox_state(recurring_project_ids):
     """
-    Κρατάει σταθερή την επιλογή του χρήστη.
+    Τα checkbox είναι η μοναδική πηγή αλήθειας.
 
-    Σημαντικό:
-    Δεν ξαναπροσθέτουμε κάθε φορά όσα έργα ο χρήστης έχει αποεπιλέξει.
-    Προσθέτουμε αυτόματα μόνο πραγματικά νέα recurring έργα που δεν υπήρχαν
-    στην προηγούμενη λίστα γνωστών recurring έργων.
+    Δεν ξαναγράφουμε τα checkbox από λίστα επιλογών σε κάθε rerun.
+    Αρχικοποιούμε μόνο:
+    - την πρώτη φορά,
+    - ή όταν εμφανιστεί πραγματικά νέο recurring έργο.
     """
-    selected_key = "gantt_visible_recurring_project_ids"
-    known_key = "gantt_known_recurring_project_ids"
-
-    if not recurring_project_ids:
-        st.session_state[selected_key] = []
-        st.session_state[known_key] = []
-        return []
-
+    known_key = _known_projects_key()
     previous_known = st.session_state.get(known_key)
 
-    if selected_key not in st.session_state:
-        selected = list(recurring_project_ids)
-    else:
-        selected = [
-            pid
-            for pid in st.session_state.get(selected_key, [])
-            if pid in recurring_project_ids
-        ]
+    if previous_known is None:
+        previous_known = []
 
-        if previous_known is not None:
-            for pid in recurring_project_ids:
-                if pid not in previous_known and pid not in selected:
-                    selected.append(pid)
+    for project_id in recurring_project_ids:
+        cb_key = _checkbox_key(project_id)
 
-    st.session_state[selected_key] = selected
+        if cb_key not in st.session_state:
+            # Πρώτη εμφάνιση ή νέο recurring έργο: προεπιλεγμένα ορατό.
+            st.session_state[cb_key] = True
+        elif project_id not in previous_known:
+            # Νέο έργο που δεν υπήρχε στην προηγούμενη λίστα: επίσης ορατό.
+            st.session_state[cb_key] = True
+
+    # Καθαρισμός παλιών checkbox keys για έργα που δεν είναι πια recurring.
+    current_checkbox_keys = {_checkbox_key(pid) for pid in recurring_project_ids}
+    for old_project_id in previous_known:
+        old_key = _checkbox_key(old_project_id)
+        if old_key not in current_checkbox_keys:
+            st.session_state.pop(old_key, None)
+
     st.session_state[known_key] = list(recurring_project_ids)
-    return selected
+
+
+def _get_visible_project_ids_from_checkboxes(recurring_project_ids):
+    visible = []
+    for project_id in recurring_project_ids:
+        if st.session_state.get(_checkbox_key(project_id), True):
+            visible.append(project_id)
+    return visible
 
 
 def render_recurring_project_visibility_filter(projects, recurring_patterns, on_change=None):
@@ -79,12 +92,14 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
     Δεν αλλάζει δεδομένα στη βάση και δεν πειράζει τις επαναλαμβανόμενες εργασίες.
     """
     recurring_project_ids = _get_recurring_project_ids(projects, recurring_patterns)
-    selected_key = "gantt_visible_recurring_project_ids"
-
-    selected_ids = _sync_selected_state_with_available_projects(recurring_project_ids)
+    selected_key = _selected_projects_key()
 
     if not recurring_project_ids:
+        st.session_state[selected_key] = []
+        st.session_state[_known_projects_key()] = []
         return []
+
+    _initialize_checkbox_state(recurring_project_ids)
 
     with st.sidebar.expander("👁️ Εμφάνιση επαναλαμβανόμενων στο Gantt", expanded=False):
         st.caption("Τικάρετε ποια έργα από επαναλαμβανόμενες εργασίες θα φαίνονται στο διάγραμμα.")
@@ -92,48 +107,39 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Όλα", key="show_all_recurring_projects", use_container_width=True):
-                st.session_state[selected_key] = list(recurring_project_ids)
-                for pid in recurring_project_ids:
-                    st.session_state[_checkbox_key(pid)] = True
+                for project_id in recurring_project_ids:
+                    st.session_state[_checkbox_key(project_id)] = True
                 if on_change:
                     on_change()
                 st.rerun()
 
         with c2:
             if st.button("Κανένα", key="hide_all_recurring_projects", use_container_width=True):
-                st.session_state[selected_key] = []
-                for pid in recurring_project_ids:
-                    st.session_state[_checkbox_key(pid)] = False
+                for project_id in recurring_project_ids:
+                    st.session_state[_checkbox_key(project_id)] = False
                 if on_change:
                     on_change()
                 st.rerun()
 
-        selected_after_checkboxes = []
-
         for project_id in recurring_project_ids:
-            cb_key = _checkbox_key(project_id)
-
-            if cb_key not in st.session_state:
-                st.session_state[cb_key] = project_id in selected_ids
-
-            is_visible = st.checkbox(
+            st.checkbox(
                 _project_name(project_id, projects),
-                key=cb_key,
+                key=_checkbox_key(project_id),
                 on_change=on_change,
             )
 
-            if is_visible:
-                selected_after_checkboxes.append(project_id)
+        visible_ids = _get_visible_project_ids_from_checkboxes(recurring_project_ids)
+        st.session_state[selected_key] = visible_ids
 
-        st.session_state[selected_key] = selected_after_checkboxes
-
-        hidden_count = len(recurring_project_ids) - len(selected_after_checkboxes)
+        hidden_count = len(recurring_project_ids) - len(visible_ids)
         if hidden_count > 0:
             st.caption(f"Κρυμμένα επαναλαμβανόμενα έργα: {hidden_count}")
         else:
             st.caption("Εμφανίζονται όλα τα επαναλαμβανόμενα έργα.")
 
-    return list(st.session_state.get(selected_key, []))
+    visible_ids = _get_visible_project_ids_from_checkboxes(recurring_project_ids)
+    st.session_state[selected_key] = visible_ids
+    return visible_ids
 
 
 def apply_recurring_project_visibility_filter(assignments_by_date, visible_project_ids):
@@ -146,6 +152,7 @@ def apply_recurring_project_visibility_filter(assignments_by_date, visible_proje
 
     for day, assignments in (assignments_by_date or {}).items():
         kept = []
+
         for assignment in assignments or []:
             if not isinstance(assignment, dict):
                 continue
