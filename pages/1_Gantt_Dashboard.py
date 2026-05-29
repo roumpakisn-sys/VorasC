@@ -182,6 +182,7 @@ elif clicked_safe_id:
             st.session_state.clicked_key = real_clicked_key
             st.session_state.edit_bar_select_widget = real_clicked_key
             st.session_state.trigger_scroll = True
+            st.session_state.skip_remote_sync_once = True
             st.rerun()
 
 if st.session_state.get("clicked_key"):
@@ -344,13 +345,22 @@ if not presentation_mode:
 
                         if insert_ok:
                             st.session_state.assignments.extend(new_assigns)
+
+                            for new_a in new_assigns:
+                                d = new_a.get("date")
+                                if d:
+                                    if "assignments_by_date" not in st.session_state:
+                                        st.session_state.assignments_by_date = {}
+                                    if d not in st.session_state.assignments_by_date:
+                                        st.session_state.assignments_by_date[d] = []
+                                    st.session_state.assignments_by_date[d].append(new_a)
+
                             st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {duration_days} ημέρα/ες!")
-                            time.sleep(0.4)
                             utils.mark_data_changed()
-                            utils.init_data_and_sync()
 
                             st.session_state.qa_rc += 1
                             clear_bar_selection()
+                            st.session_state.skip_remote_sync_once = True
                             st.rerun()
                         else:
                             st.error("Δεν έγινε αποθήκευση στη βάση. Δοκιμάστε ξανά ή πατήστε Άμεση Ανανέωση πριν ξανακαταχωρήσετε.")
@@ -410,6 +420,7 @@ if not presentation_mode:
                 if selected_key != "" and selected_key != st.session_state.clicked_key:
                     st.session_state.clicked_key = selected_key
                     st.session_state.trigger_scroll = True
+                    st.session_state.skip_remote_sync_once = True
                     st.rerun()
 
                 if selected_key != "":
