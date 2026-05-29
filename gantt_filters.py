@@ -141,14 +141,18 @@ def _save_hidden_projects_to_db(hidden_project_ids):
 def _load_user_preferences_once(recurring_project_ids):
     """
     Φορτώνει τις επιλογές μόνο μία φορά ανά χρήστη/session.
-    Δεν πρέπει να φορτώνεται σε κάθε rerun, αλλιώς θα πατάει τις νέες αλλαγές του checkbox.
+
+    Επιστρέφει True μόνο όταν μόλις έγινε φόρτωση από τη βάση.
+    Αυτό είναι κρίσιμο: αν ξαναγράφουμε τα checkbox σε κάθε rerun,
+    τότε όταν ο χρήστης ξανατικάρει ένα κρυμμένο έργο, το παλιό hidden state
+    το ξετικάρει ξανά.
     """
     username = _current_username()
     loaded_key = _loaded_user_key()
     hidden_key = _hidden_projects_key()
 
     if st.session_state.get(loaded_key) == username:
-        return
+        return False
 
     db_hidden_ids = _load_hidden_projects_from_db(recurring_project_ids)
     if db_hidden_ids is not None:
@@ -160,17 +164,21 @@ def _load_user_preferences_once(recurring_project_ids):
         )
 
     st.session_state[loaded_key] = username
+    return True
 
 
 def _prepare_state(recurring_project_ids):
     """
     Η σταθερή μνήμη του φίλτρου είναι η λίστα κρυμμένων recurring project ids.
     Πλέον φορτώνεται και αποθηκεύεται ανά χρήστη στη Supabase.
+
+    Η βάση εφαρμόζεται στα checkbox μόνο όταν μπαίνει/φορτώνει ο χρήστης.
+    Μετά από αυτό, η αλήθεια είναι το ίδιο το checkbox.
     """
     known_key = _known_projects_key()
     hidden_key = _hidden_projects_key()
 
-    _load_user_preferences_once(recurring_project_ids)
+    loaded_from_db_now = _load_user_preferences_once(recurring_project_ids)
 
     previous_known = st.session_state.get(known_key)
     if previous_known is None:
@@ -186,12 +194,12 @@ def _prepare_state(recurring_project_ids):
 
     for project_id in recurring_project_ids:
         cb_key = _checkbox_key(project_id)
+
         if cb_key not in st.session_state:
             st.session_state[cb_key] = project_id not in hidden_ids
-        else:
-            # Σε νέο login/session, συγχρονίζουμε το widget από τη μόνιμη προτίμηση.
-            if project_id in hidden_ids:
-                st.session_state[cb_key] = False
+        elif loaded_from_db_now:
+            # Μόνο στην πρώτη φόρτωση χρήστη συγχρονίζουμε widget από τη μόνιμη προτίμηση.
+            st.session_state[cb_key] = project_id not in hidden_ids
 
     # Καθαρισμός παλιών checkbox keys για έργα που δεν είναι πια recurring.
     current_checkbox_keys = {_checkbox_key(pid) for pid in recurring_project_ids}
