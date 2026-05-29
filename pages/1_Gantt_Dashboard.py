@@ -240,6 +240,8 @@ if not presentation_mode:
                 with c_notes:
                     add_notes = st.text_input("Παρατηρήσεις (Προαιρετικό)", key=f"qa_notes_{qa_rc}")
 
+                is_general = st.checkbox("Γενικός", key=f"qa_general_{qa_rc}")
+
                 c_arr, c_start, c_end = st.columns(3)
                 with c_arr:
                     use_arr = st.checkbox("Προσέλευση;", key=f"chk_arr_{qa_rc}")
@@ -334,6 +336,7 @@ if not presentation_mode:
                                     "is_cancelled": False,
                                     "cancel_reason": "",
                                     "recurring_id": None,
+                                    "is_general": bool(is_general),
                                 }
                                 new_assigns.append(new_assign)
 
@@ -543,6 +546,13 @@ if not presentation_mode:
                             new_t_end = st.time_input("Νέα Λήξη", value=datetime.strptime(str(target_group["EndTime"])[:5], "%H:%M").time())
 
                         st.markdown("---")
+                        e_is_general = st.checkbox(
+                            "Γενικός",
+                            value=bool(target_group.get("IsGeneral", False)),
+                            key="edit_is_general",
+                        )
+
+                        st.markdown("---")
                         st.write("🛑 **Ακύρωση / Διαγραφή Βάρδιας (Διαγράμμιση)**")
                         c_canc1, c_canc2 = st.columns([1, 2])
                         with c_canc1:
@@ -606,6 +616,7 @@ if not presentation_mode:
                                     and edit_notes == target_clean_note
                                     and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                     and normalized_cancel_reason == target_cancel_reason
+                                    and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
                                     and selected_emp_ids == original_emp_ids
                                 )
 
@@ -711,6 +722,7 @@ if not presentation_mode:
                                         "is_cancelled": e_is_cancelled,
                                         "cancel_reason": normalized_cancel_reason,
                                         "recurring_id": target_group.get("RecurringId"),
+                                        "is_general": bool(e_is_general),
                                     }
                                     new_assigns.append(new_a)
                                     st.session_state.assignments.append(new_a)
