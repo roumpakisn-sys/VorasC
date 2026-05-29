@@ -597,20 +597,60 @@ elif menu == "Άδειες":
 
 # --- VIEW: LEAVE SUMMARY ---
 elif menu == "Σύνολο Αδειών":
-    st.title("📊 Σύνολο Αδειών ανά Έτος")
+    st.title("📊 Σύνολο Αδειών")
     current_year = date.today().year
     years = list(range(2020, 2036))
-    col1, col2 = st.columns([1, 3])
+    months = [
+        "Όλο το έτος",
+        "Ιανουάριος",
+        "Φεβρουάριος",
+        "Μάρτιος",
+        "Απρίλιος",
+        "Μάιος",
+        "Ιούνιος",
+        "Ιούλιος",
+        "Αύγουστος",
+        "Σεπτέμβριος",
+        "Οκτώβριος",
+        "Νοέμβριος",
+        "Δεκέμβριος",
+    ]
+
+    col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        selected_year = st.selectbox("Επιλογή Έτους", years, index=years.index(current_year))
+        selected_year = st.selectbox(
+            "Επιλογή Έτους",
+            years,
+            index=years.index(current_year),
+            key="leave_summary_year",
+        )
+    with col2:
+        selected_month_name = st.selectbox(
+            "Επιλογή Μήνα",
+            months,
+            index=0,
+            key="leave_summary_month",
+        )
+
+    selected_month = months.index(selected_month_name)
+
+    if selected_month == 0:
+        period_start = date(selected_year, 1, 1)
+        period_end = date(selected_year, 12, 31)
+        period_label = f"το έτος: {selected_year}"
+    else:
+        last_day = calendar.monthrange(selected_year, selected_month)[1]
+        period_start = date(selected_year, selected_month, 1)
+        period_end = date(selected_year, selected_month, last_day)
+        period_label = f"{selected_month_name} {selected_year}"
+
     st.divider()
 
     leave_days = {emp['id']: 0 for emp in st.session_state.employees}
-    year_start = date(selected_year, 1, 1)
-    year_end = date(selected_year, 12, 31)
+
     for l in st.session_state.leaves:
-        actual_start = max(l['startDate'], year_start)
-        actual_end = min(l['endDate'], year_end)
+        actual_start = max(l['startDate'], period_start)
+        actual_end = min(l['endDate'], period_end)
         if actual_start <= actual_end:
             if l['employeeId'] in leave_days:
                 leave_days[l['employeeId']] += (actual_end - actual_start).days + 1
@@ -624,7 +664,9 @@ elif menu == "Σύνολο Αδειών":
         }
         for emp in st.session_state.employees
     ]
-    st.write(f"### Συνολικές Ημέρες Άδειας για το έτος: {selected_year}")
+
+    st.write(f"### Συνολικές Ημέρες Άδειας για: {period_label}")
+    st.caption(f"Περίοδος υπολογισμού: {period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}")
     st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
 
 # --- VIEW: WORK HOURS ---
