@@ -3,6 +3,9 @@ import hashlib
 import streamlit as st
 
 
+PREFERENCE_KEY = "gantt_hidden_recurring_project_ids"
+
+
 def _project_name(project_id, projects):
     for project in projects or []:
         if isinstance(project, dict) and project.get("id") == project_id:
@@ -44,24 +47,130 @@ def _visible_projects_key():
     return "gantt_visible_recurring_project_ids"
 
 
+def _loaded_user_key():
+    return "gantt_recurring_filter_loaded_for_user"
+
+
 def _normalize_project_list(values, allowed_ids):
     allowed = set(allowed_ids or [])
     clean = []
+
     for value in values or []:
         if value in allowed and value not in clean:
             clean.append(value)
+
     return clean
+
+
+def _current_username():
+    return st.session_state.get("current_user") or ""
+
+
+def _load_hidden_projects_from_db(recurring_project_ids):
+    """
+    Φορτώνει από Supabase τις κρυμμένες επιλογές του τρέχοντος χρήστη.
+    Αν δεν υπάρχει πίνακας/σύνδεση, η εφαρμογή συνεχίζει με session state.
+    """
+    username = _current_username()
+    if not username:
+        return None
+
+    try:
+        import utils
+
+        if not utils.supabase:
+            return None
+
+        res = (
+            utils.supabase
+            .table("user_preferences")
+            .select("preference_value")
+            .eq("username", username)
+            .eq("preference_key", PREFERENCE_KEY)
+            .limit(1)
+            .execute()
+        )
+
+        rows = res.data or []
+        if not rows:
+            return []
+
+        value = rows[0].get("preference_value")
+        if not isinstance(value, list):
+            return []
+
+        return _normalize_project_list(value, recurring_project_ids)
+
+    except Exception as e:
+        print(f"Could not load Gantt recurring filter preference: {e}")
+        return None
+
+
+def _save_hidden_projects_to_db(hidden_project_ids):
+    """
+    Αποθηκεύει στη Supabase τις κρυμμένες επιλογές του τρέχοντος χρήστη.
+    Είναι σιωπηλό ώστε να μην κρασάρει το Gantt αν η βάση δεν έχει ακόμα τον πίνακα.
+    """
+    username = _current_username()
+    if not username:
+        return
+
+    try:
+        import utils
+
+        if not utils.supabase:
+            return
+
+        payload = {
+            "username": username,
+            "preference_key": PREFERENCE_KEY,
+            "preference_value": list(hidden_project_ids or []),
+        }
+
+        (
+            utils.supabase
+            .table("user_preferences")
+            .upsert(payload, on_conflict="username,preference_key")
+            .execute()
+        )
+
+    except Exception as e:
+        print(f"Could not save Gantt recurring filter preference: {e}")
+
+
+def _load_user_preferences_once(recurring_project_ids):
+    """
+    Φορτώνει τις επιλογές μόνο μία φορά ανά χρήστη/session.
+    Δεν πρέπει να φορτώνεται σε κάθε rerun, αλλιώς θα πατάει τις νέες αλλαγές του checkbox.
+    """
+    username = _current_username()
+    loaded_key = _loaded_user_key()
+    hidden_key = _hidden_projects_key()
+
+    if st.session_state.get(loaded_key) == username:
+        return
+
+    db_hidden_ids = _load_hidden_projects_from_db(recurring_project_ids)
+    if db_hidden_ids is not None:
+        st.session_state[hidden_key] = db_hidden_ids
+    else:
+        st.session_state[hidden_key] = _normalize_project_list(
+            st.session_state.get(hidden_key, []),
+            recurring_project_ids,
+        )
+
+    st.session_state[loaded_key] = username
 
 
 def _prepare_state(recurring_project_ids):
     """
     Η σταθερή μνήμη του φίλτρου είναι η λίστα κρυμμένων recurring project ids.
-
-    Αυτό αντέχει καλύτερα σε rerun / auto refresh από το να βασιζόμαστε μόνο
-    στην προσωρινή κατάσταση των checkbox widgets.
+    Πλέον φορτώνεται και αποθηκεύεται ανά χρήστη στη Supabase.
     """
     known_key = _known_projects_key()
     hidden_key = _hidden_projects_key()
+
+    _load_user_preferences_once(recurring_project_ids)
 
     previous_known = st.session_state.get(known_key)
     if previous_known is None:
@@ -72,7 +181,6 @@ def _prepare_state(recurring_project_ids):
         recurring_project_ids,
     )
 
-    # Πραγματικά νέα recurring έργα μπαίνουν ορατά, άρα δεν τα προσθέτουμε στα hidden.
     st.session_state[hidden_key] = hidden_ids
     st.session_state[known_key] = list(recurring_project_ids)
 
@@ -80,6 +188,10 @@ def _prepare_state(recurring_project_ids):
         cb_key = _checkbox_key(project_id)
         if cb_key not in st.session_state:
             st.session_state[cb_key] = project_id not in hidden_ids
+        else:
+            # Σε νέο login/session, συγχρονίζουμε το widget από τη μόνιμη προτίμηση.
+            if project_id in hidden_ids:
+                st.session_state[cb_key] = False
 
     # Καθαρισμός παλιών checkbox keys για έργα που δεν είναι πια recurring.
     current_checkbox_keys = {_checkbox_key(pid) for pid in recurring_project_ids}
@@ -89,7 +201,7 @@ def _prepare_state(recurring_project_ids):
             st.session_state.pop(old_key, None)
 
 
-def _sync_hidden_from_checkboxes(recurring_project_ids):
+def _sync_hidden_from_checkboxes(recurring_project_ids, save=True):
     hidden_ids = []
 
     for project_id in recurring_project_ids:
@@ -97,6 +209,7 @@ def _sync_hidden_from_checkboxes(recurring_project_ids):
         if not is_visible:
             hidden_ids.append(project_id)
 
+    hidden_ids = _normalize_project_list(hidden_ids, recurring_project_ids)
     st.session_state[_hidden_projects_key()] = hidden_ids
 
     visible_ids = [
@@ -104,7 +217,12 @@ def _sync_hidden_from_checkboxes(recurring_project_ids):
         for project_id in recurring_project_ids
         if project_id not in hidden_ids
     ]
+
     st.session_state[_visible_projects_key()] = visible_ids
+
+    if save:
+        _save_hidden_projects_to_db(hidden_ids)
+
     return visible_ids
 
 
@@ -135,20 +253,29 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
             if st.button("Όλα", key="show_all_recurring_projects", use_container_width=True):
                 for project_id in recurring_project_ids:
                     st.session_state[_checkbox_key(project_id)] = True
+
                 st.session_state[_hidden_projects_key()] = []
                 st.session_state[_visible_projects_key()] = list(recurring_project_ids)
+                _save_hidden_projects_to_db([])
+
                 if on_change:
                     on_change()
+
                 st.rerun()
 
         with c2:
             if st.button("Κανένα", key="hide_all_recurring_projects", use_container_width=True):
                 for project_id in recurring_project_ids:
                     st.session_state[_checkbox_key(project_id)] = False
-                st.session_state[_hidden_projects_key()] = list(recurring_project_ids)
+
+                hidden_ids = list(recurring_project_ids)
+                st.session_state[_hidden_projects_key()] = hidden_ids
                 st.session_state[_visible_projects_key()] = []
+                _save_hidden_projects_to_db(hidden_ids)
+
                 if on_change:
                     on_change()
+
                 st.rerun()
 
         for project_id in recurring_project_ids:
@@ -158,7 +285,7 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
                 on_change=on_change,
             )
 
-        visible_ids = _sync_hidden_from_checkboxes(recurring_project_ids)
+        visible_ids = _sync_hidden_from_checkboxes(recurring_project_ids, save=True)
 
         hidden_count = len(recurring_project_ids) - len(visible_ids)
         if hidden_count > 0:
@@ -166,7 +293,7 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
         else:
             st.caption("Εμφανίζονται όλα τα επαναλαμβανόμενα έργα.")
 
-    visible_ids = _sync_hidden_from_checkboxes(recurring_project_ids)
+    visible_ids = _sync_hidden_from_checkboxes(recurring_project_ids, save=True)
     return visible_ids
 
 
@@ -175,8 +302,7 @@ def apply_recurring_project_visibility_filter(assignments_by_date, visible_proje
     Επιστρέφει νέο assignments_by_date μόνο για προβολή στο Gantt.
 
     Κρύβει έργα που ανήκουν στη λίστα recurring patterns και είναι ξετικαρισμένα.
-    Αυτό είναι πιο ασφαλές από το να βασιζόμαστε μόνο στο assignment.recurring_id,
-    γιατί μετά από sync παλιές/παράγωγες εγγραφές μπορεί να μη φέρουν πάντα το ίδιο πεδίο.
+    Αυτό είναι πιο ασφαλές από το να βασιζόμαστε μόνο στο assignment.recurring_id.
     """
     visible_project_ids = set(visible_project_ids or [])
     recurring_project_ids = set(st.session_state.get(_known_projects_key(), []))
