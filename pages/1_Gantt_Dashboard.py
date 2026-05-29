@@ -36,32 +36,13 @@ import utils
 import scheduling
 import gantt_engine
 import gantt_html
+from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
-def get_local_today():
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo("Europe/Athens")).date()
-    except Exception:
-        return (datetime.utcnow() + timedelta(hours=3)).date()
+# Οι βοηθητικές συναρτήσεις Gantt μεταφέρθηκαν στο gantt_helpers.py.
+# Κρατάμε εδώ μόνο τις κλήσεις τους, χωρίς αλλαγή λειτουργικότητας.
 
 
-def normalize_id_list(values):
-    """Κρατάει σειρά και αφαιρεί κενά/διπλότυπα ids για ασφαλείς συγκρίσεις."""
-    clean = []
-    for value in values or []:
-        if not value:
-            continue
-        if value not in clean:
-            clean.append(value)
-    return clean
-
-
-def clean_conflict_leave_notes(notes):
-    """Αφαιρεί τεχνικές σημειώσεις [Άδεια: ...] / [Εμπλοκή: ...] από το κείμενο."""
-    clean = re.sub(r"\[(?:Άδεια|Εμπλοκή):.*?\]", "", notes or "")
-    clean = re.sub(r"\s*\|\s*", " ", clean).strip()
-    return clean
 
 
 
