@@ -174,11 +174,18 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
             safe_id = key_to_safe_id.get(g["Key"], "")
 
+            bar_border = "4px solid #dc2626" if g.get("IsGeneral", False) else "1px solid rgba(0,0,0,0.5)"
+            bar_shadow = (
+                "0 0 0 2px rgba(220,38,38,0.35), 0 3px 8px rgba(0,0,0,0.25)"
+                if g.get("IsGeneral", False)
+                else "0 3px 6px rgba(0,0,0,0.15)"
+            )
+
             html += (
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
-                f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: 1px solid rgba(0,0,0,0.5); border-radius: 6px; "
-                f"box-shadow: 0 3px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; "
+                f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
+                f"box-shadow: {bar_shadow}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'>"
                 f"<div style='line-height: 1.15; pointer-events: none; width: 100%; padding: 0 4px; display: -webkit-box; "
