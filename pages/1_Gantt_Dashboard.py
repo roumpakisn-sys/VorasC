@@ -1,9 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import pandas as pd
 from datetime import datetime, date, timedelta
 import uuid
-import io
 import textwrap
 import time
 import re
@@ -37,6 +35,7 @@ import scheduling
 import gantt_engine
 import gantt_html
 import gantt_controls
+import gantt_export
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -174,25 +173,8 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες. **4)** Ρυθμίστε το κάθετο μέγεθος από το slider 'Ύψος Gantt'."
-if export_data:
-    col_hint, col_btn = st.columns([3, 1])
-    with col_hint:
-        st.caption(hint_text)
-    with col_btn:
-        df_export = pd.DataFrame(export_data)
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            df_export.to_excel(writer, index=False, sheet_name="Πρόγραμμα")
-        st.download_button(
-            label="📥 Εξαγωγή (Excel)",
-            data=buffer.getvalue(),
-            file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-else:
-    st.caption(hint_text)
+# Η υλοποίηση μεταφέρθηκε στο gantt_export.py.
+gantt_export.render_gantt_export(export_data, start_of_week)
 
 # --- ΦΟΡΜΕΣ ΠΡΟΣΘΗΚΗΣ ΚΑΙ ΕΠΕΞΕΡΓΑΣΙΑΣ ΜΠΑΡΑΣ ---
 if not presentation_mode:
