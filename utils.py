@@ -430,11 +430,14 @@ def init_data_and_sync():
         st.session_state.last_sync_time = None
         st.session_state.full_sync_done_for_user = current_user
     
-    try:
-        import database
-        database.sync_data_incremental()
-    except Exception as e:
-        print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
+    skip_remote_sync = bool(st.session_state.pop("skip_remote_sync_once", False))
+
+    if not skip_remote_sync:
+        try:
+            import database
+            database.sync_data_incremental()
+        except Exception as e:
+            print(f"Αποτροπή κρασαρίσματος από το Database Sync: {e}")
 
     if 'view_week_date' not in st.session_state:
         st.session_state.view_week_date = date.today()
