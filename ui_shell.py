@@ -231,9 +231,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         let checkInFlight = false;
 
         function userIsWorking() {{
-            const isEditing = doc.getElementById("is_editing_flag");
-            if (isEditing) return true;
-
+            // Δεν μπλοκάρουμε πλέον το refresh απλώς επειδή υπάρχει ανοιχτή φόρμα/μπάρα.
+            // Το μπλοκάρουμε μόνο όταν ο χρήστης όντως γράφει ή έχει ενεργό πεδίο.
             if (doc.hidden) return true;
 
             const active = doc.activeElement;
@@ -251,7 +250,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         function clickCheckUpdates() {{
             const buttons = doc.querySelectorAll("button");
             for (let btn of buttons) {{
-                if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {{
+                const txt = (btn.innerText || btn.textContent || "").trim();
+                if (txt.includes("🔄 Check Updates") || txt.includes("Check Updates")) {{
                     btn.click();
                     return true;
                 }}
