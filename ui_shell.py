@@ -217,6 +217,23 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         const SUPABASE_ANON_KEY = {json.dumps(supabase_anon_key)};
         const CURRENT_SYNC_STAMP = {json.dumps(current_sync_stamp)};
         const STORAGE_KEY = "staff_pro_app_sync_state_last_changed_at";
+        const DEBUG_ENABLED = true;
+
+        function updateSmartPollingDebug(status, details) {{
+            if (!DEBUG_ENABLED) return;
+            let box = doc.getElementById("staff_pro_smart_polling_debug");
+            if (!box) {{
+                box = doc.createElement("div");
+                box.id = "staff_pro_smart_polling_debug";
+                doc.body.appendChild(box);
+                box.style.cssText = "position: fixed; right: 20px; bottom: 18px; z-index: 999999; background: #0f172a; color: #e2e8f0; font-family: monospace; font-size: 11px; line-height: 1.35; padding: 8px 10px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); max-width: 420px; opacity: 0.92; white-space: pre-wrap;";
+            }}
+            const now = new Date().toLocaleTimeString("el-GR", {{hour12: false}});
+            box.textContent = "Smart Polling: " + status + "\n" + now + "\n" + (details || "");
+        }}
+
+        updateSmartPollingDebug("loaded", "current=" + (CURRENT_SYNC_STAMP || "-"));
+
 
         if (CURRENT_SYNC_STAMP) {{
             window.staffProCurrentSyncStamp = CURRENT_SYNC_STAMP;
@@ -256,13 +273,14 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                     return true;
                 }}
             }}
+            updateSmartPollingDebug("button not found", "Could not find hidden Check Updates button");
             return false;
         }}
 
         async function checkForRemoteChanges() {{
-            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
-            if (userIsWorking()) return;
-            if (checkInFlight) return;
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {{ updateSmartPollingDebug("disabled", "Missing SUPABASE_URL or SUPABASE_ANON_KEY"); return; }}
+            if (userIsWorking()) {{ updateSmartPollingDebug("paused", "User is typing / active field / hidden tab"); return; }}
+            if (checkInFlight) {{ updateSmartPollingDebug("waiting", "Previous check still running"); return; }}
 
             checkInFlight = true;
             try {{
@@ -279,11 +297,11 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                     }}
                 );
 
-                if (!response.ok) return;
+                if (!response.ok) {{ updateSmartPollingDebug("supabase fail", "HTTP " + response.status); return; }}
 
                 const rows = await response.json();
                 const remoteStamp = rows && rows[0] ? (rows[0].last_changed_at || "") : "";
-                if (!remoteStamp) return;
+                if (!remoteStamp) {{ updateSmartPollingDebug("no remote stamp", "Supabase returned no timestamp"); return; }}
 
                 let localStamp = "";
                 try {{
@@ -291,6 +309,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 }} catch (e) {{
                     localStamp = "";
                 }}
+
+                updateSmartPollingDebug("checked", "remote=" + remoteStamp + "\nlocal=" + (localStamp || "-"));
 
                 if (!localStamp) {{
                     try {{
@@ -301,8 +321,10 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 }}
 
                 if (remoteStamp !== localStamp) {{
+                    updateSmartPollingDebug("change found", "remote=" + remoteStamp + "\nlocal=" + localStamp);
                     const clicked = clickCheckUpdates();
                     if (clicked) {{
+                        updateSmartPollingDebug("refresh clicked", "Remote change detected");
                         try {{
                             window.localStorage.setItem(STORAGE_KEY, remoteStamp);
                         }} catch (e) {{}}
@@ -310,6 +332,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                     }}
                 }}
             }} catch (e) {{
+                updateSmartPollingDebug("error", String(e));
                 console.warn("STAFF.PRO smart polling check failed", e);
             }} finally {{
                 checkInFlight = false;
