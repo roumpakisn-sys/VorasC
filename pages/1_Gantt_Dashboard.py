@@ -170,6 +170,55 @@ clicked_safe_id = click_detector(
     key=f"gantt_detector_{st.session_state.detector_version}_{st.session_state.gantt_height_px}",
 )
 
+# --- ΕΞΑΓΩΓΗ GANTT ΣΕ HTML ---
+downloadable_gantt_html = f"""<!doctype html>
+<html lang="el">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gantt Πρόγραμμα - {start_of_week.strftime('%d/%m/%Y')}</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 18px;
+            background: #f8fafc;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }}
+        .export-title {{
+            margin: 0 0 12px 0;
+            color: #0f172a;
+            font-size: 22px;
+            font-weight: 800;
+        }}
+        .export-subtitle {{
+            margin: 0 0 18px 0;
+            color: #475569;
+            font-size: 14px;
+        }}
+        #gantt-master-container {{
+            height: calc(100vh - 110px) !important;
+            max-height: none !important;
+        }}
+    </style>
+</head>
+<body>
+    <h1 class="export-title">Πρόγραμμα Gantt</h1>
+    <div class="export-subtitle">
+        Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} - {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}
+    </div>
+    {html_chart}
+</body>
+</html>
+"""
+
+st.download_button(
+    "🌐 Εξαγωγή Gantt σε HTML",
+    data=downloadable_gantt_html.encode("utf-8"),
+    file_name=f"gantt_programma_{start_of_week.strftime('%Y_%m_%d')}.html",
+    mime="text/html",
+    use_container_width=True,
+)
+
 if st.session_state.get("suppress_next_detector_click", False):
     st.session_state.suppress_next_detector_click = False
 elif clicked_safe_id:
