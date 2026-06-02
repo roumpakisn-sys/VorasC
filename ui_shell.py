@@ -226,10 +226,10 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 box = doc.createElement("div");
                 box.id = "staff_pro_smart_polling_debug";
                 doc.body.appendChild(box);
-                box.style.cssText = "position: fixed; right: 20px; bottom: 18px; z-index: 999999; background: #0f172a; color: #e2e8f0; font-family: monospace; font-size: 11px; line-height: 1.35; padding: 8px 10px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); max-width: 420px; opacity: 0.92; white-space: pre-wrap;";
+                box.style.cssText = "position: fixed; right: 20px; top: 58px; z-index: 999999; background: #0f172a; color: #e2e8f0; font-family: monospace; font-size: 11px; line-height: 1.35; padding: 8px 10px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); max-width: 420px; opacity: 0.92; white-space: pre-wrap;";
             }}
             const now = new Date().toLocaleTimeString("el-GR", {{hour12: false}});
-            box.textContent = "Smart Polling: " + status + "\n" + now + "\n" + (details || "");
+            box.textContent = "Smart Polling: " + status + "\\n" + now + "\\n" + (details || "");
         }}
 
         updateSmartPollingDebug("loaded", "current=" + (CURRENT_SYNC_STAMP || "-"));
@@ -310,7 +310,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                     localStamp = "";
                 }}
 
-                updateSmartPollingDebug("checked", "remote=" + remoteStamp + "\nlocal=" + (localStamp || "-"));
+                updateSmartPollingDebug("checked", "remote=" + remoteStamp + "\\nlocal=" + (localStamp || "-"));
 
                 if (!localStamp) {{
                     try {{
@@ -321,7 +321,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                 }}
 
                 if (remoteStamp !== localStamp) {{
-                    updateSmartPollingDebug("change found", "remote=" + remoteStamp + "\nlocal=" + localStamp);
+                    updateSmartPollingDebug("change found", "remote=" + remoteStamp + "\\nlocal=" + localStamp);
                     const clicked = clickCheckUpdates();
                     if (clicked) {{
                         updateSmartPollingDebug("refresh clicked", "Remote change detected");
