@@ -216,7 +216,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         const SUPABASE_URL = {json.dumps(supabase_url)};
         const SUPABASE_ANON_KEY = {json.dumps(supabase_anon_key)};
         const CURRENT_SYNC_STAMP = {json.dumps(current_sync_stamp)};
-        const STORAGE_KEY = "staff_pro_app_sync_state_last_changed_at";
+        const STORAGE_KEY = "staff_pro_app_sync_state_last_changed_at_session";
         const DEBUG_ENABLED = true;
 
         function updateSmartPollingDebug(status, details) {{
@@ -238,7 +238,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         if (CURRENT_SYNC_STAMP) {{
             window.staffProCurrentSyncStamp = CURRENT_SYNC_STAMP;
             try {{
-                window.localStorage.setItem(STORAGE_KEY, CURRENT_SYNC_STAMP);
+                window.sessionStorage.setItem(STORAGE_KEY, CURRENT_SYNC_STAMP);
             }} catch (e) {{}}
         }}
 
@@ -303,7 +303,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
 
                 let localStamp = "";
                 try {{
-                    localStamp = window.localStorage.getItem(STORAGE_KEY) || "";
+                    localStamp = window.sessionStorage.getItem(STORAGE_KEY) || "";
                 }} catch (e) {{
                     localStamp = "";
                 }}
@@ -312,7 +312,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
 
                 if (!localStamp) {{
                     try {{
-                        window.localStorage.setItem(STORAGE_KEY, remoteStamp);
+                        window.sessionStorage.setItem(STORAGE_KEY, remoteStamp);
                     }} catch (e) {{}}
                     window.staffProCurrentSyncStamp = remoteStamp;
                     return;
@@ -324,7 +324,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
                     if (clicked) {{
                         updateSmartPollingDebug("refresh clicked", "Remote change detected");
                         try {{
-                            window.localStorage.setItem(STORAGE_KEY, remoteStamp);
+                            window.sessionStorage.setItem(STORAGE_KEY, remoteStamp);
                         }} catch (e) {{}}
                         window.staffProCurrentSyncStamp = remoteStamp;
                     }}
