@@ -217,7 +217,9 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         const SUPABASE_ANON_KEY = {json.dumps(supabase_anon_key)};
         const CURRENT_SYNC_STAMP = {json.dumps(current_sync_stamp)};
         const STORAGE_KEY = "staff_pro_app_sync_state_last_changed_at_session";
-        const DEBUG_ENABLED = true;
+        const DEBUG_ENABLED = false;
+        const oldDebugBox = doc.getElementById("staff_pro_smart_polling_debug");
+        if (oldDebugBox) oldDebugBox.remove();
 
         function updateSmartPollingDebug(status, details) {{
             if (!DEBUG_ENABLED) return;
