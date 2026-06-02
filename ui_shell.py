@@ -250,8 +250,6 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         function userIsWorking() {{
             // Δεν μπλοκάρουμε πλέον το refresh απλώς επειδή υπάρχει ανοιχτή φόρμα/μπάρα.
             // Το μπλοκάρουμε μόνο όταν ο χρήστης όντως γράφει ή έχει ενεργό πεδίο.
-            if (doc.hidden) return true;
-
             const active = doc.activeElement;
             if (active) {{
                 const tag = (active.tagName || "").toLowerCase();
@@ -279,7 +277,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
 
         async function checkForRemoteChanges() {{
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {{ updateSmartPollingDebug("disabled", "Missing SUPABASE_URL or SUPABASE_ANON_KEY"); return; }}
-            if (userIsWorking()) {{ updateSmartPollingDebug("paused", "User is typing / active field / hidden tab"); return; }}
+            if (userIsWorking()) {{ updateSmartPollingDebug("paused", "User is typing / active field"); return; }}
             if (checkInFlight) {{ updateSmartPollingDebug("waiting", "Previous check still running"); return; }}
 
             checkInFlight = true;
@@ -340,7 +338,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         }}
 
         setInterval(checkForRemoteChanges, 30000);
-        setTimeout(checkForRemoteChanges, 8000);
+        setTimeout(checkForRemoteChanges, 3000);
     }})();
     """ if not show_menu else ""
     
