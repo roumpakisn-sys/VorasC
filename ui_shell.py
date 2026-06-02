@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta
+import json
 
 
 def setup_shared_ui(show_menu=False, menu_options=None):
@@ -178,43 +179,146 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     </style>
     """, unsafe_allow_html=True)
     
-    polling_js = """
-    (function () {
+    # --- SMART POLLING SETUP ---
+    # Το app δεν κάνει πλέον τυφλό rerun κάθε 30 δευτερόλεπτα.
+    # Διαβάζει πρώτα το app_sync_state.last_changed_at από Supabase
+    # και πατάει το κρυφό refresh μόνο αν υπάρχει πραγματική αλλαγή.
+    supabase_url = ""
+    supabase_anon_key = ""
+    current_sync_stamp = ""
+
+    try:
+        supabase_url = str(st.secrets.get("SUPABASE_URL", "")).rstrip("/")
+        supabase_anon_key = str(st.secrets.get("SUPABASE_ANON_KEY", ""))
+    except Exception:
+        supabase_url = ""
+        supabase_anon_key = ""
+
+    try:
+        if utils.supabase:
+            sync_res = (
+                utils.supabase
+                .table("app_sync_state")
+                .select("last_changed_at")
+                .eq("id", "global")
+                .limit(1)
+                .execute()
+            )
+            sync_rows = sync_res.data or []
+            if sync_rows:
+                current_sync_stamp = str(sync_rows[0].get("last_changed_at") or "")
+    except Exception as e:
+        print(f"Smart polling sync-state read failed: {e}")
+        current_sync_stamp = ""
+
+    polling_js = f"""
+    (function () {{
+        const SUPABASE_URL = {json.dumps(supabase_url)};
+        const SUPABASE_ANON_KEY = {json.dumps(supabase_anon_key)};
+        const CURRENT_SYNC_STAMP = {json.dumps(current_sync_stamp)};
+        const STORAGE_KEY = "staff_pro_app_sync_state_last_changed_at";
+
+        if (CURRENT_SYNC_STAMP) {{
+            window.staffProCurrentSyncStamp = CURRENT_SYNC_STAMP;
+            try {{
+                window.localStorage.setItem(STORAGE_KEY, CURRENT_SYNC_STAMP);
+            }} catch (e) {{}}
+        }}
+
         if (window.staffProSmartPollingStarted) return;
         window.staffProSmartPollingStarted = true;
 
-        function userIsWorking() {
+        let checkInFlight = false;
+
+        function userIsWorking() {{
             const isEditing = doc.getElementById("is_editing_flag");
             if (isEditing) return true;
 
             if (doc.hidden) return true;
 
             const active = doc.activeElement;
-            if (active) {
+            if (active) {{
                 const tag = (active.tagName || "").toLowerCase();
                 const role = active.getAttribute ? (active.getAttribute("role") || "") : "";
                 if (["input", "textarea", "select"].includes(tag)) return true;
                 if (["combobox", "listbox", "textbox", "spinbutton", "slider"].includes(role)) return true;
                 if (active.isContentEditable) return true;
-            }
+            }}
 
             return false;
-        }
+        }}
 
-        function clickCheckUpdates() {
-            if (userIsWorking()) return;
-
+        function clickCheckUpdates() {{
             const buttons = doc.querySelectorAll("button");
-            for (let btn of buttons) {
-                if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {
+            for (let btn of buttons) {{
+                if (btn.innerText && btn.innerText.includes("🔄 Check Updates")) {{
                     btn.click();
-                    break;
-                }
-            }
-        }
+                    return true;
+                }}
+            }}
+            return false;
+        }}
 
-        setInterval(clickCheckUpdates, 30000);
-    })();
+        async function checkForRemoteChanges() {{
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+            if (userIsWorking()) return;
+            if (checkInFlight) return;
+
+            checkInFlight = true;
+            try {{
+                const response = await fetch(
+                    SUPABASE_URL + "/rest/v1/app_sync_state?id=eq.global&select=last_changed_at",
+                    {{
+                        method: "GET",
+                        headers: {{
+                            "apikey": SUPABASE_ANON_KEY,
+                            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+                            "Accept": "application/json"
+                        }},
+                        cache: "no-store"
+                    }}
+                );
+
+                if (!response.ok) return;
+
+                const rows = await response.json();
+                const remoteStamp = rows && rows[0] ? (rows[0].last_changed_at || "") : "";
+                if (!remoteStamp) return;
+
+                let localStamp = "";
+                try {{
+                    localStamp = window.localStorage.getItem(STORAGE_KEY) || "";
+                }} catch (e) {{
+                    localStamp = "";
+                }}
+
+                if (!localStamp) {{
+                    try {{
+                        window.localStorage.setItem(STORAGE_KEY, remoteStamp);
+                    }} catch (e) {{}}
+                    window.staffProCurrentSyncStamp = remoteStamp;
+                    return;
+                }}
+
+                if (remoteStamp !== localStamp) {{
+                    const clicked = clickCheckUpdates();
+                    if (clicked) {{
+                        try {{
+                            window.localStorage.setItem(STORAGE_KEY, remoteStamp);
+                        }} catch (e) {{}}
+                        window.staffProCurrentSyncStamp = remoteStamp;
+                    }}
+                }}
+            }} catch (e) {{
+                console.warn("STAFF.PRO smart polling check failed", e);
+            }} finally {{
+                checkInFlight = false;
+            }}
+        }}
+
+        setInterval(checkForRemoteChanges, 30000);
+        setTimeout(checkForRemoteChanges, 8000);
+    }})();
     """ if not show_menu else ""
     
     components.html("""
