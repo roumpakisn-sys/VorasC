@@ -56,18 +56,17 @@ def mark_data_changed():
 
 def touch_app_sync_state():
     """
-    Ενημερώνει τον μικρό πίνακα app_sync_state ώστε τα άλλα ανοιχτά sessions
-    να καταλάβουν ότι υπάρχει πραγματική αλλαγή και να κάνουν refresh μόνο τότε.
+    Ενημερώνει τον μικρό πίνακα app_sync_state μέσω Supabase RPC,
+    ώστε τα άλλα ανοιχτά sessions να καταλάβουν ότι υπάρχει πραγματική αλλαγή.
 
+    Χρησιμοποιεί τη function public.touch_app_sync_state_public().
     Είναι σιωπηλό: αν αποτύχει, δεν πρέπει να χαλάσει η βασική αποθήκευση.
     """
     if not supabase:
         return
 
     try:
-        supabase.table("app_sync_state").update({
-            "last_changed_at": datetime.utcnow().isoformat() + "Z"
-        }).eq("id", "global").execute()
+        supabase.rpc("touch_app_sync_state_public").execute()
     except Exception as e:
         print(f"App sync state touch failed: {e}")
 
