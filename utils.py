@@ -54,6 +54,25 @@ def mark_data_changed():
     st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
     st.session_state.data_dirty = True
 
+
+def touch_app_sync_state():
+    """
+    Ενημερώνει τον μικρό πίνακα app_sync_state ώστε τα άλλα ανοιχτά sessions
+    να καταλάβουν ότι υπάρχει πραγματική αλλαγή και να κάνουν refresh μόνο τότε.
+
+    Το κρατάμε σιωπηλό: αν κάτι πάει στραβά εδώ, δεν πρέπει να χαλάσει η βασική
+    αποθήκευση της εφαρμογής.
+    """
+    if not supabase:
+        return
+
+    try:
+        supabase.table("app_sync_state").update({
+            "last_changed_at": datetime.utcnow().isoformat() + "Z"
+        }).eq("id", "global").execute()
+    except Exception as e:
+        print(f"App sync state touch failed: {e}")
+
 def fetch_paginated(table):
     if not supabase: return []
     all_rows = []
@@ -290,6 +309,7 @@ def db_insert(table, data, track=True):
 
     try:
         supabase.table(table).insert(serialize_dates(data)).execute()
+        touch_app_sync_state()
         log_activity("ΠΡΟΣΘΗΚΗ", table, format_log_details(table, data))
         return True
     except Exception as e:
@@ -306,6 +326,7 @@ def db_delete(table, column, value, deleted_records=None, track=True):
     if supabase:
         try:
             supabase.table(table).delete().eq(column, value).execute()
+            touch_app_sync_state()
             log_activity("ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{column} = {value}")
             for r in deleted_records:
                 rec_id = r.get('id')
@@ -328,6 +349,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                     chunk_values = values[i:i+chunk_size]
                     supabase.table(table).delete().in_(column, chunk_values).execute()
                     
+                touch_app_sync_state()
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
                 for r in deleted_records:
                     rec_id = r.get('id')
@@ -345,6 +367,7 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
     if supabase:
         try:
             supabase.table(table).update(serialize_dates(new_data)).eq('id', id_val).execute()
+            touch_app_sync_state()
             log_activity("ΕΝΗΜΕΡΩΣΗ", table, format_log_details(table, new_data))
         except Exception as e:
             st.error(f"Σφάλμα ενημέρωσης στη βάση: {e}")
