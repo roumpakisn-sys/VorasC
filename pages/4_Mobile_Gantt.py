@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import uuid
 import hashlib
@@ -48,6 +49,44 @@ if not st.session_state.get("authenticated"):
 # --- DATA / UI ---
 utils.init_data_and_sync()
 utils.setup_shared_ui()
+
+# Στη mobile έκδοση αφαιρούμε το πάνω δεξιά ρολόι που προσθέτει το κοινό ui_shell.
+# Δεν επηρεάζει το desktop Gantt.
+st.markdown(
+    """
+    <style>
+    #staff_pro_clock {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+components.html(
+    """
+    <script>
+    (function () {
+        const doc = window.parent.document;
+        const clock = doc.getElementById("staff_pro_clock");
+        if (clock) clock.remove();
+
+        // Αν το κοινό ui_shell το ξαναδημιουργήσει μετά από rerun,
+        // το καθαρίζουμε διακριτικά μόνο στη mobile σελίδα.
+        if (!window.parent.staffProMobileClockCleanerStarted) {
+            window.parent.staffProMobileClockCleanerStarted = true;
+            setInterval(function () {
+                const c = doc.getElementById("staff_pro_clock");
+                if (c) c.remove();
+            }, 1000);
+        }
+    })();
+    </script>
+    """,
+    height=0,
+    width=0,
+)
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
 active_employee_ids = [
@@ -138,6 +177,9 @@ if "mobile_reset_edit_select_next_run" not in st.session_state:
 
 if "mobile_qa_rc" not in st.session_state:
     st.session_state.mobile_qa_rc = 0
+
+if "mobile_zoom_pct" not in st.session_state:
+    st.session_state.mobile_zoom_pct = 90
 
 
 def clear_mobile_selection():
@@ -255,27 +297,37 @@ with ctrl_next:
         clear_mobile_selection()
         st.rerun()
 
-ctrl_today, ctrl_zoom = st.columns([1, 2])
+ctrl_today, ctrl_zoom_minus, ctrl_zoom_slider, ctrl_zoom_plus = st.columns([1.1, 0.9, 2.2, 0.9])
 with ctrl_today:
     if st.button("Σήμερα", use_container_width=True):
         st.session_state.mobile_view_date = get_local_today()
         clear_mobile_selection()
         st.rerun()
 
-with ctrl_zoom:
-    mobile_zoom_choice = st.selectbox(
-        "Ζουμ",
-        options=["Σφιχτό", "Κανονικό", "Άνετο"],
-        index=1,
-        key="mobile_zoom_choice",
+with ctrl_zoom_minus:
+    if st.button("➖", use_container_width=True, help="Σμίκρυνση Gantt"):
+        st.session_state.mobile_zoom_pct = max(50, int(st.session_state.mobile_zoom_pct) - 10)
+        clear_mobile_selection()
+        st.rerun()
+
+with ctrl_zoom_slider:
+    st.session_state.mobile_zoom_pct = st.slider(
+        "Zoom Gantt",
+        min_value=50,
+        max_value=170,
+        value=int(st.session_state.mobile_zoom_pct),
+        step=5,
+        key="mobile_zoom_pct_slider",
+        help="Μεγέθυνση/σμίκρυνση του οριζόντιου χρόνου στο διάγραμμα.",
     )
 
-zoom_map = {
-    "Σφιχτό": 0.72,
-    "Κανονικό": 0.9,
-    "Άνετο": 1.15,
-}
-zoom_factor = zoom_map.get(mobile_zoom_choice, 0.9)
+with ctrl_zoom_plus:
+    if st.button("➕", use_container_width=True, help="Μεγέθυνση Gantt"):
+        st.session_state.mobile_zoom_pct = min(170, int(st.session_state.mobile_zoom_pct) + 10)
+        clear_mobile_selection()
+        st.rerun()
+
+zoom_factor = max(0.5, min(1.7, int(st.session_state.mobile_zoom_pct) / 100.0))
 
 start_of_week = _start_of_week(st.session_state.mobile_view_date)
 gantt_height_px = 560
