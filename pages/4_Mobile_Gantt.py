@@ -181,6 +181,9 @@ if "mobile_qa_rc" not in st.session_state:
 if "mobile_zoom_pct" not in st.session_state:
     st.session_state.mobile_zoom_pct = 90
 
+if "mobile_app_scale_pct" not in st.session_state:
+    st.session_state.mobile_app_scale_pct = 90
+
 
 def clear_mobile_selection():
     st.session_state.mobile_clicked_key = None
@@ -419,10 +422,103 @@ with ctrl_zoom_plus:
         clear_mobile_selection()
         st.rerun()
 
+st.caption("🔎 Το Zoom Gantt αλλάζει μόνο το πλάτος του διαγράμματος. Το App scale μικραίνει/μεγαλώνει όλη τη mobile σελίδα.")
+
+scale_minus, scale_slider, scale_plus = st.columns([0.9, 2.4, 0.9])
+
+with scale_minus:
+    if st.button("➖", key="mobile_app_scale_minus", use_container_width=True, help="Σμίκρυνση όλης της mobile σελίδας"):
+        st.session_state.mobile_app_scale_pct = max(65, int(st.session_state.mobile_app_scale_pct) - 5)
+        clear_mobile_selection()
+        st.rerun()
+
+with scale_slider:
+    st.session_state.mobile_app_scale_pct = st.slider(
+        "App scale / Γενικό unzoom",
+        min_value=65,
+        max_value=115,
+        value=int(st.session_state.mobile_app_scale_pct),
+        step=5,
+        key="mobile_app_scale_pct_slider",
+        help="Μικραίνει ή μεγαλώνει γενικά τα στοιχεία της mobile σελίδας.",
+    )
+
+with scale_plus:
+    if st.button("➕", key="mobile_app_scale_plus", use_container_width=True, help="Μεγέθυνση όλης της mobile σελίδας"):
+        st.session_state.mobile_app_scale_pct = min(115, int(st.session_state.mobile_app_scale_pct) + 5)
+        clear_mobile_selection()
+        st.rerun()
+
+app_scale = max(0.65, min(1.15, int(st.session_state.mobile_app_scale_pct) / 100.0))
 zoom_factor = max(0.5, min(1.7, int(st.session_state.mobile_zoom_pct) / 100.0))
 
+st.markdown(
+    f"""
+    <style>
+    /* Mobile-only γενικό unzoom της σελίδας */
+    .block-container {{
+        font-size: {app_scale:.2f}rem !important;
+        padding-top: {0.75 * app_scale:.2f}rem !important;
+        padding-left: {0.55 * app_scale:.2f}rem !important;
+        padding-right: {0.55 * app_scale:.2f}rem !important;
+    }}
+
+    .block-container h1 {{
+        font-size: {2.0 * app_scale:.2f}rem !important;
+        margin-bottom: {0.6 * app_scale:.2f}rem !important;
+    }}
+
+    .block-container h2 {{
+        font-size: {1.55 * app_scale:.2f}rem !important;
+    }}
+
+    .block-container h3 {{
+        font-size: {1.25 * app_scale:.2f}rem !important;
+    }}
+
+    .block-container p,
+    .block-container label,
+    .block-container span,
+    .block-container div {{
+        line-height: {1.35 * app_scale:.2f} !important;
+    }}
+
+    .stButton > button,
+    .stDownloadButton > button,
+    div[data-testid="stFormSubmitButton"] button {{
+        min-height: {2.75 * app_scale:.2f}rem !important;
+        font-size: {1.0 * app_scale:.2f}rem !important;
+        padding: {0.45 * app_scale:.2f}rem {0.75 * app_scale:.2f}rem !important;
+        border-radius: {12 * app_scale:.0f}px !important;
+    }}
+
+    div[data-testid="stForm"] {{
+        padding: {0.75 * app_scale:.2f}rem !important;
+        border-radius: {14 * app_scale:.0f}px !important;
+    }}
+
+    div[data-testid="stExpander"] summary {{
+        font-size: {1.0 * app_scale:.2f}rem !important;
+        min-height: {2.5 * app_scale:.2f}rem !important;
+    }}
+
+    .mobile-tip {{
+        font-size: {0.92 * app_scale:.2f}rem !important;
+        padding: {0.65 * app_scale:.2f}rem {0.8 * app_scale:.2f}rem !important;
+        border-radius: {12 * app_scale:.0f}px !important;
+        margin-bottom: {0.75 * app_scale:.2f}rem !important;
+    }}
+
+    input, textarea, select {{
+        font-size: max(14px, {16 * app_scale:.0f}px) !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 start_of_week = _start_of_week(st.session_state.mobile_view_date)
-gantt_height_px = 560
+gantt_height_px = int(560 * app_scale)
 
 
 # --- ΚΑΘΡΕΦΤΗΣ ΦΙΛΤΡΟΥ ΚΕΝΤΡΙΚΟΥ GANTT ---
@@ -473,7 +569,7 @@ def get_mobile_cached_data(
 wk_groups, export_data = get_mobile_cached_data(
     start_of_week,
     zoom_factor,
-    f"{st.session_state.get('local_gantt_version', 0)}_{start_of_week.isoformat()}_{zoom_factor}_{recurring_filter_version}",
+    f"{st.session_state.get('local_gantt_version', 0)}_{start_of_week.isoformat()}_{zoom_factor}_{app_scale}_{recurring_filter_version}",
     filtered_assignments_by_date,
     st.session_state.leaves,
     st.session_state.employees,
@@ -502,7 +598,7 @@ html_chart = gantt_html.build_html_gantt(
 
 clicked_safe_id = click_detector(
     html_chart,
-    key=f"mobile_gantt_detector_{st.session_state.mobile_detector_version}_{gantt_height_px}_{zoom_factor}",
+    key=f"mobile_gantt_detector_{st.session_state.mobile_detector_version}_{gantt_height_px}_{zoom_factor}_{app_scale}",
 )
 
 if clicked_safe_id:
