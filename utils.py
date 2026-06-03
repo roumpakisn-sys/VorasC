@@ -20,16 +20,35 @@ except ImportError:
 
 # --- SETUP SUPABASE ---
 try:
-    HAS_SECRETS = "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets
+    HAS_SECRETS = (
+        "SUPABASE_URL" in st.secrets
+        and (
+            "SUPABASE_SERVICE_ROLE_KEY" in st.secrets
+            or "SUPABASE_KEY" in st.secrets
+        )
+    )
 except Exception:
     HAS_SECRETS = False
 
 @st.cache_resource
 def init_supabase():
+    """
+    Server-side Supabase client.
+
+    Προτιμά το SUPABASE_SERVICE_ROLE_KEY για το Streamlit backend,
+    ώστε η εφαρμογή να συνεχίσει να δουλεύει σωστά ακόμη και όταν
+    ενεργοποιήσουμε RLS στους πίνακες.
+
+    Το SUPABASE_SERVICE_ROLE_KEY δεν πρέπει ποτέ να μπαίνει σε JavaScript,
+    HTML ή αρχείο GitHub. Μόνο στα Streamlit Secrets.
+    """
     if not SUPABASE_INSTALLED or not HAS_SECRETS:
         return None
+
     try:
-        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        supabase_url = st.secrets["SUPABASE_URL"]
+        supabase_backend_key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY") or st.secrets.get("SUPABASE_KEY")
+        return create_client(supabase_url, supabase_backend_key)
     except Exception:
         return None
 
@@ -175,7 +194,7 @@ def log_activity(action_type, table_name, details_raw):
         now_gr = datetime.now(ZoneInfo("Europe/Athens")).isoformat()
     except:
         now_gr = (datetime.utcnow() + timedelta(hours=3)).isoformat()
-    
+
     log_entry = {
         "id": str(uuid.uuid4()),
         "timestamp": now_gr,
@@ -204,7 +223,7 @@ def inject_silent_refresh_css():
             visibility: hidden !important; 
             display: none !important; 
         }
-        
+
         /* 2. Κλείδωμα της διαφάνειας στο 100% για να μην "θολώνει" (αφαίρεση του veil effect) */
         [data-testid="stAppViewContainer"], 
         [data-testid="stMainBlockContainer"],
@@ -214,7 +233,7 @@ def inject_silent_refresh_css():
             filter: none !important;
             transition: none !important;
         }
-        
+
         /* 3. Κρύβουμε την κόκκινη/πολύχρωμη γραμμή φόρτωσης στην κορυφή */
         [data-testid="stDecoration"] { 
             display: none !important; 
@@ -269,7 +288,7 @@ def sync_data_incremental():
 
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
-    
+
     def _thread_task():
         chunk_size = 500
         for i in range(0, len(data), chunk_size):
@@ -277,7 +296,7 @@ def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗ
                 supabase.table(table).insert(serialize_dates(data[i:i+chunk_size])).execute()
             except Exception as e:
                 print(f"Bulk insert error: {e}")
-        
+
         try:
             now_utc = datetime.utcnow().isoformat() + "Z"
             log_entry = {
@@ -345,7 +364,7 @@ def db_delete_in(table, column, values, deleted_records=None, track=True):
                 for i in range(0, len(values), chunk_size):
                     chunk_values = values[i:i+chunk_size]
                     supabase.table(table).delete().in_(column, chunk_values).execute()
-                    
+
                 touch_app_sync_state()
                 log_activity("ΜΑΖΙΚΗ ΔΙΑΓΡΑΦΗ", table, format_log_details(table, deleted_records) if deleted_records else f"{len(values)} εγγραφές")
                 for r in deleted_records:
@@ -449,7 +468,7 @@ def init_data_and_sync():
     if current_user and st.session_state.get("full_sync_done_for_user") != current_user:
         st.session_state.last_sync_time = None
         st.session_state.full_sync_done_for_user = current_user
-    
+
     skip_remote_sync = bool(st.session_state.pop("skip_remote_sync_once", False))
 
     if not skip_remote_sync:
@@ -486,7 +505,7 @@ def init_data_and_sync():
 
     st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
     st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
-    
+
     assign_date_map = {}
     for a in st.session_state.get('assignments', []):
         d = a.get('date')
@@ -494,7 +513,7 @@ def init_data_and_sync():
             if d not in assign_date_map: assign_date_map[d] = []
             assign_date_map[d].append(a)
     st.session_state.assignments_by_date = assign_date_map
-    
+
     leaves_by_emp = {}
     for l in st.session_state.get('leaves', []):
         eid = l.get('employeeId')
@@ -502,7 +521,7 @@ def init_data_and_sync():
             if eid not in leaves_by_emp: leaves_by_emp[eid] = []
             leaves_by_emp[eid].append(l)
     st.session_state.leaves_by_emp = leaves_by_emp
-    
+
     st.session_state.data_dirty = False
 
     if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
