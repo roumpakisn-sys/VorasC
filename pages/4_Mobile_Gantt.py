@@ -261,6 +261,98 @@ def _make_or_get_project(project_id, custom_name, color_name):
     return new_project_id
 
 
+def _normalize_mobile_project_list(values, allowed_ids):
+    allowed = set(allowed_ids or [])
+    clean = []
+
+    for value in values or []:
+        if value in allowed and value not in clean:
+            clean.append(value)
+
+    return clean
+
+
+def _get_mobile_recurring_project_ids(projects, recurring_patterns):
+    project_ids = []
+    known_project_ids = {p.get("id") for p in projects or [] if isinstance(p, dict)}
+
+    for pattern in recurring_patterns or []:
+        if not isinstance(pattern, dict):
+            continue
+
+        project_id = pattern.get("projectId")
+        if project_id and project_id in known_project_ids and project_id not in project_ids:
+            project_ids.append(project_id)
+
+    project_ids.sort(key=lambda pid: utils.get_project_name(pid).lower())
+    return project_ids
+
+
+def _load_mobile_hidden_recurring_projects(recurring_project_ids):
+    """
+    Η mobile σελίδα δεν έχει δικό της φίλτρο.
+    Διαβάζει τις ίδιες αποθηκευμένες επιλογές που χρησιμοποιεί το κεντρικό Gantt.
+    """
+    preference_key = "gantt_hidden_recurring_project_ids"
+    username = st.session_state.get("current_user") or ""
+
+    hidden_from_session = st.session_state.get(preference_key)
+    loaded_for_user = st.session_state.get("mobile_recurring_filter_loaded_for_user")
+
+    if loaded_for_user == username and hidden_from_session is not None:
+        return _normalize_mobile_project_list(hidden_from_session, recurring_project_ids)
+
+    hidden_ids = []
+    if username and utils.supabase:
+        try:
+            res = (
+                utils.supabase
+                .table("user_preferences")
+                .select("preference_value")
+                .eq("username", username)
+                .eq("preference_key", preference_key)
+                .limit(1)
+                .execute()
+            )
+
+            rows = res.data or []
+            if rows and isinstance(rows[0].get("preference_value"), list):
+                hidden_ids = rows[0].get("preference_value") or []
+        except Exception as e:
+            print(f"Could not load mobile recurring filter preference: {e}")
+            hidden_ids = hidden_from_session or []
+
+    hidden_ids = _normalize_mobile_project_list(hidden_ids, recurring_project_ids)
+
+    st.session_state[preference_key] = hidden_ids
+    st.session_state["mobile_recurring_filter_loaded_for_user"] = username
+
+    return hidden_ids
+
+
+def _get_mobile_visible_recurring_project_ids(projects, recurring_patterns):
+    """
+    Επιστρέφει τα recurring project ids που πρέπει να φαίνονται στο Mobile Gantt,
+    με βάση τις αποθηκευμένες επιλογές του κεντρικού Gantt.
+    """
+    recurring_project_ids = _get_mobile_recurring_project_ids(projects, recurring_patterns)
+
+    # Το apply_recurring_project_visibility_filter χρειάζεται να ξέρει ποια έργα
+    # θεωρούνται recurring. Το σετάρουμε εδώ χωρίς να εμφανίσουμε δεύτερο φίλτρο.
+    st.session_state["gantt_known_recurring_project_ids"] = list(recurring_project_ids)
+
+    if not recurring_project_ids:
+        return []
+
+    hidden_ids = _load_mobile_hidden_recurring_projects(recurring_project_ids)
+
+    return [
+        project_id
+        for project_id in recurring_project_ids
+        if project_id not in hidden_ids
+    ]
+
+
 # --- HEADER / CONTROLS ---
 st.title("📱 Mobile Gantt")
 
@@ -333,13 +425,13 @@ start_of_week = _start_of_week(st.session_state.mobile_view_date)
 gantt_height_px = 560
 
 
-# --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
-# Η mobile σελίδα σέβεται τις ίδιες επιλογές που έχει ο χρήστης
-# από το κεντρικό Gantt/sidebar για τα επαναλαμβανόμενα έργα.
-visible_recurring_project_ids = gantt_filters.render_recurring_project_visibility_filter(
+# --- ΚΑΘΡΕΦΤΗΣ ΦΙΛΤΡΟΥ ΚΕΝΤΡΙΚΟΥ GANTT ---
+# Η mobile σελίδα δεν εμφανίζει δεύτερο ανεξάρτητο φίλτρο.
+# Διαβάζει τις αποθηκευμένες επιλογές του χρήστη και δείχνει τις ίδιες μπάρες
+# με το κεντρικό Gantt για τα επαναλαμβανόμενα έργα.
+visible_recurring_project_ids = _get_mobile_visible_recurring_project_ids(
     projects=st.session_state.projects,
     recurring_patterns=st.session_state.recurring_patterns,
-    on_change=clear_mobile_selection,
 )
 
 filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
