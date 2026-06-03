@@ -11,6 +11,7 @@ import utils
 import scheduling
 import gantt_engine
 import gantt_html
+import gantt_filters
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -280,6 +281,23 @@ start_of_week = _start_of_week(st.session_state.mobile_view_date)
 gantt_height_px = 560
 
 
+# --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
+# Η mobile σελίδα σέβεται τις ίδιες επιλογές που έχει ο χρήστης
+# από το κεντρικό Gantt/sidebar για τα επαναλαμβανόμενα έργα.
+visible_recurring_project_ids = gantt_filters.render_recurring_project_visibility_filter(
+    projects=st.session_state.projects,
+    recurring_patterns=st.session_state.recurring_patterns,
+    on_change=clear_mobile_selection,
+)
+
+filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
+    assignments_by_date=st.session_state.assignments_by_date,
+    visible_project_ids=visible_recurring_project_ids,
+)
+
+recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_recurring_project_ids)
+
+
 # --- GANTT DATA ---
 @st.cache_data(show_spinner=False, max_entries=5)
 def get_mobile_cached_data(
@@ -311,8 +329,8 @@ def get_mobile_cached_data(
 wk_groups, export_data = get_mobile_cached_data(
     start_of_week,
     zoom_factor,
-    f"{st.session_state.get('local_gantt_version', 0)}_{start_of_week.isoformat()}_{zoom_factor}",
-    st.session_state.assignments_by_date,
+    f"{st.session_state.get('local_gantt_version', 0)}_{start_of_week.isoformat()}_{zoom_factor}_{recurring_filter_version}",
+    filtered_assignments_by_date,
     st.session_state.leaves,
     st.session_state.employees,
     st.session_state.projects,
