@@ -194,6 +194,7 @@ def auto_extend_recurring_patterns():
                         'notes': combined_notes,
                         'is_cancelled': False,
                         'cancel_reason': "",
+                        'is_general': False,
                     }
 
                     new_assignments_batch.append(new_assign)
