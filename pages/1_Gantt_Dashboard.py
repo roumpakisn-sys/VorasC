@@ -88,6 +88,27 @@ def clear_bar_selection():
     st.session_state.detector_version = st.session_state.get("detector_version", 0) + 1
 
 
+def preserve_context_notes(original_notes, edited_notes):
+    """
+    Κρατάει τις κρυφές πληροφορίες συμφραζομένων από τις παρατηρήσεις
+    όταν γίνεται επεξεργασία μπάρας.
+
+    Το πεδίο Παρατηρήσεις εμφανίζει καθαρισμένο κείμενο, χωρίς tags τύπου:
+    [Άδεια: Όνομα] ή [Εμπλοκή: Όνομα].
+    Όταν ο χρήστης προσθέτει νέα παρατήρηση ή νέο προσωπικό, αυτά τα tags
+    δεν πρέπει να χάνονται από την παλιά μπάρα.
+    """
+    result = (edited_notes or "").strip()
+    original = original_notes or ""
+
+    preserved_tags = re.findall(r"\[(?:Άδεια|Εμπλοκή):\s*[^\]]+\]", original)
+    for tag in preserved_tags:
+        if tag and tag not in result:
+            result = f"{result} {tag}".strip()
+
+    return result
+
+
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
@@ -764,9 +785,9 @@ if not presentation_mode:
                                     if va["msg"] == "Allowed Overlap":
                                         st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου: {va['emp_name']} ({va['start']})", icon="ℹ️")
 
-                                    c_notes = edit_notes
+                                    c_notes = preserve_context_notes(target_group.get("Notes", ""), edit_notes)
                                     if va["msg"] and va["msg"] != "Allowed Overlap":
-                                        c_notes = f"{edit_notes} {va['msg']}".strip()
+                                        c_notes = f"{c_notes} {va['msg']}".strip()
 
                                     new_a = {
                                         "id": str(uuid.uuid4()),
