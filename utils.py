@@ -291,11 +291,20 @@ def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗ
 
     def _thread_task():
         chunk_size = 500
+        inserted_any = False
+
         for i in range(0, len(data), chunk_size):
             try:
                 supabase.table(table).insert(serialize_dates(data[i:i+chunk_size])).execute()
+                inserted_any = True
             except Exception as e:
                 print(f"Bulk insert error: {e}")
+
+        # Σημαντικό για smart polling:
+        # Τα μαζικά inserts γίνονται σε background thread, άρα πρέπει να χτυπήσουν
+        # και αυτά το app_sync_state για να ενημερωθούν οι άλλοι χρήστες.
+        if inserted_any:
+            touch_app_sync_state()
 
         try:
             now_utc = datetime.utcnow().isoformat() + "Z"
