@@ -1045,13 +1045,20 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 final_r_proj_id = e_r_proj
 
                             old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                            st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                            utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
+                            old_assign_ids = [a['id'] for a in old_assigns]
 
-                            # Φτιάχνουμε νέο, ζωντανό index ΜΕΤΑ τη διαγραφή της παλιάς σειράς
-                            # για να μην συγκρούεται η σειρά με τον ίδιο της τον εαυτό.
+                            # Ασφαλής σειρά:
+                            # Πρώτα υπολογίζουμε τις νέες βάρδιες σε προσωρινές λίστες.
+                            # Μόνο αφού ολοκληρωθεί ο υπολογισμός, διαγράφουμε τις παλιές και γράφουμε τις νέες.
+                            assignments_without_current_series = [
+                                a for a in st.session_state.assignments
+                                if a.get('recurring_id') != selected_pattern_id
+                            ]
+
+                            # Ζωντανό index χωρίς την παλιά σειρά,
+                            # ώστε η σειρά να μη συγκρούεται με τον εαυτό της.
                             live_assignments_by_date = {}
-                            for _a in st.session_state.assignments:
+                            for _a in assignments_without_current_series:
                                 _d = _a.get('date')
                                 if _d is not None:
                                     live_assignments_by_date.setdefault(_d, []).append(_a)
@@ -1092,7 +1099,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 for d in dates_to_assign:
                                     emps_to_process = e_selected_weekdays_data.get(day_map_inv[d.weekday()], []) if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
                                     emps_to_process = emps_to_process if emps_to_process else [""]
-
                                     for eid in emps_to_process:
                                         final_eid = eid
                                         final_start = str_start
@@ -1142,7 +1148,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 final_employee_ids = e_selected_weekdays_data if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps
 
                                 old_pat = dict(pat)
-                                pat.update({
+                                updated_pat = dict(pat)
+                                updated_pat.update({
                                     'projectId': final_r_proj_id,
                                     'employeeIds': final_employee_ids,
                                     'colorName': e_r_color,
@@ -1154,6 +1161,21 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'startTime': str_start,
                                     'endTime': str_end
                                 })
+
+                                # Από εδώ και κάτω κάνουμε πραγματικές αλλαγές στη βάση/session.
+                                # Ο υπολογισμός έχει ήδη ολοκληρωθεί.
+                                st.session_state.assignments = assignments_without_current_series
+
+                                if old_assign_ids:
+                                    utils.db_delete_in(
+                                        'assignments',
+                                        'id',
+                                        old_assign_ids,
+                                        deleted_records=old_assigns,
+                                        track=False
+                                    )
+
+                                pat.update(updated_pat)
                                 utils.db_update('recurring_patterns', selected_pattern_id, pat, old_data=old_pat, track=False)
 
                                 if new_assignments_batch:
