@@ -509,8 +509,14 @@ def init_data_and_sync():
             valid_leaves.append(l)
     st.session_state.leaves = valid_leaves
 
-    cleanup_duplicates()
-    cleanup_projects()
+    # ΠΡΟΣΟΧΗ:
+    # Δεν τρέχουμε πλέον cleanup_duplicates() / cleanup_projects() αυτόματα σε κάθε sync/refresh.
+    # Αυτές οι λειτουργίες αλλάζουν/διαγράφουν δεδομένα στη βάση σε background thread.
+    # Όταν έτρεχαν σε κάθε "Άμεση Ανανέωση", μπορούσαν να προκαλέσουν φαινόμενο:
+    # "η αλλαγή φαίνεται στιγμιαία και μετά εξαφανίζεται".
+    # Αν χρειαστεί καθαρισμός, πρέπει να γίνεται με ξεχωριστό χειροκίνητο κουμπί/εργαλείο.
+    # cleanup_duplicates()
+    # cleanup_projects()
 
     st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
     st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
