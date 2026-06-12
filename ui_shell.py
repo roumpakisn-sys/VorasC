@@ -269,12 +269,55 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         
         st.sidebar.markdown('<div class="hidden-btn-container">', unsafe_allow_html=True)
         if st.sidebar.button("🔄 Check Updates", key="hidden_silent_refresh_btn"):
-            st.session_state.last_sync_time = None
+            for key in [
+                "last_sync_time",
+                "full_sync_done_for_user",
+                "employees",
+                "projects",
+                "assignments",
+                "leaves",
+                "recurring_patterns",
+                "evaluations",
+                "emp_map",
+                "proj_map",
+                "assignments_by_date",
+                "leaves_by_emp",
+                "data_dirty",
+                "local_gantt_version",
+            ]:
+                st.session_state.pop(key, None)
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
             st.rerun()
         st.sidebar.markdown('</div>', unsafe_allow_html=True)
         
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            st.session_state.last_sync_time = None 
+            # Πραγματικό hard refresh από Supabase.
+            # Δεν κρατάμε παλιές τοπικές λίστες/maps/cache, ώστε όλοι οι χρήστες
+            # να βλέπουν την ίδια εικόνα της βάσης μετά την ανανέωση.
+            for key in [
+                "last_sync_time",
+                "full_sync_done_for_user",
+                "employees",
+                "projects",
+                "assignments",
+                "leaves",
+                "recurring_patterns",
+                "evaluations",
+                "emp_map",
+                "proj_map",
+                "assignments_by_date",
+                "leaves_by_emp",
+                "data_dirty",
+                "local_gantt_version",
+            ]:
+                st.session_state.pop(key, None)
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
             st.rerun()
     else:
         st.sidebar.error("🔌 Εκτός Σύνδεσης (Τοπικά)")
