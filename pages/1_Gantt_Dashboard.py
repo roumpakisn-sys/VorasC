@@ -129,7 +129,11 @@ recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_re
 
 
 # --- ΕΞΑΓΩΓΗ ΔΕΔΟΜΕΝΩΝ ΑΠΟ ΤΟ ENGINE ---
-@st.cache_data(show_spinner=False, max_entries=5)
+# ΠΡΟΣΟΧΗ:
+# Δεν κάνουμε cache τα δεδομένα του Gantt εδώ.
+# Τα assignments/projects/employees περνάνε ως ορίσματα με "_" για λόγους hashability,
+# άρα το Streamlit δεν τα συμπεριλαμβάνει στο cache key.
+# Αυτό μπορούσε να κάνει διαφορετικούς χρήστες να βλέπουν διαφορετική/παλιά εικόνα.
 def get_cached_data(
     start_of_week,
     zoom_factor,
