@@ -1,6 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import json
 
 
@@ -268,11 +268,13 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         st.sidebar.success("☁️ Cloud Sync (Incremental)")
         
         if st.sidebar.button("🔄 Άμεση Ανανέωση", use_container_width=True):
-            # Low-egress refresh:
-            # Δεν μηδενίζουμε last_sync_time και δεν ξανακατεβάζουμε όλη τη βάση.
-            # Ζητάμε μόνο τις αλλαγές από το τελευταίο sync και μετά.
+            # Low-egress refresh με ασφαλές lookback.
+            # Δεν κατεβάζουμε όλη τη βάση. Γυρίζουμε προσωρινά το last_sync_time
+            # 24 ώρες πίσω, ώστε να πιάνονται σίγουρα οι πρόσφατες αλλαγές
+            # μεταξύ χρηστών ακόμη κι αν το session είχε μπερδεμένο timestamp.
             try:
                 import database
+                st.session_state.last_sync_time = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
                 database.sync_data_incremental()
                 utils.mark_data_changed()
                 try:
