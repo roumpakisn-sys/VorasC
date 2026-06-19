@@ -196,8 +196,45 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     + "</span>"
                 )
 
-            emps_plain = ", ".join(g["Employees"]).upper()
-            emps_html = ", ".join(_employee_text_html(emp) for emp in g["Employees"])
+            def _group_employee_labels(employee_names):
+                """
+                Ομαδοποιεί εργαζόμενους που έχουν ίδια ένδειξη:
+                [ΜΕΤΑ ΑΠΟ 'ΕΡΓΟ' ▶ ΟΝΟΜΑ]
+                ώστε να εμφανίζονται ως:
+                [ΜΕΤΑ ΑΠΟ 'ΕΡΓΟ' ▶ ΟΝΟΜΑ1, ΟΝΟΜΑ2]
+                """
+                grouped_after = {}
+                normal_names = []
+
+                for raw_name in employee_names or []:
+                    text_value = str(raw_name or "").upper().strip()
+
+                    if text_value.startswith("[ΜΕΤΑ ΑΠΟ ") and "▶" in text_value:
+                        before_arrow, after_arrow = text_value.split("▶", 1)
+                        after_arrow = after_arrow.strip()
+
+                        if after_arrow.endswith("]"):
+                            after_arrow = after_arrow[:-1].strip()
+
+                        prefix = before_arrow.strip()
+                        grouped_after.setdefault(prefix, [])
+                        if after_arrow and after_arrow not in grouped_after[prefix]:
+                            grouped_after[prefix].append(after_arrow)
+                    else:
+                        if text_value and text_value not in normal_names:
+                            normal_names.append(text_value)
+
+                result = list(normal_names)
+
+                for prefix, names in grouped_after.items():
+                    if names:
+                        result.append(f"{prefix} ▶ {', '.join(names)}]")
+
+                return result
+
+            grouped_employee_labels = _group_employee_labels(g["Employees"])
+            emps_plain = ", ".join(grouped_employee_labels).upper()
+            emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
             proj_name = g["Project"].upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
