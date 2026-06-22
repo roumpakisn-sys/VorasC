@@ -936,7 +936,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     pat_emp_ids = safe_eval(pat.get('employeeIds'), [])
                     pat_weekdays = safe_eval(pat.get('weekdays'), [])
 
-                    st.warning("⚠️ Προσοχή: Η αποθήκευση αλλαγών θα επαναδημιουργήσει **ΟΛΕΣ** τις βάρδιες αυτής της σειράς. Τυχόν μεμονωμένες αλλαγές που κάνατε στο Ταμπλό θα χαθούν.")
+                    st.warning("⚠️ Η αποθήκευση αλλαγών θα επαναδημιουργήσει μόνο τις βάρδιες από την επιλεγμένη «Από Ημερομηνία» και μετά. Οι παλιότερες μεμονωμένες αλλαγές που κάνατε στο Ταμπλό δεν θα επηρεαστούν.")
 
                     r_col1, r_col2 = st.columns(2)
                     with r_col1:
@@ -1044,15 +1044,37 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             else:
                                 final_r_proj_id = e_r_proj
 
-                            old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                            old_assign_ids = [a['id'] for a in old_assigns]
+                            edit_effective_date = e_r_start_date
+
+                            def _assignment_date_for_recurring_edit(assign):
+                                try:
+                                    return utils.safe_date_parse(assign.get('date'))
+                                except Exception:
+                                    return assign.get('date') if isinstance(assign.get('date'), date) else None
+
+                            def _is_current_series_on_or_after_effective_date(assign):
+                                if assign.get('recurring_id') != selected_pattern_id:
+                                    return False
+
+                                assign_date = _assignment_date_for_recurring_edit(assign)
+                                return bool(assign_date and assign_date >= edit_effective_date)
+
+                            # Κρατάμε ανέπαφες όλες τις παλιότερες βάρδιες της σειράς.
+                            # Αν μια μπάρα επαναλαμβανόμενου έργου έχει αλλαχθεί χειροκίνητα
+                            # σε προηγούμενη ημερομηνία, δεν διαγράφεται και δεν ξαναγράφεται.
+                            old_assigns_to_replace = [
+                                a for a in st.session_state.assignments
+                                if _is_current_series_on_or_after_effective_date(a)
+                            ]
+                            old_assign_ids = [a['id'] for a in old_assigns_to_replace if a.get('id')]
 
                             # Ασφαλής σειρά:
                             # Πρώτα υπολογίζουμε τις νέες βάρδιες σε προσωρινές λίστες.
-                            # Μόνο αφού ολοκληρωθεί ο υπολογισμός, διαγράφουμε τις παλιές και γράφουμε τις νέες.
+                            # Μόνο αφού ολοκληρωθεί ο υπολογισμός, διαγράφουμε τις βάρδιες
+                            # από την επιλεγμένη ημερομηνία και μετά, και γράφουμε τις νέες.
                             assignments_without_current_series = [
                                 a for a in st.session_state.assignments
-                                if a.get('recurring_id') != selected_pattern_id
+                                if not _is_current_series_on_or_after_effective_date(a)
                             ]
 
                             # Ζωντανό index χωρίς την παλιά σειρά,
@@ -1171,7 +1193,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         'assignments',
                                         'id',
                                         old_assign_ids,
-                                        deleted_records=old_assigns,
+                                        deleted_records=old_assigns_to_replace,
                                         track=False
                                     )
 
@@ -1186,7 +1208,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                             utils.add_transaction(actions)
                             st.session_state.rec_reset_counter += 1
                             if success_count > 0:
-                                st.success(f"Επιτυχής ενημέρωση! Δημιουργήθηκαν {success_count} νέες βάρδιες. Η σελίδα ανανεώνεται...")
+                                st.success(f"Επιτυχής ενημέρωση από {edit_effective_date.strftime('%d/%m/%Y')} και μετά! Δημιουργήθηκαν {success_count} νέες βάρδιες. Η σελίδα ανανεώνεται...")
                                 time.sleep(1.5)
                                 st.rerun()
                             if conflict_count > 0:
