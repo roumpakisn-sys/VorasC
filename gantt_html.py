@@ -264,12 +264,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             tooltip = base_text_plain.replace('"', "&quot;").replace("'", "&#39;")
             project_copy_attr = html_utils.escape(str(g["Project"]), quote=True)
 
-            # Επαναφορά κόκκινου περιγράμματος για μπάρες που έχουν τικαριστεί ως "Γενικός".
-            # Δεν αλλάζει λειτουργία ή δεδομένα, μόνο το border/shadow της συγκεκριμένης μπάρας.
-            bar_border = "4px solid #dc2626" if g.get("IsGeneral", False) else "1px solid rgba(0,0,0,0.5)"
+            # Κόκκινη περιμετρική ένδειξη για μπάρες που έχουν τικαριστεί ως "Γενικός".
+            # Χρησιμοποιούμε border + outline + inset box-shadow, ώστε να φαίνεται καθαρά
+            # πάνω σε οποιοδήποτε χρώμα μπάρας. Δεν αλλάζει λειτουργία ή δεδομένα.
+            is_general_bar = bool(g.get("IsGeneral", False) or g.get("is_general", False))
+            bar_border = "3px solid #dc2626" if is_general_bar else "1px solid rgba(0,0,0,0.5)"
+            bar_outline = "3px solid #dc2626" if is_general_bar else "none"
+            bar_outline_offset = "-3px" if is_general_bar else "0"
             bar_shadow = (
-                "0 0 0 2px rgba(220,38,38,0.35), 0 3px 8px rgba(0,0,0,0.25)"
-                if g.get("IsGeneral", False)
+                "inset 0 0 0 3px #dc2626, 0 0 0 2px rgba(220,38,38,0.55), 0 3px 8px rgba(0,0,0,0.25)"
+                if is_general_bar
                 else "0 3px 6px rgba(0,0,0,0.15)"
             )
 
@@ -279,7 +283,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
                 f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
-                f"box-shadow: {bar_shadow}; display: flex; align-items: center; justify-content: center; "
+                f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'>"
                 f"<button type='button' class='gantt-copy-project-btn' data-project='{project_copy_attr}' title='Αντιγραφή ονόματος έργου'>📋</button>"
