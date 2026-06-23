@@ -36,6 +36,127 @@ def _shorten_text(value, max_len=95):
     return text[: max_len - 1] + "…"
 
 
+def _safe_employee_short_names():
+    emp_short_names = {}
+    for emp in st.session_state.get("employees", []):
+        if not isinstance(emp, dict):
+            continue
+        emp_id = emp.get("id")
+        full_name = emp.get("name", "")
+        if not emp_id:
+            continue
+        parts = full_name.split()
+        emp_short_names[emp_id] = f"{parts[-1]} {parts[0][0]}." if len(parts) > 1 else full_name
+    return emp_short_names
+
+
+def _employee_name(employee_id, emp_short_names=None):
+    if not employee_id:
+        return ""
+    emp_short_names = emp_short_names or {}
+    if employee_id in emp_short_names:
+        return emp_short_names[employee_id]
+
+    try:
+        import utils
+        return utils.get_employee_name(employee_id)
+    except Exception:
+        return str(employee_id)
+
+
+def _day_left_label(current_date, day_name):
+    """
+    Κείμενο αριστερού κελιού ημέρας για το visual Excel Gantt.
+
+    Περιλαμβάνει:
+    - Ημέρα / ημερομηνία
+    - Άδειες ημέρας
+    - Διαθέσιμα εξωτερικά συνεργεία μετά τα πρωινά
+    """
+    emp_short_names = _safe_employee_short_names()
+
+    lines = [
+        f"{day_name}",
+        current_date.strftime("%d/%m/%Y"),
+    ]
+
+    leaves_today = []
+    for leave in st.session_state.get("leaves", []):
+        if not isinstance(leave, dict):
+            continue
+
+        start_date = leave.get("startDate")
+        end_date = leave.get("endDate")
+        if not start_date or not end_date:
+            continue
+
+        try:
+            if start_date <= current_date <= end_date:
+                emp_n = _employee_name(leave.get("employeeId"), emp_short_names)
+                sub_id = leave.get("substituteId")
+                if sub_id:
+                    sub_n = _employee_name(sub_id, emp_short_names)
+                    leaves_today.append(f"{emp_n} (Αντ: {sub_n})")
+                elif emp_n:
+                    leaves_today.append(emp_n)
+        except Exception:
+            continue
+
+    if leaves_today:
+        lines.append("")
+        lines.append("Άδειες:")
+        lines.extend(leaves_today)
+
+    available_ext_crew = []
+    day_assigns = st.session_state.get("assignments_by_date", {}).get(current_date, [])
+
+    for emp in st.session_state.get("employees", []):
+        if not isinstance(emp, dict):
+            continue
+
+        emp_id = emp.get("id")
+        if not emp_id:
+            continue
+
+        if emp.get("status", "Ενεργός") != "Ενεργός":
+            continue
+
+        if not emp.get("is_external_crew", False):
+            continue
+
+        is_on_leave = False
+        for leave in st.session_state.get("leaves", []):
+            if not isinstance(leave, dict):
+                continue
+            try:
+                if leave.get("employeeId") == emp_id and leave.get("startDate") <= current_date <= leave.get("endDate"):
+                    is_on_leave = True
+                    break
+            except Exception:
+                continue
+
+        if is_on_leave:
+            continue
+
+        is_busy_after_10 = any(
+            isinstance(a, dict)
+            and a.get("employeeId") == emp_id
+            and not a.get("is_cancelled", False)
+            and str(a.get("endTime", ""))[:5] > "10:00"
+            for a in day_assigns
+        )
+
+        if not is_busy_after_10:
+            available_ext_crew.append(emp_short_names.get(emp_id, emp.get("name", "")))
+
+    if available_ext_crew:
+        lines.append("")
+        lines.append("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:")
+        lines.extend(available_ext_crew)
+
+    return "\n".join(lines), len(lines)
+
+
 def _build_lanes(day_groups):
     """
     Ίδια βασική λογική στοίβαξης με το HTML Gantt:
@@ -171,7 +292,7 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
         cell.border = grid_border
 
     # Διαστάσεις
-    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["A"].width = 30
     for col in range(first_time_col, last_time_col + 1):
         ws.column_dimensions[get_column_letter(col)].width = 4.2
 
@@ -190,17 +311,24 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
             if group.get("Date") == current_date
         ]
 
+        day_label, day_label_lines = _day_left_label(current_date, day_names_gr[day_idx])
         placed_groups, lane_count = _build_lanes(day_groups)
+
+        # Εξασφαλίζει ότι το αριστερό κελί έχει αρκετό ύψος για άδειες/διαθέσιμους.
+        # Δεν επηρεάζει τις ίδιες τις μπάρες, απλώς προσθέτει ύψος στην ημέρα όπου χρειάζεται.
+        min_rows_for_label = max(1, math.ceil(day_label_lines / 2.2))
+        lane_count = max(lane_count, min_rows_for_label)
+
         day_start_row = current_row
         day_end_row = current_row + lane_count - 1
 
         # Αριστερό κελί ημέρας, merged κάθετα.
         ws.merge_cells(start_row=day_start_row, start_column=1, end_row=day_end_row, end_column=1)
         day_cell = ws.cell(row=day_start_row, column=1)
-        day_cell.value = f"{day_names_gr[day_idx]}\n{current_date.strftime('%d/%m/%Y')}"
+        day_cell.value = day_label
         day_cell.fill = day_fill
-        day_cell.font = Font(bold=True, color="1E293B", size=10)
-        day_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        day_cell.font = Font(bold=True, color="1E293B", size=9)
+        day_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
         _apply_outer_border(ws, day_start_row, day_end_row, 1, 1, dark_border)
 
         # Grid φόντου για όλες τις γραμμές της ημέρας.
