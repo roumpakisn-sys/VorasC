@@ -36,6 +36,7 @@ import gantt_engine
 import gantt_html
 import gantt_controls
 import gantt_export
+import gantt_excel_export
 import gantt_filters
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
@@ -263,7 +264,10 @@ if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
 
 # --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-# Η υλοποίηση μεταφέρθηκε στο gantt_export.py.
+# Η απλή εξαγωγή παραμένει στο gantt_export.py.
+# Η οπτική εξαγωγή με συγχωνευμένα κελιά μπαίνει σε ξεχωριστό module,
+# ώστε να μην αλλάξει η λειτουργία του Gantt.
+gantt_excel_export.render_visual_gantt_excel_export(wk_groups, start_of_week)
 gantt_export.render_gantt_export(export_data, start_of_week)
 
 # --- ΦΟΡΜΕΣ ΠΡΟΣΘΗΚΗΣ ΚΑΙ ΕΠΕΞΕΡΓΑΣΙΑΣ ΜΠΑΡΑΣ ---
