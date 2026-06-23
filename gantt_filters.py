@@ -305,12 +305,27 @@ def render_recurring_project_visibility_filter(projects, recurring_patterns, on_
     return visible_ids
 
 
+def _is_without_personnel_assignment(assignment):
+    """
+    True όταν η βάρδια είναι Χωρίς Προσωπικό.
+
+    Στην εφαρμογή αυτό αποθηκεύεται συνήθως ως employeeId = "".
+    Κρατάμε τη συνθήκη γενική ώστε να πιάνει και None, αν υπάρξει.
+    """
+    if not isinstance(assignment, dict):
+        return False
+
+    employee_id = assignment.get("employeeId")
+    return employee_id is None or str(employee_id).strip() == ""
+
+
 def apply_recurring_project_visibility_filter(assignments_by_date, visible_project_ids):
     """
     Επιστρέφει νέο assignments_by_date μόνο για προβολή στο Gantt.
 
     Κρύβει έργα που ανήκουν στη λίστα recurring patterns και είναι ξετικαρισμένα.
-    Αυτό είναι πιο ασφαλές από το να βασιζόμαστε μόνο στο assignment.recurring_id.
+    Όμως οι βάρδιες Χωρίς Προσωπικό εμφανίζονται πάντα, ακόμη κι αν το
+    επαναλαμβανόμενο έργο τους είναι κρυμμένο από τη λίστα εμφάνισης.
     """
     visible_project_ids = set(visible_project_ids or [])
     recurring_project_ids = set(st.session_state.get(_known_projects_key(), []))
@@ -322,6 +337,13 @@ def apply_recurring_project_visibility_filter(assignments_by_date, visible_proje
 
         for assignment in assignments or []:
             if not isinstance(assignment, dict):
+                continue
+
+            # Βάρδιες χωρίς προσωπικό πρέπει να εμφανίζονται πάντα στο Gantt,
+            # ώστε να μη χαθούν από τον έλεγχο/προγραμματισμό όταν το έργο
+            # είναι ξετικαρισμένο στη λίστα επαναλαμβανόμενων.
+            if _is_without_personnel_assignment(assignment):
+                kept.append(assignment)
                 continue
 
             project_id = assignment.get("projectId")
