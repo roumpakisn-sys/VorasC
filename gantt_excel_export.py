@@ -5,13 +5,23 @@ from datetime import datetime, timedelta
 import streamlit as st
 
 
-def _normalize_hex(color_value, default="999999"):
+def _normalize_hex(color_value, default="F6B26B"):
     raw = str(color_value or default).strip().replace("#", "")
     if len(raw) == 3:
         raw = "".join(ch * 2 for ch in raw)
     if len(raw) != 6:
         raw = default
     return raw.upper()
+
+
+def _font_color_for_fill(hex_color):
+    """Επιστρέφει μαύρο ή λευκό ανάλογα με τη φωτεινότητα του φόντου."""
+    raw = _normalize_hex(hex_color)
+    r = int(raw[0:2], 16)
+    g = int(raw[2:4], 16)
+    b = int(raw[4:6], 16)
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b)
+    return "000000" if luminance > 150 else "FFFFFF"
 
 
 def _time_to_minutes(time_value):
@@ -29,7 +39,7 @@ def _slot_index(time_value, slot_minutes=30, mode="floor"):
     return int(math.floor(minutes / slot_minutes))
 
 
-def _shorten_text(value, max_len=95):
+def _shorten_text(value, max_len=115):
     text = str(value or "")
     if len(text) <= max_len:
         return text
@@ -64,21 +74,17 @@ def _employee_name(employee_id, emp_short_names=None):
         return str(employee_id)
 
 
-def _day_left_label(current_date, day_name):
+def _day_left_label(current_date):
     """
-    Κείμενο αριστερού κελιού ημέρας για το visual Excel Gantt.
+    Κείμενο πληροφοριών ημέρας για το visual Excel Gantt.
 
     Περιλαμβάνει:
-    - Ημέρα / ημερομηνία
     - Άδειες ημέρας
+    - Αντικαταστάτες
     - Διαθέσιμα εξωτερικά συνεργεία μετά τα πρωινά
     """
     emp_short_names = _safe_employee_short_names()
-
-    lines = [
-        f"{day_name}",
-        current_date.strftime("%d/%m/%Y"),
-    ]
+    lines = []
 
     leaves_today = []
     for leave in st.session_state.get("leaves", []):
@@ -103,7 +109,6 @@ def _day_left_label(current_date, day_name):
             continue
 
     if leaves_today:
-        lines.append("")
         lines.append("Άδειες:")
         lines.extend(leaves_today)
 
@@ -150,9 +155,13 @@ def _day_left_label(current_date, day_name):
             available_ext_crew.append(emp_short_names.get(emp_id, emp.get("name", "")))
 
     if available_ext_crew:
-        lines.append("")
+        if lines:
+            lines.append("")
         lines.append("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:")
         lines.extend(available_ext_crew)
+
+    if not lines:
+        lines.append("")
 
     return "\n".join(lines), len(lines)
 
@@ -185,11 +194,7 @@ def _build_lanes(day_groups):
     return placed, max(1, len(lanes))
 
 
-def _apply_outer_border(ws, min_row, max_row, min_col, max_col, border):
-    """
-    Βάζει περίγραμμα γύρω/μέσα στο merged range.
-    Στα merged cells το Excel συχνά δείχνει καλύτερα όταν όλα τα κελιά του range έχουν border.
-    """
+def _apply_range_border(ws, min_row, max_row, min_col, max_col, border):
     for row in range(min_row, max_row + 1):
         for col in range(min_col, max_col + 1):
             ws.cell(row=row, column=col).border = border
@@ -199,8 +204,12 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
     """
     Δημιουργεί Excel τύπου Gantt με συγχωνευμένα κελιά.
 
-    Δεν αλλάζει δεδομένα.
-    Παίρνει τα ήδη υπολογισμένα wk_groups της εβδομάδας.
+    Παλέτα/ύφος βασισμένο στο δείγμα Google Sheet:
+    - ανοιχτό πράσινο φόντο grid
+    - σκούρο πράσινο κελί ημέρας
+    - πράσινη ημερομηνία
+    - κίτρινη/πράσινη περιοχή πληροφοριών
+    - πορτοκαλί κεφαλίδες ωρών
     """
     try:
         from openpyxl import Workbook
@@ -217,51 +226,87 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
     start_hour = 4
     total_minutes = 20 * 60
     slot_count = total_minutes // slot_minutes
-    first_time_col = 2
+
+    # Στήλες A-D είναι οι πληροφορίες ημέρας. Οι ώρες ξεκινούν από E.
+    day_col = 1
+    date_col = 2
+    info_col = 3
+    spacer_col = 4
+    first_time_col = 5
     last_time_col = first_time_col + slot_count - 1
 
-    # Χρώματα/στυλ
-    dark_fill = PatternFill("solid", fgColor="1E293B")
-    header_fill = PatternFill("solid", fgColor="E2E8F0")
-    day_fill = PatternFill("solid", fgColor="EEF2FF")
-    white_fill = PatternFill("solid", fgColor="FFFFFF")
-    grid_fill = PatternFill("solid", fgColor="F8FAFC")
+    # --- Παλέτα από το screenshot ---
+    dark_green = "4F7F35"
+    medium_green = "93C47D"
+    light_green = "D9EAD3"
+    very_light_green = "EAF4E3"
+    header_orange = "F9B233"
+    bar_orange = "F6B26B"
+    pale_yellow = "FFE599"
+    bright_green = "00F000"
+    purple_separator = "4C1130"
+    dark_text = "1F1F1F"
+    red = "DC2626"
 
-    thin_gray = Side(style="thin", color="CBD5E1")
-    medium_dark = Side(style="medium", color="1E293B")
-    red_side = Side(style="medium", color="DC2626")
-    black_side = Side(style="thin", color="222222")
+    # Fills
+    dark_green_fill = PatternFill("solid", fgColor=dark_green)
+    medium_green_fill = PatternFill("solid", fgColor=medium_green)
+    light_green_fill = PatternFill("solid", fgColor=light_green)
+    very_light_green_fill = PatternFill("solid", fgColor=very_light_green)
+    orange_header_fill = PatternFill("solid", fgColor=header_orange)
+    pale_yellow_fill = PatternFill("solid", fgColor=pale_yellow)
+    bright_green_fill = PatternFill("solid", fgColor=bright_green)
+    purple_fill = PatternFill("solid", fgColor=purple_separator)
 
-    grid_border = Border(left=thin_gray, right=thin_gray, top=thin_gray, bottom=thin_gray)
-    dark_border = Border(left=medium_dark, right=medium_dark, top=medium_dark, bottom=medium_dark)
+    # Borders
+    thin_grid = Side(style="thin", color="B6D7A8")
+    medium_grid = Side(style="medium", color="38761D")
+    dark_side = Side(style="medium", color="274E13")
+    purple_side = Side(style="thick", color=purple_separator)
+    red_side = Side(style="medium", color=red)
+    black_side = Side(style="thin", color="000000")
+
+    grid_border = Border(left=thin_grid, right=thin_grid, top=thin_grid, bottom=thin_grid)
+    green_border = Border(left=dark_side, right=dark_side, top=dark_side, bottom=dark_side)
+    purple_bottom_border = Border(bottom=purple_side)
     normal_bar_border = Border(left=black_side, right=black_side, top=black_side, bottom=black_side)
     general_bar_border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
 
-    # Τίτλος
+    # --- Τίτλος ---
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_time_col)
     title_cell = ws.cell(row=1, column=1)
-    title_cell.value = "Πρόγραμμα Gantt"
-    title_cell.fill = dark_fill
-    title_cell.font = Font(color="FFFFFF", bold=True, size=15)
+    title_cell.value = "ΠΡΟΓΡΑΜΜΑ GANTT"
+    title_cell.fill = dark_green_fill
+    title_cell.font = Font(color="FFFFFF", bold=True, size=14)
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    title_cell.border = green_border
 
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_time_col)
     subtitle_cell = ws.cell(row=2, column=1)
     subtitle_cell.value = f"Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} - {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}"
-    subtitle_cell.fill = white_fill
-    subtitle_cell.font = Font(color="334155", bold=True, size=11)
+    subtitle_cell.fill = light_green_fill
+    subtitle_cell.font = Font(color=dark_text, bold=True, size=10)
     subtitle_cell.alignment = Alignment(horizontal="center", vertical="center")
+    subtitle_cell.border = grid_border
 
-    # Header ημέρα/ώρες
-    ws.merge_cells(start_row=3, start_column=1, end_row=4, end_column=1)
-    left_header = ws.cell(row=3, column=1)
-    left_header.value = "Ημέρα / Προσωπικό"
-    left_header.fill = header_fill
-    left_header.font = Font(bold=True, color="1E293B")
-    left_header.alignment = Alignment(horizontal="center", vertical="center")
-    left_header.border = dark_border
+    # --- Αριστερές κεφαλίδες ---
+    headers = {
+        day_col: "ΗΜΕΡΑ",
+        date_col: "ΗΜ/ΝΙΑ",
+        info_col: "ΑΔΕΙΕΣ / ΔΙΑΘΕΣΙΜΑ",
+        spacer_col: "ΠΡΟΓΡΑΜΜΑ",
+    }
 
-    # Hour header merged ανά ώρα
+    for col, label in headers.items():
+        ws.merge_cells(start_row=3, start_column=col, end_row=4, end_column=col)
+        cell = ws.cell(row=3, column=col)
+        cell.value = label
+        cell.fill = orange_header_fill if col == spacer_col else medium_green_fill
+        cell.font = Font(color=dark_text, bold=True, size=8)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        _apply_range_border(ws, 3, 4, col, col, green_border)
+
+    # --- Κεφαλίδες ωρών ---
     for hour_offset in range(20):
         col_start = first_time_col + (hour_offset * (60 // slot_minutes))
         col_end = col_start + (60 // slot_minutes) - 1
@@ -271,11 +316,10 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
         ws.merge_cells(start_row=3, start_column=col_start, end_row=3, end_column=col_end)
         cell = ws.cell(row=3, column=col_start)
         cell.value = label
-        cell.fill = header_fill
-        cell.font = Font(bold=True, color="1E293B", size=9)
+        cell.fill = orange_header_fill
+        cell.font = Font(bold=True, color=dark_text, size=8)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        for col in range(col_start, col_end + 1):
-            ws.cell(row=3, column=col).border = dark_border
+        _apply_range_border(ws, 3, 3, col_start, col_end, grid_border)
 
     for slot in range(slot_count):
         col = first_time_col + slot
@@ -284,59 +328,89 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
         minute = minute_from_start % 60
         if hour >= 24:
             hour -= 24
+
         cell = ws.cell(row=4, column=col)
         cell.value = f"{hour:02d}:{minute:02d}"
-        cell.fill = header_fill
-        cell.font = Font(color="475569", size=7)
+        cell.fill = orange_header_fill
+        cell.font = Font(color=dark_text, size=7)
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = grid_border
 
-    # Διαστάσεις
-    ws.column_dimensions["A"].width = 30
+    # --- Διαστάσεις ---
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 11
+    ws.column_dimensions["C"].width = 15
+    ws.column_dimensions["D"].width = 14
     for col in range(first_time_col, last_time_col + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 4.2
+        ws.column_dimensions[get_column_letter(col)].width = 3.7
 
-    ws.row_dimensions[1].height = 25
-    ws.row_dimensions[2].height = 20
-    ws.row_dimensions[3].height = 20
-    ws.row_dimensions[4].height = 18
+    ws.row_dimensions[1].height = 23
+    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[3].height = 18
+    ws.row_dimensions[4].height = 16
 
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
     current_row = 5
     for day_idx in range(7):
         current_date = start_of_week + timedelta(days=day_idx)
+        day_name = day_names_gr[day_idx]
+
         day_groups = [
             group for group in (wk_groups or {}).values()
             if group.get("Date") == current_date
         ]
 
-        day_label, day_label_lines = _day_left_label(current_date, day_names_gr[day_idx])
+        day_info_text, day_info_lines = _day_left_label(current_date)
         placed_groups, lane_count = _build_lanes(day_groups)
 
-        # Εξασφαλίζει ότι το αριστερό κελί έχει αρκετό ύψος για άδειες/διαθέσιμους.
-        # Δεν επηρεάζει τις ίδιες τις μπάρες, απλώς προσθέτει ύψος στην ημέρα όπου χρειάζεται.
-        min_rows_for_label = max(1, math.ceil(day_label_lines / 2.2))
+        min_rows_for_label = max(1, math.ceil(day_info_lines / 2.2))
         lane_count = max(lane_count, min_rows_for_label)
 
         day_start_row = current_row
         day_end_row = current_row + lane_count - 1
 
-        # Αριστερό κελί ημέρας, merged κάθετα.
-        ws.merge_cells(start_row=day_start_row, start_column=1, end_row=day_end_row, end_column=1)
-        day_cell = ws.cell(row=day_start_row, column=1)
-        day_cell.value = day_label
-        day_cell.fill = day_fill
-        day_cell.font = Font(bold=True, color="1E293B", size=9)
-        day_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        _apply_outer_border(ws, day_start_row, day_end_row, 1, 1, dark_border)
+        # A: ημέρα κάθετα
+        ws.merge_cells(start_row=day_start_row, start_column=day_col, end_row=day_end_row, end_column=day_col)
+        day_cell = ws.cell(row=day_start_row, column=day_col)
+        day_cell.value = day_name
+        day_cell.fill = dark_green_fill
+        day_cell.font = Font(color="FFFFFF", bold=True, size=9)
+        day_cell.alignment = Alignment(horizontal="center", vertical="center", textRotation=90)
+        _apply_range_border(ws, day_start_row, day_end_row, day_col, day_col, green_border)
 
-        # Grid φόντου για όλες τις γραμμές της ημέρας.
+        # B: ημερομηνία
+        ws.merge_cells(start_row=day_start_row, start_column=date_col, end_row=day_end_row, end_column=date_col)
+        date_cell = ws.cell(row=day_start_row, column=date_col)
+        date_cell.value = current_date.strftime("%d/%m/%Y")
+        date_cell.fill = medium_green_fill
+        date_cell.font = Font(color=dark_text, bold=True, size=8)
+        date_cell.alignment = Alignment(horizontal="center", vertical="center", textRotation=90)
+        _apply_range_border(ws, day_start_row, day_end_row, date_col, date_col, green_border)
+
+        # C: άδειες / διαθέσιμοι
+        ws.merge_cells(start_row=day_start_row, start_column=info_col, end_row=day_end_row, end_column=info_col)
+        info_cell = ws.cell(row=day_start_row, column=info_col)
+        info_cell.value = day_info_text
+        info_cell.fill = bright_green_fill if "ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ" in day_info_text else pale_yellow_fill
+        info_cell.font = Font(color=dark_text, bold=True, size=7)
+        info_cell.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+        _apply_range_border(ws, day_start_row, day_end_row, info_col, info_col, green_border)
+
+        # D: spacer/label όπως το δείγμα
+        ws.merge_cells(start_row=day_start_row, start_column=spacer_col, end_row=day_end_row, end_column=spacer_col)
+        spacer_cell = ws.cell(row=day_start_row, column=spacer_col)
+        spacer_cell.value = ""
+        spacer_cell.fill = light_green_fill
+        spacer_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        _apply_range_border(ws, day_start_row, day_end_row, spacer_col, spacer_col, green_border)
+
+        # Grid φόντου
         for row in range(day_start_row, day_end_row + 1):
-            ws.row_dimensions[row].height = 34
+            ws.row_dimensions[row].height = 29
             for col in range(first_time_col, last_time_col + 1):
                 cell = ws.cell(row=row, column=col)
-                cell.fill = grid_fill
+                cell.fill = very_light_green_fill
                 cell.border = grid_border
 
         # Μπάρες
@@ -366,17 +440,18 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
             if notes:
                 parts.append(f"({notes})")
 
-            bar_text = _shorten_text(" | ".join(parts), max_len=110)
+            bar_text = _shorten_text(" | ".join(parts), max_len=120)
+            fill_hex = _normalize_hex(group.get("ColorHex"), default=bar_orange)
 
             ws.merge_cells(start_row=row, start_column=col_start, end_row=row, end_column=col_end)
             bar_cell = ws.cell(row=row, column=col_start)
             bar_cell.value = bar_text
-            bar_cell.fill = PatternFill("solid", fgColor=_normalize_hex(group.get("ColorHex")))
-            bar_cell.font = Font(bold=True, color="FFFFFF", size=8)
+            bar_cell.fill = PatternFill("solid", fgColor=fill_hex)
+            bar_cell.font = Font(bold=True, color=_font_color_for_fill(fill_hex), size=7)
             bar_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True, shrink_to_fit=True)
 
             is_general = bool(group.get("IsGeneral", False) or group.get("is_general", False))
-            _apply_outer_border(
+            _apply_range_border(
                 ws,
                 row,
                 row,
@@ -385,10 +460,20 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
                 general_bar_border if is_general else normal_bar_border,
             )
 
+        # Μωβ διαχωριστικό ημέρας, όπως στο δείγμα.
+        for col in range(1, last_time_col + 1):
+            cell = ws.cell(row=day_end_row, column=col)
+            cell.border = Border(
+                left=cell.border.left,
+                right=cell.border.right,
+                top=cell.border.top,
+                bottom=purple_side,
+            )
+
         current_row = day_end_row + 1
 
     # Πάγωμα τίτλων/headers.
-    ws.freeze_panes = "B5"
+    ws.freeze_panes = "E5"
 
     # Print / view setup
     ws.sheet_view.showGridLines = False
