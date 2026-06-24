@@ -41,11 +41,36 @@ def _slot_index(time_value, slot_minutes=30, mode="floor"):
     return int(math.floor(minutes / slot_minutes))
 
 
-def _shorten_text(value, max_len=115):
-    text = str(value or "")
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 1] + "…"
+def _estimate_bar_row_height(text, merged_columns, base_height=29, max_height=95):
+    """
+    Υπολογίζει μεγαλύτερο ύψος γραμμής όταν η μπάρα έχει πολλά ονόματα.
+    Έτσι το Excel μπορεί να εμφανίσει όλα τα ονόματα με αναδίπλωση κειμένου.
+    """
+    text = str(text or "")
+    merged_columns = max(1, int(merged_columns or 1))
+
+    # Κάθε μισάωρο κελί έχει μικρό πλάτος. Το merged width είναι περίπου
+    # 3.7 χαρακτήρες ανά στήλη, λίγο λιγότερο για ασφάλεια.
+    approx_chars_per_line = max(12, int(merged_columns * 3.1))
+
+    estimated_lines = 1
+    for part in text.split("\n"):
+        estimated_lines += max(0, math.ceil(len(part) / approx_chars_per_line) - 1)
+
+    # Περισσότερη ανάσα όταν υπάρχουν πολλά κόμματα/ονόματα.
+    comma_bonus = min(3, text.count(",") // 3)
+    estimated_lines += comma_bonus
+
+    return min(max_height, max(base_height, 18 + estimated_lines * 13))
+
+
+def _shorten_text(value, max_len=None):
+    """
+    Δεν κόβουμε πλέον το κείμενο της μπάρας στο Excel.
+    Τα πολλά ονόματα εμφανίζονται με wrap μέσα στο συγχωνευμένο κελί
+    και αυξάνεται δυναμικά το ύψος της γραμμής.
+    """
+    return str(value or "")
 
 
 def _safe_employee_short_names():
@@ -471,7 +496,7 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
             if notes:
                 parts.append(f"({notes})")
 
-            bar_text = _shorten_text(" | ".join(parts), max_len=120)
+            bar_text = _shorten_text(" | ".join(parts))
             fill_hex = _normalize_hex(group.get("ColorHex"), default=bar_orange)
 
             ws.merge_cells(start_row=row, start_column=col_start, end_row=row, end_column=col_end)
@@ -479,7 +504,17 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
             bar_cell.value = bar_text
             bar_cell.fill = PatternFill("solid", fgColor=fill_hex)
             bar_cell.font = Font(bold=True, color=_font_color_for_fill(fill_hex), size=7)
-            bar_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True, shrink_to_fit=True)
+            bar_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True, shrink_to_fit=False)
+
+            required_height = _estimate_bar_row_height(
+                bar_text,
+                merged_columns=(col_end - col_start + 1),
+                base_height=29,
+                max_height=95,
+            )
+            current_height = ws.row_dimensions[row].height or 29
+            if required_height > current_height:
+                ws.row_dimensions[row].height = required_height
 
             is_general = bool(group.get("IsGeneral", False) or group.get("is_general", False))
             _apply_range_border(
