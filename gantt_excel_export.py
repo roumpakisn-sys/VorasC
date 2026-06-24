@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 
 import streamlit as st
 
+import config
+
 
 def _normalize_hex(color_value, default="F6B26B"):
     raw = str(color_value or default).strip().replace("#", "")
@@ -166,15 +168,15 @@ def _day_left_label(current_date):
     return "\n".join(lines), len(lines)
 
 
-def _build_lanes(day_groups):
+def _place_groups_in_lanes(groups, lane_offset=0):
     """
-    Ίδια βασική λογική στοίβαξης με το HTML Gantt:
-    κάθε μπάρα μπαίνει στην πρώτη διαθέσιμη γραμμή που δεν επικαλύπτεται.
+    Τοποθετεί μπάρες σε lanes χωρίς επικάλυψη.
+    Επιστρέφει λίστα (group, τελικό_lane_idx) και πόσα lanes χρησιμοποίησε.
     """
     lanes = []
     placed = []
 
-    for group in sorted(day_groups, key=lambda x: (x.get("StartTime", ""), x.get("EndTime", ""), x.get("Project", ""))):
+    for group in sorted(groups, key=lambda x: (x.get("StartTime", ""), x.get("EndTime", ""), x.get("Project", ""))):
         start = str(group.get("StartTime", ""))[:5]
         end = str(group.get("EndTime", ""))[:5]
 
@@ -189,9 +191,38 @@ def _build_lanes(day_groups):
             lanes.append(end)
             placed_lane = len(lanes) - 1
 
-        placed.append((group, placed_lane))
+        placed.append((group, lane_offset + placed_lane))
 
-    return placed, max(1, len(lanes))
+    return placed, len(lanes)
+
+
+def _is_blue_stack_group(group):
+    """
+    True για τις μπλε μπάρες που στο HTML Gantt μπαίνουν πάντα στο κάτω μέρος της ημέρας.
+    Χρησιμοποιεί το ίδιο BLUE_STACK_HEX από το config.
+    """
+    blue_stack_hex = str(getattr(config, "BLUE_STACK_HEX", "") or "").lower()
+    group_color = str(group.get("ColorHex", "") or "").lower()
+    return bool(blue_stack_hex and group_color == blue_stack_hex)
+
+
+def _build_lanes(day_groups):
+    """
+    Ίδια λογική στοίβαξης με το HTML Gantt:
+    - πρώτα τοποθετούνται όλες οι μη μπλε μπάρες
+    - μετά τοποθετούνται οι μπλε μπάρες
+    Έτσι οι μπλε μπάρες εμφανίζονται πάντα στο κάτω μέρος της ημέρας και στο Excel.
+    """
+    non_blue_groups = [group for group in (day_groups or []) if not _is_blue_stack_group(group)]
+    blue_groups = [group for group in (day_groups or []) if _is_blue_stack_group(group)]
+
+    non_blue_placed, non_blue_lane_count = _place_groups_in_lanes(non_blue_groups, lane_offset=0)
+    blue_placed, blue_lane_count = _place_groups_in_lanes(blue_groups, lane_offset=non_blue_lane_count)
+
+    placed = non_blue_placed + blue_placed
+    total_lanes = non_blue_lane_count + blue_lane_count
+
+    return placed, max(1, total_lanes)
 
 
 def _apply_range_border(ws, min_row, max_row, min_col, max_col, border):
