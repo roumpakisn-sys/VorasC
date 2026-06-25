@@ -1,10 +1,27 @@
 import io
 import math
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import streamlit as st
 
 import config
+import gantt_engine
+
+
+GREEK_MONTHS = {
+    1: "Ιανουάριος",
+    2: "Φεβρουάριος",
+    3: "Μάρτιος",
+    4: "Απρίλιος",
+    5: "Μάιος",
+    6: "Ιούνιος",
+    7: "Ιούλιος",
+    8: "Αύγουστος",
+    9: "Σεπτέμβριος",
+    10: "Οκτώβριος",
+    11: "Νοέμβριος",
+    12: "Δεκέμβριος",
+}
 
 
 def _normalize_hex(color_value, default="F6B26B"):
@@ -34,6 +51,19 @@ def _time_to_minutes(time_value):
     return (hour - 4) * 60 + minute
 
 
+def _time_to_sort_minutes(time_value):
+    raw = str(time_value or "")[:5]
+    try:
+        hour, minute = map(int, raw.split(":"))
+    except Exception:
+        return None
+
+    if hour < 4:
+        hour += 24
+
+    return hour * 60 + minute
+
+
 def _slot_index(time_value, slot_minutes=30, mode="floor"):
     minutes = _time_to_minutes(time_value)
     if mode == "ceil":
@@ -48,16 +78,12 @@ def _estimate_bar_row_height(text, merged_columns, base_height=29, max_height=95
     """
     text = str(text or "")
     merged_columns = max(1, int(merged_columns or 1))
-
-    # Κάθε μισάωρο κελί έχει μικρό πλάτος. Το merged width είναι περίπου
-    # 3.7 χαρακτήρες ανά στήλη, λίγο λιγότερο για ασφάλεια.
     approx_chars_per_line = max(12, int(merged_columns * 3.1))
 
     estimated_lines = 1
     for part in text.split("\n"):
         estimated_lines += max(0, math.ceil(len(part) / approx_chars_per_line) - 1)
 
-    # Περισσότερη ανάσα όταν υπάρχουν πολλά κόμματα/ονόματα.
     comma_bonus = min(3, text.count(",") // 3)
     estimated_lines += comma_bonus
 
@@ -66,7 +92,7 @@ def _estimate_bar_row_height(text, merged_columns, base_height=29, max_height=95
 
 def _shorten_text(value, max_len=None):
     """
-    Δεν κόβουμε πλέον το κείμενο της μπάρας στο Excel.
+    Δεν κόβουμε το κείμενο της μπάρας στο Excel.
     Τα πολλά ονόματα εμφανίζονται με wrap μέσα στο συγχωνευμένο κελί
     και αυξάνεται δυναμικά το ύψος της γραμμής.
     """
@@ -101,16 +127,18 @@ def _employee_name(employee_id, emp_short_names=None):
         return str(employee_id)
 
 
-def _day_left_label(current_date):
+def _day_left_label(current_date, assignments_by_date=None):
     """
     Κείμενο πληροφοριών ημέρας για το visual Excel Gantt.
 
     Περιλαμβάνει:
     - Άδειες ημέρας
     - Αντικαταστάτες
-    - Διαθέσιμα εξωτερικά συνεργεία μετά τα πρωινά
+    - ΔΙΑΘΕΣΙΜΟΙ μετά τις 06:00
+    - ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ μετά τις 10:00
     """
     emp_short_names = _safe_employee_short_names()
+    assignments_by_date = assignments_by_date or st.session_state.get("assignments_by_date", {})
     lines = []
 
     leaves_today = []
@@ -139,21 +167,22 @@ def _day_left_label(current_date):
         lines.append("Άδειες:")
         lines.extend(leaves_today)
 
-    available_ext_crew = []
-    day_assigns = st.session_state.get("assignments_by_date", {}).get(current_date, [])
+    external_crews = [
+        emp for emp in st.session_state.get("employees", [])
+        if isinstance(emp, dict)
+        and emp.get("status", "Ενεργός") == "Ενεργός"
+        and emp.get("is_external_crew", False)
+    ]
 
-    for emp in st.session_state.get("employees", []):
-        if not isinstance(emp, dict):
-            continue
+    available_after_6 = []
+    available_after_10 = []
+    day_assigns = assignments_by_date.get(current_date, [])
+    limit_6 = 6 * 60
+    limit_10 = 10 * 60
 
+    for emp in external_crews:
         emp_id = emp.get("id")
         if not emp_id:
-            continue
-
-        if emp.get("status", "Ενεργός") != "Ενεργός":
-            continue
-
-        if not emp.get("is_external_crew", False):
             continue
 
         is_on_leave = False
@@ -170,22 +199,35 @@ def _day_left_label(current_date):
         if is_on_leave:
             continue
 
-        is_busy_after_10 = any(
-            isinstance(a, dict)
+        employee_day_assigns = [
+            a for a in day_assigns
+            if isinstance(a, dict)
             and a.get("employeeId") == emp_id
             and not a.get("is_cancelled", False)
-            and str(a.get("endTime", ""))[:5] > "10:00"
-            for a in day_assigns
-        )
+        ]
 
-        if not is_busy_after_10:
-            available_ext_crew.append(emp_short_names.get(emp_id, emp.get("name", "")))
+        end_minutes = [_time_to_sort_minutes(a.get("endTime")) for a in employee_day_assigns]
+        end_minutes = [value for value in end_minutes if value is not None]
+        latest_end_minutes = max(end_minutes) if end_minutes else None
 
-    if available_ext_crew:
+        emp_label = emp_short_names.get(emp_id, emp.get("name", ""))
+
+        if latest_end_minutes is None or latest_end_minutes <= limit_6:
+            available_after_6.append(emp_label)
+        elif latest_end_minutes <= limit_10:
+            available_after_10.append(emp_label)
+
+    if available_after_6:
+        if lines:
+            lines.append("")
+        lines.append("ΔΙΑΘΕΣΙΜΟΙ:")
+        lines.extend(available_after_6)
+
+    if available_after_10:
         if lines:
             lines.append("")
         lines.append("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:")
-        lines.extend(available_ext_crew)
+        lines.extend(available_after_10)
 
     if not lines:
         lines.append("")
@@ -256,27 +298,84 @@ def _apply_range_border(ws, min_row, max_row, min_col, max_col, border):
             ws.cell(row=row, column=col).border = border
 
 
-def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
-    """
-    Δημιουργεί Excel τύπου Gantt με συγχωνευμένα κελιά.
+def _safe_sheet_title(title):
+    title = str(title or "Sheet")
+    for char in ["\\", "/", "*", "?", ":", "[", "]"]:
+        title = title.replace(char, "-")
+    return title[:31]
 
-    Παλέτα/ύφος βασισμένο στο δείγμα Google Sheet:
-    - ανοιχτό πράσινο φόντο grid
-    - σκούρο πράσινο κελί ημέρας
-    - πράσινη ημερομηνία
-    - κίτρινη/πράσινη περιοχή πληροφοριών
-    - πορτοκαλί κεφαλίδες ωρών
-    """
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-        from openpyxl.utils import get_column_letter
-    except Exception as exc:
-        raise RuntimeError("Λείπει το openpyxl από το περιβάλλον.") from exc
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Gantt"
+def _week_sheet_title(week_start):
+    week_end = week_start + timedelta(days=6)
+    return _safe_sheet_title(f"{week_start.strftime('%d-%m')} έως {week_end.strftime('%d-%m')}")
+
+
+def _month_start(value):
+    if isinstance(value, datetime):
+        value = value.date()
+    if not isinstance(value, date):
+        value = date.today()
+    return date(value.year, value.month, 1)
+
+
+def _add_months(value, months):
+    year = value.year + ((value.month - 1 + months) // 12)
+    month = ((value.month - 1 + months) % 12) + 1
+    return date(year, month, 1)
+
+
+def _month_label(value):
+    return f"{GREEK_MONTHS.get(value.month, value.strftime('%B'))} {value.year}"
+
+
+def _month_options(assignments_by_date, default_date):
+    dates = [key for key in (assignments_by_date or {}).keys() if isinstance(key, date)]
+    default_month = _month_start(default_date)
+
+    if dates:
+        first_month = _add_months(_month_start(min(dates)), -1)
+        last_month = _add_months(_month_start(max(dates)), 3)
+    else:
+        first_month = _add_months(default_month, -6)
+        last_month = _add_months(default_month, 12)
+
+    if default_month < first_month:
+        first_month = default_month
+    if default_month > last_month:
+        last_month = default_month
+
+    options = []
+    cursor = first_month
+    while cursor <= last_month:
+        options.append(cursor)
+        cursor = _add_months(cursor, 1)
+
+    return options
+
+
+def _week_starts_for_month(month_start):
+    first_day = _month_start(month_start)
+    last_day = _add_months(first_day, 1) - timedelta(days=1)
+
+    first_week_start = first_day - timedelta(days=first_day.weekday())
+    last_week_start = last_day - timedelta(days=last_day.weekday())
+
+    weeks = []
+    cursor = first_week_start
+    while cursor <= last_week_start:
+        weeks.append(cursor)
+        cursor += timedelta(days=7)
+
+    return weeks
+
+
+def _render_week_to_sheet(wb, ws, wk_groups, start_of_week, assignments_by_date=None, slot_minutes=30):
+    """
+    Ζωγραφίζει μία εβδομάδα σε ένα worksheet.
+    Χρησιμοποιείται και στην εβδομαδιαία και στη μηνιαία εξαγωγή.
+    """
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
     # Χρονικό εύρος όπως το HTML Gantt: 04:00 έως 00:00.
     start_hour = 4
@@ -312,11 +411,9 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
     orange_header_fill = PatternFill("solid", fgColor=header_orange)
     pale_yellow_fill = PatternFill("solid", fgColor=pale_yellow)
     bright_green_fill = PatternFill("solid", fgColor=bright_green)
-    purple_fill = PatternFill("solid", fgColor=purple_separator)
 
     # Borders
     thin_grid = Side(style="thin", color="B6D7A8")
-    medium_grid = Side(style="medium", color="38761D")
     dark_side = Side(style="medium", color="274E13")
     purple_side = Side(style="thick", color=purple_separator)
     red_side = Side(style="medium", color=red)
@@ -324,7 +421,6 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
 
     grid_border = Border(left=thin_grid, right=thin_grid, top=thin_grid, bottom=thin_grid)
     green_border = Border(left=dark_side, right=dark_side, top=dark_side, bottom=dark_side)
-    purple_bottom_border = Border(bottom=purple_side)
     normal_bar_border = Border(left=black_side, right=black_side, top=black_side, bottom=black_side)
     general_bar_border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side)
 
@@ -417,7 +513,7 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
             if group.get("Date") == current_date
         ]
 
-        day_info_text, day_info_lines = _day_left_label(current_date)
+        day_info_text, day_info_lines = _day_left_label(current_date, assignments_by_date=assignments_by_date)
         placed_groups, lane_count = _build_lanes(day_groups)
 
         min_rows_for_label = max(1, math.ceil(day_info_lines / 2.2))
@@ -448,7 +544,7 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
         ws.merge_cells(start_row=day_start_row, start_column=info_col, end_row=day_end_row, end_column=info_col)
         info_cell = ws.cell(row=day_start_row, column=info_col)
         info_cell.value = day_info_text
-        info_cell.fill = bright_green_fill if "ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ" in day_info_text else pale_yellow_fill
+        info_cell.fill = bright_green_fill if ("ΔΙΑΘΕΣΙΜΟΙ" in day_info_text or "ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ" in day_info_text) else pale_yellow_fill
         info_cell.font = Font(color=dark_text, bold=True, size=7)
         info_cell.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
         _apply_range_border(ws, day_start_row, day_end_row, info_col, info_col, green_border)
@@ -548,6 +644,75 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
 
+
+def _generate_week_groups_for_export(week_start, assignments_by_date):
+    _, wk_groups, _ = gantt_engine.generate_gantt_chart(
+        week_start,
+        1,
+        False,
+        f"excel_export_{week_start.isoformat()}",
+        assignments_by_date,
+        st.session_state.get("leaves", []),
+        st.session_state.get("employees", []),
+        st.session_state.get("projects", []),
+        st.session_state.get("emp_map", {}),
+        st.session_state.get("proj_map", {}),
+    )
+    return wk_groups
+
+
+def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30, assignments_by_date=None):
+    """Δημιουργεί Excel τύπου Gantt για μία εβδομάδα."""
+    try:
+        from openpyxl import Workbook
+    except Exception as exc:
+        raise RuntimeError("Λείπει το openpyxl από το περιβάλλον.") from exc
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _week_sheet_title(start_of_week)
+    _render_week_to_sheet(
+        wb,
+        ws,
+        wk_groups,
+        start_of_week,
+        assignments_by_date=assignments_by_date,
+        slot_minutes=slot_minutes,
+    )
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def create_visual_gantt_month_excel(assignments_by_date, selected_month, slot_minutes=30):
+    """Δημιουργεί Excel με όλες τις εβδομάδες του επιλεγμένου μήνα σε ξεχωριστές καρτέλες."""
+    try:
+        from openpyxl import Workbook
+    except Exception as exc:
+        raise RuntimeError("Λείπει το openpyxl από το περιβάλλον.") from exc
+
+    selected_month = _month_start(selected_month)
+    week_starts = _week_starts_for_month(selected_month)
+
+    wb = Workbook()
+    first_sheet = wb.active
+
+    for index, week_start in enumerate(week_starts):
+        ws = first_sheet if index == 0 else wb.create_sheet()
+        ws.title = _week_sheet_title(week_start)
+
+        wk_groups = _generate_week_groups_for_export(week_start, assignments_by_date)
+        _render_week_to_sheet(
+            wb,
+            ws,
+            wk_groups,
+            week_start,
+            assignments_by_date=assignments_by_date,
+            slot_minutes=slot_minutes,
+        )
+
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -555,12 +720,16 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30):
 
 
 def render_visual_gantt_excel_export(wk_groups, start_of_week):
-    """Κουμπί εξαγωγής οπτικού Gantt σε Excel με συγχωνευμένα κελιά."""
+    """Κουμπί εξαγωγής οπτικού Gantt σε Excel με συγχωνευμένα κελιά για την τρέχουσα εβδομάδα."""
     if not wk_groups:
         return
 
     try:
-        data = create_visual_gantt_excel(wk_groups, start_of_week)
+        data = create_visual_gantt_excel(
+            wk_groups,
+            start_of_week,
+            assignments_by_date=st.session_state.get("assignments_by_date", {}),
+        )
     except Exception as exc:
         st.warning(f"Δεν ήταν δυνατή η δημιουργία του οπτικού Excel Gantt: {exc}")
         return
@@ -572,3 +741,64 @@ def render_visual_gantt_excel_export(wk_groups, start_of_week):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+
+def render_visual_gantt_month_export(assignments_by_date, default_date):
+    """Επιλογή μήνα και εξαγωγή όλων των εβδομάδων του μήνα σε ξεχωριστά sheets."""
+    assignments_by_date = assignments_by_date or {}
+    default_month = _month_start(default_date)
+    month_options = _month_options(assignments_by_date, default_month)
+
+    try:
+        default_index = month_options.index(default_month)
+    except ValueError:
+        default_index = 0
+
+    st.markdown("#### 📅 Μηνιαία εξαγωγή Gantt σε Excel")
+
+    col_month, col_button = st.columns([2, 1])
+    with col_month:
+        selected_month = st.selectbox(
+            "Μήνας εξαγωγής",
+            options=month_options,
+            index=default_index,
+            format_func=_month_label,
+            key="visual_gantt_month_export_month",
+        )
+
+    with col_button:
+        st.write("")
+        st.write("")
+        create_clicked = st.button(
+            "Δημιουργία μηνιαίου Excel",
+            key="visual_gantt_month_export_create_btn",
+            use_container_width=True,
+        )
+
+    if create_clicked:
+        try:
+            data = create_visual_gantt_month_excel(assignments_by_date, selected_month)
+            st.session_state["visual_gantt_month_excel_bytes"] = data
+            st.session_state["visual_gantt_month_excel_filename"] = (
+                f"Gantt_Month_{selected_month.strftime('%Y_%m')}.xlsx"
+            )
+            st.session_state["visual_gantt_month_excel_label"] = _month_label(selected_month)
+        except Exception as exc:
+            st.warning(f"Δεν ήταν δυνατή η δημιουργία του μηνιαίου Excel Gantt: {exc}")
+            st.session_state.pop("visual_gantt_month_excel_bytes", None)
+            st.session_state.pop("visual_gantt_month_excel_filename", None)
+            st.session_state.pop("visual_gantt_month_excel_label", None)
+
+    if st.session_state.get("visual_gantt_month_excel_bytes"):
+        month_label = st.session_state.get("visual_gantt_month_excel_label", "")
+        st.download_button(
+            label=f"⬇️ Κατέβασμα μηνιαίου Excel {month_label}",
+            data=st.session_state["visual_gantt_month_excel_bytes"],
+            file_name=st.session_state.get(
+                "visual_gantt_month_excel_filename",
+                f"Gantt_Month_{selected_month.strftime('%Y_%m')}.xlsx",
+            ),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="visual_gantt_month_export_download_btn",
+            use_container_width=True,
+        )
