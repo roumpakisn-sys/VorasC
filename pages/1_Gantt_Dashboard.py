@@ -267,6 +267,7 @@ if st.session_state.get("clicked_key"):
 # Η απλή εξαγωγή παραμένει στο gantt_export.py.
 # Η οπτική εξαγωγή με συγχωνευμένα κελιά μπαίνει σε ξεχωριστό module,
 # ώστε να μην αλλάξει η λειτουργία του Gantt.
+gantt_excel_export.render_visual_gantt_month_export(filtered_assignments_by_date, start_of_week)
 gantt_excel_export.render_visual_gantt_excel_export(wk_groups, start_of_week)
 gantt_export.render_gantt_export(export_data, start_of_week)
 
