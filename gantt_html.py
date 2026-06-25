@@ -79,25 +79,46 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 else:
                     leaves_today.append(f"{emp_n}")
 
-        available_ext_crew = []
+        available_after_6 = []
+        available_after_10 = []
         day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
         for emp in external_crews:
             eid = emp["id"]
-            if not any(l["employeeId"] == eid and l["startDate"] <= curr_date <= l["endDate"] for l in st.session_state.leaves):
-                is_busy_after_10 = any(
-                    a.get("employeeId") == eid
-                    and not a.get("is_cancelled", False)
-                    and str(a.get("endTime", ""))[:5] > "10:00"
-                    for a in day_assigns
-                )
-                if not is_busy_after_10:
-                    available_ext_crew.append(emp_short_names.get(eid, emp["name"]))
+            if any(l["employeeId"] == eid and l["startDate"] <= curr_date <= l["endDate"] for l in st.session_state.leaves):
+                continue
+
+            emp_label = emp_short_names.get(eid, emp["name"])
+
+            is_busy_after_6 = any(
+                a.get("employeeId") == eid
+                and not a.get("is_cancelled", False)
+                and str(a.get("endTime", ""))[:5] > "06:00"
+                for a in day_assigns
+            )
+
+            is_busy_after_10 = any(
+                a.get("employeeId") == eid
+                and not a.get("is_cancelled", False)
+                and str(a.get("endTime", ""))[:5] > "10:00"
+                for a in day_assigns
+            )
+
+            # Δύο κατηγορίες:
+            # 1) ΔΙΑΘΕΣΙΜΟΙ: ελεύθεροι μετά τις 06:00.
+            # 2) ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ: έχουν τελειώσει πρωινή απασχόληση μέχρι τις 10:00.
+            # Δεν βάζουμε το ίδιο άτομο και στις δύο λίστες.
+            if not is_busy_after_6:
+                available_after_6.append(emp_label)
+            elif not is_busy_after_10:
+                available_after_10.append(emp_label)
 
         label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
         if leaves_today:
             label_html += f"<div style='color: #d32f2f; margin-bottom: 8px; font-size: 11px;'><b>Άδειες:</b><br>{'<br>'.join(leaves_today)}</div>"
-        if available_ext_crew:
-            label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_ext_crew)}</div>"
+        if available_after_6:
+            label_html += f"<div style='color: #15803d; margin-bottom: 8px; font-size: 11px;'><b>ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(available_after_6)}</div>"
+        if available_after_10:
+            label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_after_10)}</div>"
 
         day_groups = [g for g in wk_groups.values() if g["Date"] == curr_date]
 
