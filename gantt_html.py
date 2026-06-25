@@ -79,9 +79,28 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 else:
                     leaves_today.append(f"{emp_n}")
 
+        def _time_to_sort_minutes(time_value):
+            """
+            Μετατρέπει ώρα HH:MM σε λεπτά για σωστή σύγκριση.
+            Αν η ώρα είναι μετά τα μεσάνυχτα και πριν τις 04:00, θεωρείται συνέχεια της ημέρας.
+            """
+            raw = str(time_value or "")[:5]
+            try:
+                hour, minute = map(int, raw.split(":"))
+            except Exception:
+                return None
+
+            if hour < 4:
+                hour += 24
+
+            return hour * 60 + minute
+
         available_after_6 = []
         available_after_10 = []
         day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
+        limit_6 = 6 * 60
+        limit_10 = 10 * 60
+
         for emp in external_crews:
             eid = emp["id"]
             if any(l["employeeId"] == eid and l["startDate"] <= curr_date <= l["endDate"] for l in st.session_state.leaves):
@@ -89,27 +108,30 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
             emp_label = emp_short_names.get(eid, emp["name"])
 
-            is_busy_after_6 = any(
-                a.get("employeeId") == eid
+            employee_day_assigns = [
+                a for a in day_assigns
+                if a.get("employeeId") == eid
                 and not a.get("is_cancelled", False)
-                and str(a.get("endTime", ""))[:5] > "06:00"
-                for a in day_assigns
-            )
+            ]
 
-            is_busy_after_10 = any(
-                a.get("employeeId") == eid
-                and not a.get("is_cancelled", False)
-                and str(a.get("endTime", ""))[:5] > "10:00"
-                for a in day_assigns
-            )
+            end_minutes = [
+                _time_to_sort_minutes(a.get("endTime"))
+                for a in employee_day_assigns
+            ]
+            end_minutes = [value for value in end_minutes if value is not None]
 
-            # Δύο κατηγορίες:
-            # 1) ΔΙΑΘΕΣΙΜΟΙ: ελεύθεροι μετά τις 06:00.
-            # 2) ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ: έχουν τελειώσει πρωινή απασχόληση μέχρι τις 10:00.
-            # Δεν βάζουμε το ίδιο άτομο και στις δύο λίστες.
-            if not is_busy_after_6:
+            latest_end_minutes = max(end_minutes) if end_minutes else None
+
+            # Δύο κατηγορίες διαθεσιμότητας:
+            # 1) ΔΙΑΘΕΣΙΜΟΙ:
+            #    δεν έχουν βάρδια στη μέρα ή η τελευταία βάρδια τους λήγει έως 06:00.
+            # 2) ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:
+            #    η τελευταία βάρδια τους λήγει μετά τις 06:00 και έως 10:00.
+            #
+            # Αν η τελευταία βάρδια λήγει μετά τις 10:00, δεν εμφανίζονται σε καμία λίστα.
+            if latest_end_minutes is None or latest_end_minutes <= limit_6:
                 available_after_6.append(emp_label)
-            elif not is_busy_after_10:
+            elif latest_end_minutes <= limit_10:
                 available_after_10.append(emp_label)
 
         label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
