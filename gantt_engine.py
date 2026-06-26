@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime, date, timedelta
 import textwrap
+import re
 
 
 def get_local_today():
@@ -27,6 +28,21 @@ def _to_time_dt(time_value):
         datetime(1970, 1, 1),
         datetime.strptime(str(time_value)[:5], "%H:%M").time(),
     )
+
+
+def _clean_leave_note_from_bar(notes):
+    """
+    Αφαιρεί από την ορατή μπάρα τεχνικές σημειώσεις τύπου:
+    [Άδεια: ΟΝΟΜΑ]
+
+    Η πληροφορία μπορεί να υπάρχει ακόμη στις raw σημειώσεις/Notes_List για εσωτερική χρήση,
+    αλλά δεν πρέπει να γράφεται μέσα στη μπάρα.
+    """
+    clean = re.sub(r"\[Άδεια:\s*[^\]]+\]", "", notes or "")
+    clean = re.sub(r"\s*\|\s*", " | ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    clean = clean.strip("|").strip()
+    return clean
 
 
 def generate_gantt_chart(
@@ -121,55 +137,66 @@ def generate_gantt_chart(
                     "ColorHex": c_hex,
                     "ColorName": c_name,
                     "Notes_List": [],
+                    "Notes_Raw": "",
                     "Notes": "",
                     "is_cancelled": is_canc,
                     "cancel_reason": c_reason,
                     "LegendGroup": legend_val,
                     "RecurringId": a.get("recurring_id"),
                     "IsGeneral": is_general,
+                    "HasAssignedEmployee": False,
                 }
 
             if notes and notes not in groups[key]["Notes_List"]:
                 groups[key]["Notes_List"].append(notes)
 
             employee_id = a.get("employeeId")
-            if not employee_id:
-                formatted_name = "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"
-            else:
-                formatted_name = emp_short_names.get(employee_id, get_employee_name(employee_id, emp_map))
-
-                # Διατηρεί τη λογική εμφάνισης "μετά από" για επιτρεπόμενη επικάλυψη.
-                prev_assigns = []
-                for pa in emp_day_assigns.get(employee_id, []):
-                    if pa.get("id") == a.get("id"):
-                        continue
-                    pa_start = str(pa.get("startTime", ""))[:5]
-                    pa_end = str(pa.get("endTime", ""))[:5]
-                    pa_proj = get_project_info(pa.get("projectId"), proj_map)
-                    a_proj = get_project_info(project_id, proj_map)
-                    pa_name = pa_proj.get("name", "1").strip().lower() if pa_proj else "1"
-                    a_name = a_proj.get("name", "2").strip().lower() if a_proj else "2"
-
-                    if (
-                        pa_name != a_name
-                        and pa_start <= start_time
-                        and pa_end > start_time
-                        and end_time > pa_end
-                    ):
-                        prev_assigns.append(pa)
-
-                if prev_assigns:
-                    prev_assigns.sort(key=lambda x: str(x.get("endTime", ""))[:5], reverse=True)
-                    prev_proj = get_project_info(prev_assigns[0].get("projectId"), proj_map)
-                    if prev_proj:
-                        formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj.get('name', 'Άγνωστο')}' ▶ {formatted_name}]"
-
-            groups[key]["Employees"].append(formatted_name)
             groups[key]["EmployeeIds"].append(employee_id)
             groups[key]["AssignmentIds"].append(a.get("id"))
 
+            if not employee_id:
+                # Δεν προσθέτουμε εδώ το "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ".
+                # Θα προστεθεί μετά μόνο αν η μπάρα δεν έχει ΚΑΝΕΝΑΝ πραγματικό εργαζόμενο.
+                continue
+
+            groups[key]["HasAssignedEmployee"] = True
+            formatted_name = emp_short_names.get(employee_id, get_employee_name(employee_id, emp_map))
+
+            # Διατηρεί τη λογική εμφάνισης "μετά από" για επιτρεπόμενη επικάλυψη.
+            prev_assigns = []
+            for pa in emp_day_assigns.get(employee_id, []):
+                if pa.get("id") == a.get("id"):
+                    continue
+                pa_start = str(pa.get("startTime", ""))[:5]
+                pa_end = str(pa.get("endTime", ""))[:5]
+                pa_proj = get_project_info(pa.get("projectId"), proj_map)
+                a_proj = get_project_info(project_id, proj_map)
+                pa_name = pa_proj.get("name", "1").strip().lower() if pa_proj else "1"
+                a_name = a_proj.get("name", "2").strip().lower() if a_proj else "2"
+
+                if (
+                    pa_name != a_name
+                    and pa_start <= start_time
+                    and pa_end > start_time
+                    and end_time > pa_end
+                ):
+                    prev_assigns.append(pa)
+
+            if prev_assigns:
+                prev_assigns.sort(key=lambda x: str(x.get("endTime", ""))[:5], reverse=True)
+                prev_proj = get_project_info(prev_assigns[0].get("projectId"), proj_map)
+                if prev_proj:
+                    formatted_name = f"[ΜΕΤΑ ΑΠΟ '{prev_proj.get('name', 'Άγνωστο')}' ▶ {formatted_name}]"
+
+            groups[key]["Employees"].append(formatted_name)
+
         for g in groups.values():
-            g["Notes"] = " | ".join(g["Notes_List"])
+            if not g.get("HasAssignedEmployee", False):
+                g["Employees"] = ["ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"]
+
+            g["Notes_Raw"] = " | ".join(g["Notes_List"])
+            g["Notes"] = _clean_leave_note_from_bar(g["Notes_Raw"])
+
             export_data.append({
                 "Ημερομηνία": curr_date.strftime("%d/%m/%Y"),
                 "Ημέρα": day_names_gr[i],
