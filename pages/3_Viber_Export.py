@@ -100,6 +100,49 @@ def _employee_viber_label(assignment, day_assignments):
     return employee_name
 
 
+
+def _group_after_project_labels(employee_labels):
+    """
+    Ομαδοποιεί εργαζόμενους που έχουν ίδια ένδειξη:
+    ΜΕΤΑ ΑΠΟ 'ΕΡΓΟ' > ΟΝΟΜΑ
+
+    ώστε στο Viber να εμφανίζονται ως:
+    ΜΕΤΑ ΑΠΟ 'ΕΡΓΟ' > ΟΝΟΜΑ1, ΟΝΟΜΑ2
+    """
+    normal_names = []
+    grouped_after = {}
+
+    for raw_label in employee_labels or []:
+        label = str(raw_label or "").strip()
+        if not label:
+            continue
+
+        prefix_marker = "ΜΕΤΑ ΑΠΟ '"
+        split_marker = "' > "
+
+        if label.startswith(prefix_marker) and split_marker in label:
+            project_part, employee_name = label.split(split_marker, 1)
+            project_name = project_part.replace(prefix_marker, "", 1).strip()
+            employee_name = employee_name.strip()
+
+            if project_name and employee_name:
+                grouped_after.setdefault(project_name, [])
+                if employee_name not in grouped_after[project_name]:
+                    grouped_after[project_name].append(employee_name)
+            continue
+
+        if label not in normal_names:
+            normal_names.append(label)
+
+    result = list(normal_names)
+
+    for project_name, names in grouped_after.items():
+        if names:
+            result.append(f"ΜΕΤΑ ΑΠΟ '{project_name}' > {', '.join(names)}")
+
+    return result
+
+
 # --- ΚΑΘΑΡΙΣΜΟΣ ΜΝΗΜΗΣ CHECKBOXES ΟΤΑΝ ΑΛΛΑΖΕΙ Η ΜΕΡΑ ---
 # Αν ο χρήστης αλλάξει μέρα, θέλουμε όλα τα έργα να είναι ξανά προεπιλεγμένα (True).
 if "viber_last_date" not in st.session_state or st.session_state.viber_last_date != target_date:
@@ -201,8 +244,10 @@ else:
         # Ώρες με αστερίσκους, έργο χωρίς αστερίσκους
         viber_msg += f"⏰ *{start} - {end}* | 🏗️ {proj}\n"
 
-        # Ονόματα εργαζομένων με αστερίσκους
-        emp_str = ", ".join(emps) if emps else "Χωρίς Προσωπικό"
+        # Ονόματα εργαζομένων με αστερίσκους.
+        # Όσοι είναι ΜΕΤΑ ΑΠΟ το ίδιο έργο ομαδοποιούνται όπως στο Gantt.
+        grouped_emps = _group_after_project_labels(emps)
+        emp_str = ", ".join(grouped_emps) if grouped_emps else "Χωρίς Προσωπικό"
         viber_msg += f"👥 Προσωπικό: *{emp_str}*\n"
 
         # Ώρα προσέλευσης (αν υπάρχει) με αστερίσκους
