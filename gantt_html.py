@@ -72,12 +72,21 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         for l in st.session_state.leaves:
             if l["startDate"] <= curr_date <= l["endDate"]:
                 emp_n = emp_short_names.get(l["employeeId"], utils.get_employee_name(l["employeeId"]))
+                # Στην αριστερή λίστα αδειών, η αναρρωτική επισημαίνεται διακριτικά.
+                # Παλαιότερες εγγραφές χωρίς leaveType αντιμετωπίζονται ως κανονική άδεια.
+                leave_type = str(l.get("leaveType") or l.get("leave_type") or "").strip().lower()
+                sick_marker = (
+                    " <small style='font-size: 9px; font-weight: normal;'>ανναρ.</small>"
+                    if "αναρ" in leave_type or "sick" in leave_type
+                    else ""
+                )
+                emp_label = f"{html_utils.escape(str(emp_n))}{sick_marker}"
                 sub_id = l.get("substituteId")
                 if sub_id:
                     sub_n = emp_short_names.get(sub_id, utils.get_employee_name(sub_id))
-                    leaves_today.append(f"{emp_n} (Αντ: {sub_n})")
+                    leaves_today.append(f"{emp_label} (Αντ: {html_utils.escape(str(sub_n))})")
                 else:
-                    leaves_today.append(f"{emp_n}")
+                    leaves_today.append(emp_label)
 
         def _time_to_sort_minutes(time_value):
             """
