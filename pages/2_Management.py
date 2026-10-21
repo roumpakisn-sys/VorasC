@@ -1083,22 +1083,153 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                     with col_b1:
                         save_rec = st.button("💾 Αποθήκευση Αλλαγών", type="primary", use_container_width=True, key=f"btn_save_rec_{selected_pattern_id}_{rc}")
                     with col_b2:
-                        del_rec = st.button("🗑️ Διαγραφή ΟΛΗΣ της σειράς", use_container_width=True, key=f"btn_del_rec_{selected_pattern_id}_{rc}")
+                        del_rec = st.button(
+                            "🛑 Διακοπή επαναλήψεων (διατήρηση ιστορικού)",
+                            use_container_width=True,
+                            key=f"btn_del_rec_{selected_pattern_id}_{rc}"
+                        )
 
                     if del_rec:
-                        st.success("Η σειρά διαγράφεται οριστικά. Παρακαλώ περιμένετε...")
-                        old_assigns = [a for a in st.session_state.assignments if a.get('recurring_id') == selected_pattern_id]
-                        st.session_state.assignments = [a for a in st.session_state.assignments if a.get('recurring_id') != selected_pattern_id]
-                        st.session_state.recurring_patterns = [p for p in st.session_state.recurring_patterns if p['id'] != selected_pattern_id]
-                        utils.db_delete_in('assignments', 'id', [a['id'] for a in old_assigns], deleted_records=old_assigns, track=False)
-                        utils.db_delete('recurring_patterns', 'id', selected_pattern_id, deleted_records=[pat], track=False)
-                        utils.add_transaction([
-                            {'type': 'delete', 'table': 'assignments', 'records': old_assigns},
-                            {'type': 'delete', 'table': 'recurring_patterns', 'records': [dict(pat)]}
-                        ])
-                        st.session_state.rec_reset_counter += 1
-                        time.sleep(1.0)
-                        st.rerun()
+                        # ΔΙΑΚΟΠΗ ΣΕΙΡΑΣ: Το ιστορικό μέχρι και σήμερα ΠΑΡΑΜΕΝΕΙ.
+                        # Μόνο οι μελλοντικές βάρδιες αυτής της σειράς διαγράφονται.
+                        # Οι ιστορικές αποσυνδέονται πρώτα από το recurring_patterns,
+                        # ώστε να μην κινδυνεύσουν από ON DELETE CASCADE στη βάση.
+                        try:
+                            from zoneinfo import ZoneInfo
+                            stop_date = datetime.now(ZoneInfo("Europe/Athens")).date()
+                        except Exception:
+                            stop_date = date.today()
+
+                        series_assigns = [
+                            a for a in st.session_state.assignments
+                            if a.get('recurring_id') == selected_pattern_id
+                        ]
+                        dated_assigns = [
+                            (a, utils.safe_date_parse(a.get('date')))
+                            for a in series_assigns
+                        ]
+
+                        if any(d is None for _, d in dated_assigns):
+                            st.error(
+                                "Η διακοπή ακυρώθηκε: υπάρχουν βάρδιες της σειράς "
+                                "χωρίς έγκυρη ημερομηνία. Δεν διαγράφηκε τίποτα."
+                            )
+                        elif not utils.supabase:
+                            st.error(
+                                "Η διακοπή δεν μπορεί να αποθηκευτεί: "
+                                "δεν υπάρχει σύνδεση με τη Supabase."
+                            )
+                        else:
+                            past_assigns = [a for a, d in dated_assigns if d <= stop_date]
+                            future_assigns = [a for a, d in dated_assigns if d > stop_date]
+                            past_before = [dict(a) for a in past_assigns]
+                            past_after = [
+                                {**a, 'recurring_id': None}
+                                for a in past_assigns
+                            ]
+                            cutoff = stop_date.isoformat()
+
+                            try:
+                                # 1. Κρατάμε τις παλιές βάρδιες αποσυνδέοντάς τις
+                                # από τη σειρά (χωρίς να πειράξουμε καμία άλλη τιμή).
+                                utils.supabase.table('assignments').update(
+                                    {'recurring_id': None}
+                                ).eq('recurring_id', selected_pattern_id).lte(
+                                    'date', cutoff
+                                ).execute()
+
+                                # Επιβεβαίωση ότι δεν απέμειναν ιστορικές βάρδιες
+                                # δεμένες με τη σειρά πριν τη διαγράψουμε.
+                                remaining_past = (
+                                    utils.supabase.table('assignments')
+                                    .select('id')
+                                    .eq('recurring_id', selected_pattern_id)
+                                    .lte('date', cutoff)
+                                    .limit(1)
+                                    .execute()
+                                )
+                                if remaining_past.data:
+                                    raise RuntimeError(
+                                        "Δεν ολοκληρώθηκε η αποσύνδεση του ιστορικού."
+                                    )
+
+                                # 2. Αφαιρούμε μόνο τις βάρδιες από αύριο και μετά.
+                                utils.supabase.table('assignments').delete().eq(
+                                    'recurring_id', selected_pattern_id
+                                ).gt('date', cutoff).execute()
+
+                                # 3. Τερματίζουμε τη σειρά για να μην επανεμφανιστούν.
+                                utils.supabase.table('recurring_patterns').delete().eq(
+                                    'id', selected_pattern_id
+                                ).execute()
+
+                            except Exception as exc:
+                                st.error(
+                                    "Δεν ολοκληρώθηκε η διακοπή στη βάση: "
+                                    f"{exc}. Το ιστορικό δεν διαγράφηκε."
+                                )
+                            else:
+                                # Ενημέρωση του τοπικού state ΜΟΝΟ αφού πετύχει
+                                # ο χειρισμός στη βάση.
+                                future_ids = {
+                                    a['id'] for a in future_assigns if a.get('id')
+                                }
+                                for a in past_assigns:
+                                    a['recurring_id'] = None
+                                st.session_state.assignments = [
+                                    a for a in st.session_state.assignments
+                                    if a.get('id') not in future_ids
+                                ]
+                                st.session_state.recurring_patterns = [
+                                    p for p in st.session_state.recurring_patterns
+                                    if p.get('id') != selected_pattern_id
+                                ]
+
+                                # Διατήρηση ιστορικού Undo / Redo και συγχρονισμού.
+                                actions = []
+                                if past_assigns:
+                                    actions.append({
+                                        'type': 'update',
+                                        'table': 'assignments',
+                                        'old_records': past_before,
+                                        'new_records': past_after
+                                    })
+                                if future_assigns:
+                                    actions.append({
+                                        'type': 'delete',
+                                        'table': 'assignments',
+                                        'records': future_assigns
+                                    })
+                                actions.append({
+                                    'type': 'delete',
+                                    'table': 'recurring_patterns',
+                                    'records': [dict(pat)]
+                                })
+                                utils.add_transaction(actions)
+
+                                for a in future_assigns:
+                                    if a.get('id'):
+                                        utils.track_deletion('assignments', a['id'])
+                                utils.track_deletion('recurring_patterns', selected_pattern_id)
+                                utils.mark_data_changed()
+                                utils.touch_app_sync_state()
+                                utils.log_activity(
+                                    'ΔΙΑΚΟΠΗ ΣΕΙΡΑΣ',
+                                    'recurring_patterns',
+                                    f"Διακοπή από {stop_date.strftime('%d/%m/%Y')}: "
+                                    f"διατηρήθηκαν {len(past_assigns)} ιστορικές "
+                                    f"και αφαιρέθηκαν {len(future_assigns)} μελλοντικές βάρδιες"
+                                )
+
+                                st.success(
+                                    f"Η σειρά σταμάτησε. Διατηρήθηκαν "
+                                    f"{len(past_assigns)} βάρδιες έως "
+                                    f"{stop_date.strftime('%d/%m/%Y')} και "
+                                    f"αφαιρέθηκαν {len(future_assigns)} μελλοντικές."
+                                )
+                                st.session_state.rec_reset_counter += 1
+                                time.sleep(1.0)
+                                st.rerun()
 
                     if save_rec:
                         str_arrival = e_r_arrival_time.strftime("%H:%M") if e_use_arr_rec else ""
