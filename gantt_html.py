@@ -106,6 +106,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
         available_after_6 = []
         available_after_10 = []
+        unavailable_staff = []
         day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
         limit_6 = 6 * 60
         limit_10 = 10 * 60
@@ -137,11 +138,30 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             # 2) ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:
             #    η τελευταία βάρδια τους λήγει μετά τις 06:00 και έως 10:00.
             #
-            # Αν η τελευταία βάρδια λήγει μετά τις 10:00, δεν εμφανίζονται σε καμία λίστα.
+            # Όσοι τελειώνουν μετά τις 10:00 είναι ΜΗ ΔΙΑΘΕΣΙΜΟΙ.
             if latest_end_minutes is None or latest_end_minutes <= limit_6:
                 available_after_6.append(emp_label)
             elif latest_end_minutes <= limit_10:
                 available_after_10.append(emp_label)
+            else:
+                # Συνολική διάρκεια των μη ακυρωμένων βαρδιών της ημέρας,
+                # σε ένα ή περισσότερα έργα (και με λήξη μετά τα μεσάνυχτα).
+                total_minutes = 0
+                for a in employee_day_assigns:
+                    start_minutes = _time_to_sort_minutes(a.get("startTime"))
+                    finish_minutes = _time_to_sort_minutes(a.get("endTime"))
+                    if start_minutes is None or finish_minutes is None:
+                        continue
+                    if finish_minutes <= start_minutes:
+                        finish_minutes += 24 * 60
+                    total_minutes += finish_minutes - start_minutes
+
+                hours, minutes = divmod(total_minutes, 60)
+                hours_label = f"{hours} ώρ." + (f" {minutes} λ." if minutes else "")
+                unavailable_staff.append(
+                    f"{html_utils.escape(str(emp_label))} "
+                    f"<small style='font-size: 9px; font-weight: normal;'>({hours_label})</small>"
+                )
 
         label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
         if leaves_today:
@@ -150,6 +170,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             label_html += f"<div style='color: #15803d; margin-bottom: 8px; font-size: 11px;'><b>ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(available_after_6)}</div>"
         if available_after_10:
             label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_after_10)}</div>"
+        if unavailable_staff:
+            label_html += f"<div style='color: #b45309; margin-top: 8px; font-size: 11px;'><b>ΜΗ ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(unavailable_staff)}</div>"
 
         day_groups = [g for g in wk_groups.values() if g["Date"] == curr_date]
 
