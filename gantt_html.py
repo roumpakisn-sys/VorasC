@@ -138,14 +138,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             # 2) ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:
             #    η τελευταία βάρδια τους λήγει μετά τις 06:00 και έως 10:00.
             #
-            # Όσοι τελειώνουν μετά τις 10:00 είναι ΜΗ ΔΙΑΘΕΣΙΜΟΙ.
+            # Διατηρούμε ΑΚΡΙΒΩΣ την υπάρχουσα λογική διαθεσιμότητας.
             if latest_end_minutes is None or latest_end_minutes <= limit_6:
                 available_after_6.append(emp_label)
             elif latest_end_minutes <= limit_10:
                 available_after_10.append(emp_label)
-            else:
-                # Συνολική διάρκεια των μη ακυρωμένων βαρδιών της ημέρας,
-                # σε ένα ή περισσότερα έργα (και με λήξη μετά τα μεσάνυχτα).
+
+            # Η τρίτη λίστα περιλαμβάνει ΟΛΟΥΣ όσους έχουν ανατεθεί
+            # σε τουλάχιστον μία ενεργή βάρδια, ανεξάρτητα από ώρα λήξης.
+            # Οι ώρες είναι το άθροισμα όλων των έργων της ημέρας.
+            if employee_day_assigns:
                 total_minutes = 0
                 for a in employee_day_assigns:
                     start_minutes = _time_to_sort_minutes(a.get("startTime"))
@@ -156,12 +158,13 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         finish_minutes += 24 * 60
                     total_minutes += finish_minutes - start_minutes
 
-                hours, minutes = divmod(total_minutes, 60)
-                hours_label = f"{hours} ώρ." + (f" {minutes} λ." if minutes else "")
-                unavailable_staff.append(
-                    f"{html_utils.escape(str(emp_label))} "
-                    f"<small style='font-size: 9px; font-weight: normal;'>({hours_label})</small>"
-                )
+                if total_minutes > 0:
+                    hours, minutes = divmod(total_minutes, 60)
+                    hours_label = f"{hours} ώρ." + (f" {minutes} λ." if minutes else "")
+                    unavailable_staff.append(
+                        f"{html_utils.escape(str(emp_label))} "
+                        f"<small style='font-size: 9px; font-weight: normal;'>({hours_label})</small>"
+                    )
 
         label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
         if leaves_today:
