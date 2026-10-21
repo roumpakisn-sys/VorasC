@@ -31,6 +31,40 @@ is_full_admin = current_user != "TAN"
 # Φιλτράρισμα: Μόνο οι "Ενεργοί" υπάλληλοι είναι διαθέσιμοι για τοποθετήσεις
 active_employee_ids = [e['id'] for e in st.session_state.employees if e.get('status', 'Ενεργός') == 'Ενεργός']
 
+LEAVE_TYPE_NORMAL = "Κανονική Άδεια"
+LEAVE_TYPE_SICK = "Αναρρωτική Άδεια"
+LEAVE_TYPES = [LEAVE_TYPE_NORMAL, LEAVE_TYPE_SICK]
+
+
+def normalize_leave_type(leave_obj):
+    """
+    Παλαιότερες άδειες που δεν είχαν τύπο θεωρούνται Κανονική Άδεια.
+    Υποστηρίζει και πιθανές παλιές τιμές/παραλλαγές.
+    """
+    raw = ""
+    if isinstance(leave_obj, dict):
+        raw = str(leave_obj.get("leaveType") or leave_obj.get("leave_type") or "").strip()
+    else:
+        raw = str(leave_obj or "").strip()
+
+    if not raw:
+        return LEAVE_TYPE_NORMAL
+
+    lower = raw.lower()
+    if "αναρ" in lower or "sick" in lower:
+        return LEAVE_TYPE_SICK
+
+    return LEAVE_TYPE_NORMAL
+
+
+def leave_days_in_period(leave_obj, period_start, period_end):
+    actual_start = max(leave_obj["startDate"], period_start)
+    actual_end = min(leave_obj["endDate"], period_end)
+    if actual_start <= actual_end:
+        return (actual_end - actual_start).days + 1
+    return 0
+
+
 # --- ΛΟΓΙΚΗ ΠΡΟΣΒΑΣΗΣ / ΜΕΝΟΥ ---
 if current_user == "TAN":
     # Ο ΤΑΝ βλέπει ΜΟΝΟ Προσωπικό και Άδειες (και τις συγκεντρωτικές άδειες)
@@ -380,13 +414,16 @@ elif menu == "Άδειες":
 
     tab_list, tab_add, tab_edit = st.tabs(["📋 Λίστα Αδειών", "➕ Καταχώρηση", "✏️ Επεξεργασία"])
     with tab_add:
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             l_emp = st.selectbox("Υπάλληλος (Μόνο Ενεργοί)", options=active_employee_ids, format_func=utils.get_employee_name, key=f"l_emp_{lrc}")
             l_start = st.date_input("Από", key=f"l_start_{lrc}")
         with c2:
             l_sub_emp = st.selectbox("Αντικαταστάτης (Προαιρετικό)", options=[""] + active_employee_ids, format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else utils.get_employee_name(x), key=f"l_sub_{lrc}")
             l_end = st.date_input("Έως", key=f"l_end_{lrc}")
+        with c3:
+            l_type = st.selectbox("Τύπος Άδειας", options=LEAVE_TYPES, key=f"l_type_{lrc}")
+            st.caption("Η αναρρωτική δεν μειώνει το πραγματικό υπόλοιπο κανονικής άδειας.")
 
         col_b1, col_b2 = st.columns([1, 1])
         with col_b1:
@@ -424,6 +461,7 @@ elif menu == "Άδειες":
                         'startDate': l_start,
                         'endDate': l_end,
                         'substituteId': l_sub_emp if l_sub_emp else None,
+                        'leaveType': l_type,
                         'type': 'new'
                     }
                     st.session_state.leave_conflicts = conflicts
@@ -433,7 +471,8 @@ elif menu == "Άδειες":
                         'employeeId': l_emp,
                         'startDate': l_start,
                         'endDate': l_end,
-                        'substituteId': l_sub_emp if l_sub_emp else None
+                        'substituteId': l_sub_emp if l_sub_emp else None,
+                        'leaveType': l_type
                     }
                     st.session_state.leaves.append(new_l)
                     utils.db_insert('leaves', new_l)
@@ -483,7 +522,7 @@ elif menu == "Άδειες":
             }
             leave_to_edit_id = st.selectbox("Επιλέ Άδεια για Επεξεργασία", options=list(leave_options.keys()), format_func=lambda x: leave_options[x], key=f"edit_leave_sel_{lrc}")
             leave_to_edit = next(l for l in st.session_state.leaves if l['id'] == leave_to_edit_id)
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             with c1:
                 emp_options_safe = active_employee_ids + [leave_to_edit['employeeId']] if leave_to_edit['employeeId'] not in active_employee_ids else active_employee_ids
                 ed_l_emp = st.selectbox("Αλλαγή Υπαλλήλου", options=emp_options_safe, index=emp_options_safe.index(leave_to_edit['employeeId']), format_func=utils.get_employee_name, key=f"ed_l_emp_{leave_to_edit_id}_{lrc}")
@@ -495,6 +534,15 @@ elif menu == "Άδειες":
                     sub_options.append(current_sub)
                 ed_l_sub_emp = st.selectbox("Αλλαγή Αντικαταστάτη", options=sub_options, index=sub_options.index(current_sub), format_func=lambda x: "Χωρίς Αντικαταστάτη" if x == "" else utils.get_employee_name(x), key=f"ed_l_sub_{leave_to_edit_id}_{lrc}")
                 ed_l_end = st.date_input("Αλλαγή Ημερομηνίας 'Έως'", value=leave_to_edit['endDate'], key=f"ed_l_end_{leave_to_edit_id}_{lrc}")
+            with c3:
+                current_leave_type = normalize_leave_type(leave_to_edit)
+                ed_l_type = st.selectbox(
+                    "Τύπος Άδειας",
+                    options=LEAVE_TYPES,
+                    index=LEAVE_TYPES.index(current_leave_type),
+                    key=f"ed_l_type_{leave_to_edit_id}_{lrc}",
+                )
+                st.caption("Μόνο η κανονική άδεια αφαιρείται από το υπόλοιπο.")
 
             if st.button("💾 Αποθήκευση Αλλαγών", type="primary", key=f"btn_save_leave_{leave_to_edit_id}_{lrc}"):
                 if ed_l_start > ed_l_end:
@@ -518,6 +566,7 @@ elif menu == "Άδειες":
                             'startDate': ed_l_start,
                             'endDate': ed_l_end,
                             'substituteId': ed_l_sub_emp if ed_l_sub_emp else None,
+                            'leaveType': ed_l_type,
                             'type': 'edit',
                             'old_data': dict(leave_to_edit)
                         }
@@ -528,7 +577,8 @@ elif menu == "Άδειες":
                             'employeeId': ed_l_emp,
                             'startDate': ed_l_start,
                             'endDate': ed_l_end,
-                            'substituteId': ed_l_sub_emp if ed_l_sub_emp else None
+                            'substituteId': ed_l_sub_emp if ed_l_sub_emp else None,
+                            'leaveType': ed_l_type
                         })
                         utils.db_update('leaves', leave_to_edit_id, leave_to_edit, old_data=old_leave_data)
                         st.success("Οι αλλαγές στην άδεια αποθηκεύτηκαν!")
@@ -563,7 +613,8 @@ elif menu == "Άδειες":
                         'employeeId': st.session_state.pending_leave['employeeId'],
                         'startDate': st.session_state.pending_leave['startDate'],
                         'endDate': st.session_state.pending_leave['endDate'],
-                        'substituteId': st.session_state.pending_leave['substituteId']
+                        'substituteId': st.session_state.pending_leave['substituteId'],
+                        'leaveType': st.session_state.pending_leave.get('leaveType', LEAVE_TYPE_NORMAL)
                     })
                     utils.db_update('leaves', leave_id, leave_obj, old_data=old_data)
                     st.session_state.pending_leave = None
@@ -575,20 +626,24 @@ elif menu == "Άδειες":
     with tab_list:
         if st.session_state.leaves:
             st.write("### 📋 Λίστα Αδειών")
-            hc1, hc2, hc3, hc4, hc5 = st.columns([2.5, 2, 2, 2.5, 1])
+            hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2.4, 1.6, 1.6, 2.2, 1.8, 0.8])
             hc1.write("**Υπάλληλος**")
             hc2.write("**Από**")
             hc3.write("**Έως**")
             hc4.write("**Αντικαταστάτης**")
-            hc5.write("")
+            hc5.write("**Τύπος**")
+            hc6.write("")
             st.divider()
             for l in st.session_state.leaves:
-                col1, col2, col3, col4, col5 = st.columns([2.5, 2, 2, 2.5, 1])
+                col1, col2, col3, col4, col5, col6 = st.columns([2.4, 1.6, 1.6, 2.2, 1.8, 0.8])
+                leave_type_label = normalize_leave_type(l)
+                leave_type_icon = "🟢" if leave_type_label == LEAVE_TYPE_NORMAL else "🔵"
                 col1.write(utils.get_employee_name(l['employeeId']))
                 col2.write(l['startDate'].strftime('%d/%m/%Y'))
                 col3.write(l['endDate'].strftime('%d/%m/%Y'))
                 col4.write(utils.get_employee_name(l.get('substituteId')) if l.get('substituteId') else "-")
-                if col5.button("❌", key=f"del_leave_{l['id']}"):
+                col5.write(f"{leave_type_icon} {leave_type_label}")
+                if col6.button("❌", key=f"del_leave_{l['id']}"):
                     st.session_state.leaves = [leave for leave in st.session_state.leaves if leave['id'] != l['id']]
                     utils.db_delete('leaves', 'id', l['id'], deleted_records=[l])
                     st.rerun()
@@ -616,7 +671,7 @@ elif menu == "Σύνολο Αδειών":
         "Δεκέμβριος",
     ]
 
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2, col3 = st.columns([1, 1, 1.4])
     with col1:
         selected_year = st.selectbox(
             "Επιλογή Έτους",
@@ -630,6 +685,16 @@ elif menu == "Σύνολο Αδειών":
             months,
             index=0,
             key="leave_summary_month",
+        )
+    with col3:
+        annual_regular_leave_allowance = st.number_input(
+            "Ετήσιο δικαίωμα κανονικής άδειας",
+            min_value=0,
+            max_value=60,
+            value=20,
+            step=1,
+            key="annual_regular_leave_allowance",
+            help="Χρησιμοποιείται για τον υπολογισμό πραγματικού υπολοίπου. Η αναρρωτική δεν αφαιρείται.",
         )
 
     selected_month = months.index(selected_month_name)
@@ -646,28 +711,44 @@ elif menu == "Σύνολο Αδειών":
 
     st.divider()
 
-    leave_days = {emp['id']: 0 for emp in st.session_state.employees}
+    regular_leave_days = {emp['id']: 0 for emp in st.session_state.employees}
+    sick_leave_days = {emp['id']: 0 for emp in st.session_state.employees}
 
     for l in st.session_state.leaves:
-        actual_start = max(l['startDate'], period_start)
-        actual_end = min(l['endDate'], period_end)
-        if actual_start <= actual_end:
-            if l['employeeId'] in leave_days:
-                leave_days[l['employeeId']] += (actual_end - actual_start).days + 1
+        days_count = leave_days_in_period(l, period_start, period_end)
+        if days_count <= 0:
+            continue
 
-    table_data = [
-        {
+        emp_id = l.get('employeeId')
+        if emp_id not in regular_leave_days:
+            continue
+
+        if normalize_leave_type(l) == LEAVE_TYPE_SICK:
+            sick_leave_days[emp_id] += days_count
+        else:
+            regular_leave_days[emp_id] += days_count
+
+    table_data = []
+    for emp in st.session_state.employees:
+        emp_id = emp['id']
+        used_regular = regular_leave_days.get(emp_id, 0)
+        used_sick = sick_leave_days.get(emp_id, 0)
+        remaining_regular = annual_regular_leave_allowance - used_regular
+
+        table_data.append({
             "Ονοματεπώνυμο": emp['name'],
             "Θέση": emp.get('position', ''),
             "Κατάσταση": emp.get('status', 'Ενεργός'),
-            "Ημέρες Άδειας": leave_days[emp['id']]
-        }
-        for emp in st.session_state.employees
-    ]
+            "Κανονική Άδεια": used_regular,
+            "Αναρρωτική Άδεια": used_sick,
+            "Πραγματικό Υπόλοιπο": remaining_regular,
+        })
 
-    st.write(f"### Συνολικές Ημέρες Άδειας για: {period_label}")
+    st.write(f"### Σύνολο Αδειών για: {period_label}")
     st.caption(f"Περίοδος υπολογισμού: {period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}")
+    st.info("Το πραγματικό υπόλοιπο αφαιρεί μόνο τις Κανονικές Άδειες. Οι Αναρρωτικές εμφανίζονται ξεχωριστά και δεν μειώνουν το υπόλοιπο.")
     st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
+
 
 # --- VIEW: WORK HOURS ---
 elif menu == "Ώρες Εργασιών":
