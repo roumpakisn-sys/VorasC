@@ -143,6 +143,26 @@ def _group_after_project_labels(employee_labels):
     return result
 
 
+def _format_viber_employees(employee_labels):
+    """Πλάγια ένδειξη «ΜΕΤΑ ΑΠΟ», με έντονα ονόματα για αντιγραφή στο Viber."""
+    grouped_labels = _group_after_project_labels(employee_labels)
+    if not grouped_labels:
+        return "*Χωρίς Προσωπικό*"
+
+    formatted_labels = []
+    for index, label in enumerate(grouped_labels):
+        # Το κόμμα μένει μέσα στα αστεράκια, ώστε κάθε κλείσιμο
+        # μορφοποίησης να ακολουθείται από κενό ή τέλος γραμμής.
+        comma = "," if index < len(grouped_labels) - 1 else ""
+        if label.startswith("ΜΕΤΑ ΑΠΟ '") and "' > " in label:
+            project_part, names = label.split("' > ", 1)
+            formatted_labels.append(f"_{project_part}' >_ *{names}{comma}*")
+        else:
+            formatted_labels.append(f"*{label}{comma}*")
+
+    return " ".join(formatted_labels)
+
+
 # --- ΚΑΘΑΡΙΣΜΟΣ ΜΝΗΜΗΣ CHECKBOXES ΟΤΑΝ ΑΛΛΑΖΕΙ Η ΜΕΡΑ ---
 # Αν ο χρήστης αλλάξει μέρα, θέλουμε όλα τα έργα να είναι ξανά προεπιλεγμένα (True).
 if "viber_last_date" not in st.session_state or st.session_state.viber_last_date != target_date:
@@ -244,11 +264,9 @@ else:
         # Ώρες με αστερίσκους, έργο χωρίς αστερίσκους
         viber_msg += f"⏰ *{start} - {end}* | 🏗️ {proj}\n"
 
-        # Ονόματα εργαζομένων με αστερίσκους.
-        # Όσοι είναι ΜΕΤΑ ΑΠΟ το ίδιο έργο ομαδοποιούνται όπως στο Gantt.
-        grouped_emps = _group_after_project_labels(emps)
-        emp_str = ", ".join(grouped_emps) if grouped_emps else "Χωρίς Προσωπικό"
-        viber_msg += f"👥 Προσωπικό: *{emp_str}*\n"
+        # Η ένδειξη ΜΕΤΑ ΑΠΟ γίνεται πλάγια, τα ονόματα παραμένουν έντονα.
+        emp_str = _format_viber_employees(emps)
+        viber_msg += f"👥 Προσωπικό: {emp_str}\n"
 
         # Ώρα προσέλευσης (αν υπάρχει) με αστερίσκους
         if arr:
