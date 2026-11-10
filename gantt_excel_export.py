@@ -802,3 +802,288 @@ def render_visual_gantt_month_export(assignments_by_date, default_date):
             key="visual_gantt_month_export_download_btn",
             use_container_width=True,
         )
+
+
+# --- ΗΜΕΡΗΣΙΑ ΕΞΑΓΩΓΗ ΕΡΓΑΖΟΜΕΝΩΝ / ΕΡΓΩΝ / ΩΡΑΡΙΩΝ ---
+# Τα υπόλοιπα εργαλεία εξαγωγής Gantt παραμένουν ανεπηρέαστα.
+def _employee_day_minutes(value):
+    """Ωρα HH:MM -> λεπτά από τα μεσάνυχτα. None για άκυρη τιμή."""
+    from datetime import time as time_type
+
+    if isinstance(value, datetime):
+        value = value.time()
+    if isinstance(value, time_type):
+        return value.hour * 60 + value.minute
+
+    raw = str(value or "").strip()
+    try:
+        hours, minutes = map(int, raw[:5].split(":"))
+    except (ValueError, TypeError):
+        return None
+    if not (0 <= hours < 24 and 0 <= minutes < 60):
+        return None
+    return hours * 60 + minutes
+
+
+def build_employee_day_schedule_rows(assignments, employees, projects, selected_day):
+    """
+    Επιστρέφει αναλυτικές βάρδιες και σύνοψη εργαζομένων για συγκεκριμένη ημερομηνία.
+    Περιλαμβάνει όλες τις προγραμματισμένες μη ακυρωμένες βάρδιες,
+    ακόμη και από επαναλαμβανόμενα έργα, ανεξάρτητα από το οπτικό φίλτρο Gantt.
+    """
+    from collections import defaultdict
+    import utils
+
+    emp_names = {str(e.get("id")): str(e.get("name") or "Άγνωστος εργαζόμενος")
+                 for e in employees if isinstance(e, dict)}
+    proj_names = {str(p.get("id")): str(p.get("name") or "Άγνωστο έργο")
+                  for p in projects if isinstance(p, dict)}
+
+    details = []
+    for a in assignments or []:
+        if not isinstance(a, dict) or a.get("is_cancelled", False):
+            continue
+        if utils.safe_date_parse(a.get("date")) != selected_day:
+            continue
+        eid = a.get("employeeId")
+        if eid is None or str(eid).strip() == "":
+            continue  # Χωρίς προσωπικό
+
+        start_minutes = _employee_day_minutes(a.get("startTime"))
+        end_minutes = _employee_day_minutes(a.get("endTime"))
+        if start_minutes is None or end_minutes is None:
+            continue  # Ακυρο ωράριο, όχι πλασματικές ώρες
+        duration_minutes = (end_minutes - start_minutes) % (24 * 60)
+        if duration_minutes == 0:
+            continue
+
+        employee_name = emp_names.get(str(eid), "Άγνωστος εργαζόμενος")
+        project_name = proj_names.get(str(a.get("projectId")), "Άγνωστο έργο")
+        arrival = _employee_day_minutes(a.get("arrivalTime"))
+        details.append({
+            "employee_id": str(eid),
+            "employee": employee_name,
+            "project": project_name,
+            "start": f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
+            "end": f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
+            "arrival": f"{arrival // 60:02d}:{arrival % 60:02d}" if arrival is not None else "",
+            "minutes": duration_minutes,
+            "assignment_id": str(a.get("id") or ""),
+        })
+
+    details.sort(key=lambda r: (r["employee"].casefold(), r["start"], r["project"].casefold(), r["assignment_id"]))
+    grouped = defaultdict(list)
+    for r in details:
+        grouped[r["employee_id"]].append(r)
+
+    summary = []
+    for eid, shifts in grouped.items():
+        summary.append({
+            "employee_id": eid,
+            "employee": shifts[0]["employee"],
+            "shifts": shifts,
+            "minutes": sum(r["minutes"] for r in shifts),
+        })
+    summary.sort(key=lambda r: (r["employee"].casefold(), r["employee_id"]))
+    return summary, details
+
+
+def create_employee_day_excel(assignments, employees, projects, selected_day):
+    """Δημιουργεί καλομορφοποιημένο Excel δύο φύλλων· επιστρέφει bytes και μετρήσεις."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    summary, details = build_employee_day_schedule_rows(assignments, employees, projects, selected_day)
+    if not details:
+        return None, 0, 0
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Σύνοψη Εργαζομένων"
+    wd = wb.create_sheet("Αναλυτικές Βάρδιες")
+
+    navy = "14283F"
+    teal = "087F8C"
+    grey = "EAF0F4"
+    white = "FFFFFF"
+    text_color = "263747"
+    border_color = "DFE7EC"
+    thin = Side(style="hair", color=border_color)
+    edge = Border(bottom=thin)
+
+    def safe_text(value):
+        """Αποτρέπει εκτέλεση Excel formulas από ονοματεπώνυμα/έργα."""
+        return str(value or "")
+
+    def put_text(ws_, cell_ref, value):
+        c = ws_[cell_ref]
+        c.value = safe_text(value)
+        c.data_type = "s"
+        return c
+
+    def setup_sheet(ws_, title, ncols):
+        last = get_column_letter(ncols)
+        ws_.merge_cells(f"A1:{last}1")
+        c = put_text(ws_, "A1", title)
+        c.font = Font(name="Calibri", size=16, bold=True, color=white)
+        c.fill = PatternFill("solid", fgColor=navy)
+        c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        for row in ws_.iter_rows(min_row=1, max_row=1, max_col=ncols):
+            for cell in row:
+                cell.fill = PatternFill("solid", fgColor=navy)
+        ws_.row_dimensions[1].height = 38
+
+        ws_.merge_cells(f"A2:{last}2")
+        c = put_text(ws_, "A2", f"Ημερομηνία: {selected_day.strftime('%d/%m/%Y')}   |   Συνολικοί εργαζόμενοι: {len(summary)}   |   Βάρδιες: {len(details)}")
+        c.font = Font(name="Calibri", size=10, color=text_color)
+        c.alignment = Alignment(vertical="center", indent=1)
+        ws_.row_dimensions[2].height = 25
+        ws_.row_dimensions[3].height = 10
+
+    def header(ws_, labels):
+        for col, lbl in enumerate(labels, 1):
+            c = put_text(ws_, f"{get_column_letter(col)}4", lbl)
+            c.fill = PatternFill("solid", fgColor=teal)
+            c.font = Font(name="Calibri", size=10, bold=True, color=white)
+            c.alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+        ws_.row_dimensions[4].height = 30
+        ws_.sheet_view.showGridLines = False
+        ws_.sheet_view.zoomScale = 90
+        ws_.freeze_panes = "C5"
+
+    def body_row(ws_, rownum, ncols, height=28):
+        ws_.row_dimensions[rownum].height = height
+        if rownum % 2 == 0:
+            fill = PatternFill("solid", fgColor="F5F8FA")
+        else:
+            fill = PatternFill("solid", fgColor=white)
+        for col in range(1, ncols + 1):
+            c = ws_.cell(rownum, col)
+            c.fill = fill
+            c.border = edge
+            c.font = Font(name="Calibri", size=10, color=text_color)
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+
+    setup_sheet(ws, "ΗΜΕΡΗΣΙΑ ΑΠΑΣΧΟΛΗΣΗ ΠΡΟΣΩΠΙΚΟΥ", 5)
+    header(ws, ["Α/Α", "Ονοματεπώνυμο", "Έργα απασχόλησης", "Ωράρια ανά έργο", "Σύνολο ωρών"])
+    for idx, item in enumerate(summary, 1):
+        row = idx + 4
+        shifts = item["shifts"]
+        body_row(ws, row, 5, height=min(190, max(29, 15 + len(shifts) * 18)))
+        ws.cell(row, 1, idx)
+        put_text(ws, f"B{row}", item["employee"])
+        put_text(ws, f"C{row}", "\n".join(f"{n}. {s['project']}" for n, s in enumerate(shifts, 1)))
+        put_text(ws, f"D{row}", "\n".join(f"{n}. {s['start']}–{s['end']} ({s['minutes'] / 60:.2f} ώρ.)" for n, s in enumerate(shifts, 1)))
+        ws.cell(row, 5, item["minutes"] / 60)
+        ws.cell(row, 5).number_format = '0.00 "ώρ."'
+        ws.cell(row, 5).font = Font(name="Calibri", size=11, bold=True, color=navy)
+        ws.cell(row, 5).alignment = Alignment(horizontal="center", vertical="center")
+
+    total_row = len(summary) + 5
+    for col in range(1, 6):
+        c = ws.cell(total_row, col)
+        c.fill = PatternFill("solid", fgColor=grey)
+        c.font = Font(name="Calibri", size=11, bold=True, color=navy)
+        c.alignment = Alignment(vertical="center")
+    ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=4)
+    put_text(ws, f"A{total_row}", "ΣΥΝΟΛΟ ΠΡΟΓΡΑΜΜΑΤΙΣΜΕΝΩΝ ΩΡΩΝ")
+    ws.cell(total_row, 5, sum(s["minutes"] for s in summary) / 60)
+    ws.cell(total_row, 5).number_format = '0.00 "ώρ."'
+    ws.cell(total_row, 5).font = Font(name="Calibri", size=11, bold=True, color=navy)
+    ws.row_dimensions[total_row].height = 29
+    for col, width in {"A": 7, "B": 31, "C": 39, "D": 38, "E": 20}.items():
+        ws.column_dimensions[col].width = width
+    ws.auto_filter.ref = f"A4:E{len(summary) + 4}"
+    ws.print_title_rows = "1:4"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+
+    setup_sheet(wd, "ΑΝΑΛΥΤΙΚΕΣ ΒΑΡΔΙΕΣ ΗΜΕΡΑΣ", 7)
+    header(wd, ["Α/Α", "Ονοματεπώνυμο", "Έργο", "Έναρξη", "Λήξη", "Ώρες", "Προσέλευση"])
+    for idx, shift in enumerate(details, 1):
+        row = idx + 4
+        body_row(wd, row, 7)
+        wd.cell(row, 1, idx)
+        put_text(wd, f"B{row}", shift["employee"])
+        put_text(wd, f"C{row}", shift["project"])
+        put_text(wd, f"D{row}", shift["start"])
+        put_text(wd, f"E{row}", shift["end"])
+        wd.cell(row, 6, shift["minutes"] / 60)
+        wd.cell(row, 6).number_format = '0.00 "ώρ."'
+        put_text(wd, f"G{row}", shift["arrival"])
+    for col, width in {"A": 7, "B": 32, "C": 38, "D": 15, "E": 15, "F": 16, "G": 18}.items():
+        wd.column_dimensions[col].width = width
+    wd.auto_filter.ref = f"A4:G{len(details) + 4}"
+    wd.print_title_rows = "1:4"
+    wd.sheet_properties.pageSetUpPr.fitToPage = True
+    wd.page_setup.fitToWidth = 1
+    wd.page_setup.fitToHeight = 0
+
+    # Η επιλογή των ωρών είναι αθροιστική σε όλες τις βάρδιες του εργαζομένου.
+    wb.calculation.fullCalcOnLoad = True
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue(), len(summary), len(details)
+
+
+def render_employee_day_excel_export(default_date):
+    """Επιλογή ημέρας και λήψη ημερήσιου Excel ανά εργαζόμενο στο κύριο Gantt."""
+    st.markdown("#### 📋 Εξαγωγή ημερήσιου προγράμματος εργαζομένων")
+    col_date, col_create = st.columns([2, 1])
+    with col_date:
+        selected_day = st.date_input(
+            "Ημερομηνία προγράμματος",
+            value=default_date,
+            key="employee_day_excel_date",
+        )
+    with col_create:
+        st.write("")
+        st.write("")
+        clicked = st.button(
+            "Δημιουργία Excel ημέρας",
+            use_container_width=True,
+            key="employee_day_excel_create",
+        )
+
+    if clicked:
+        try:
+            data, emp_count, shift_count = create_employee_day_excel(
+                st.session_state.get("assignments", []),
+                st.session_state.get("employees", []),
+                st.session_state.get("projects", []),
+                selected_day,
+            )
+        except Exception as exc:
+            st.session_state.pop("employee_day_excel_result", None)
+            st.error(f"Αποτυχία δημιουργίας Excel ημέρας: {exc}")
+        else:
+            if data is None:
+                st.session_state.pop("employee_day_excel_result", None)
+                st.info("Δεν υπάρχουν μη ακυρωμένες βάρδιες με ορισμένο προσωπικό για αυτή την ημέρα.")
+            else:
+                st.session_state["employee_day_excel_result"] = {
+                    "date": selected_day,
+                    "data_version": st.session_state.get("local_gantt_version", 0),
+                    "bytes": data,
+                    "employees": emp_count,
+                    "shifts": shift_count,
+                }
+
+    report = st.session_state.get("employee_day_excel_result")
+    if (report
+            and report.get("date") == selected_day
+            and report.get("data_version") == st.session_state.get("local_gantt_version", 0)):
+        st.caption(
+            f"{report['employees']} εργαζόμενοι · {report['shifts']} βάρδιες · "
+            "2 φύλλα: Σύνοψη και Αναλυτικές Βάρδιες"
+        )
+        st.download_button(
+            "⬇️ Κατέβασμα ημερήσιου Excel",
+            data=report["bytes"],
+            file_name=f"Ergazomenoi_Erga_{selected_day.strftime('%Y_%m_%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="employee_day_excel_download",
+        )
