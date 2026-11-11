@@ -1,13 +1,12 @@
 """Pure, testable matching rules for STAFF.PRO smart replacements.
 
 No database credentials, Streamlit state, or external network dependencies.
-Only explicit (not inferred) region data is used for geographic preference.
+No geographic or region criterion is used for eligibility or ranking.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-import unicodedata
 from typing import Any
 
 
@@ -59,11 +58,6 @@ def minutes_worked(a: dict) -> int:
     return round((times[1] - times[0]).total_seconds() / 60) if times else 0
 
 
-def text_region(value: Any) -> str:
-    raw = unicodedata.normalize("NFKD", str(value or "").casefold())
-    return " ".join("".join(ch for ch in raw if not unicodedata.combining(ch)).split())
-
-
 def is_cancelled(a: dict) -> bool:
     return a.get("is_cancelled") is True or str(a.get("is_cancelled", "")).strip().lower() == "true"
 
@@ -105,11 +99,9 @@ def candidate_assessment(
     vacant: dict,
     all_assignments: list[dict],
     all_leaves: list[dict],
-    project_region: str = "",
     *,
     travel_buffer_minutes: int = 0,
     maximum_day_hours: float = 10,
-    require_same_region: bool = False,
     today: date | None = None,
 ) -> dict:
     """Assess availability and transparent, advisory score.
@@ -130,8 +122,6 @@ def candidate_assessment(
         "day_hours": 0.0,
         "projected_hours": 0.0,
         "experience_days": 0,
-        "region": str(employee.get("region") or "").strip(),
-        "region_label": "Χωρίς στοιχεία περιοχής",
         "existing_shifts": "—",
     }
     if not eid or employee.get("status", "Ενεργός") != "Ενεργός":
@@ -187,21 +177,6 @@ def candidate_assessment(
         result["reason"] = f"Πάνω από {maximum_day_hours:g} ώρες την ημέρα"
         return result
 
-    project_r = text_region(project_region)
-    employee_r = text_region(result["region"])
-    if project_r and employee_r:
-        if project_r == employee_r:
-            region_bonus = 20
-            result["region_label"] = "Ίδια περιοχή"
-        else:
-            region_bonus = -10
-            result["region_label"] = "Διαφορετική περιοχή"
-            if require_same_region:
-                result["reason"] = "Διαφορετική περιοχή"
-                return result
-    else:
-        region_bonus = 0
-
     # Only completed or earlier-day placements count as experience;
     # scheduled future work is not evidence that work was done.
     cutoff = min(target_day, today + timedelta(days=1))
@@ -212,11 +187,10 @@ def candidate_assessment(
         and as_date(a.get("date")) < cutoff
     }
     result["experience_days"] = len(history)
-    result["score"] = round(60 + min(40, len(history) * 8) + region_bonus - day_mins / 60 * 3)
+    result["score"] = round(60 + min(40, len(history) * 8) - day_mins / 60 * 3)
     result["eligible"] = True
     result["reason"] = (
         f"{result['experience_days']} προηγ. ημέρες στο έργο · "
-        f"{result['region_label'].lower()} · "
         f"{result['day_hours']:g} ήδη προγρ. ώρες"
     )
     return result
@@ -227,12 +201,10 @@ def rank_candidates(
     employees: list[dict],
     assignments: list[dict],
     leaves: list[dict],
-    project_region: str = "",
     *,
     only_external: bool = False,
     travel_buffer_minutes: int = 0,
     maximum_day_hours: float = 10,
-    require_same_region: bool = False,
     today: date | None = None,
 ) -> tuple[list[dict], list[dict]]:
     eligible = []
@@ -245,10 +217,9 @@ def rank_candidates(
         if emp.get("status", "Ενεργός") != "Ενεργός":
             continue
         report = candidate_assessment(
-            emp, vacant, assignments, leaves, project_region,
+            emp, vacant, assignments, leaves,
             travel_buffer_minutes=travel_buffer_minutes,
             maximum_day_hours=maximum_day_hours,
-            require_same_region=require_same_region,
             today=today,
         )
         (eligible if report["eligible"] else blocked).append(report)
