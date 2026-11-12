@@ -75,13 +75,13 @@ def covered(start: int, end: int, windows: list[tuple[int, int]]) -> bool:
 
 def assess_rules(employee_id: str, shift: dict, rules: list[dict] | None):
     """Return (eligible, human-readable reason, small preference bonus)."""
-    if not rules:
-        return True, "", 0
     day = as_day(shift.get("date"))
     s = mins(shift.get("startTime"))
     e = mins(shift.get("endTime"))
     if day is None or s is None or e is None or s == e:
         return False, "Μη έγκυρη ημερομηνία ή ώρα βάρδιας", 0
+    if not rules:
+        return True, "", 0
     start = datetime.combine(day, time.min) + timedelta(minutes=s)
     end = datetime.combine(day, time.min) + timedelta(minutes=e)
     if end < start:
@@ -119,8 +119,16 @@ def fetch_rules(supabase):
     if supabase is None:
         return [], "Δεν υπάρχει σύνδεση Supabase."
     try:
-        response = supabase.table(TABLE).select("*").execute()
-        return list(response.data or []), ""
+        rows = []
+        offset = 0
+        while True:
+            response = supabase.table(TABLE).select("*").order("id").range(offset, offset + 499).execute()
+            if not isinstance(response.data, list):
+                raise ValueError("Δεν επιστράφηκαν έγκυρα δεδομένα διαθεσιμότητας")
+            rows.extend(response.data)
+            if len(response.data) < 500:
+                return rows, ""
+            offset += 500
     except Exception as exc:
         return [], f"Ο πίνακας διαθεσιμότητας δεν είναι διαθέσιμος ({exc})."
 
@@ -131,3 +139,4 @@ def save_rule(supabase, record: dict):
 
 def delete_rule(supabase, record_id: str):
     return supabase.table(TABLE).delete().eq("id", record_id).execute()
+

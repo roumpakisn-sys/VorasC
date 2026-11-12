@@ -1,12 +1,12 @@
 """STAFF.PRO: safe, preview-first bulk edits of Gantt bars.
 
-Standalone Streamlit page; no modifications to the existing Gantt or schema.
+Uses the shared atomic assignment service and its database migration.
 Each visible bar groups its underlying assignment rows using gantt_engine's grouping fields.
 """
 import hashlib
 import json
 import re
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -15,7 +15,8 @@ import streamlit as st
 st.set_page_config(page_title="Μαζικές Αλλαγές Gantt | STAFF.PRO", page_icon="🧩", layout="wide")
 
 import utils
-from availability_rules import assess_rules, fetch_rules
+from availability_rules import fetch_rules
+from assignment_policy import validate_changes
 
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
@@ -28,11 +29,7 @@ utils.setup_shared_ui()
 
 TODAY = datetime.now(ZoneInfo("Europe/Athens")).date()
 MAX_ROWS = 80  # Maximum number of underlying assignment records in one transaction.
-COMPARE_KEYS = (
-    "employeeId", "projectId", "date", "arrivalTime", "startTime", "endTime",
-    "notes", "colorName", "colorHex", "is_cancelled", "cancel_reason",
-    "is_general", "recurring_id", "updated_at",
-)
+
 
 
 def as_date(value):
@@ -74,17 +71,6 @@ def shift_times(record, delta):
     return output
 
 
-def time_interval(record):
-    d = as_date(record.get("date"))
-    if not d:
-        raise ValueError("Βρέθηκε βάρδια χωρίς έγκυρη ημερομηνία.")
-    start = datetime.combine(d, time()) + timedelta(minutes=minutes(record.get("startTime")))
-    end_m = minutes(record.get("endTime"))
-    start_m = minutes(record.get("startTime"))
-    if end_m <= start_m:
-        end_m += 1440
-    end = datetime.combine(d, time()) + timedelta(minutes=end_m)
-    return start, end
 
 
 def bar_groups(assignments, projects, start_day, end_day, selected_projects, hide_cancelled):
@@ -155,11 +141,6 @@ def normalized(value):
     return str(value) if not isinstance(value, bool) else value
 
 
-def unchanged_fields(source, current):
-    return all(
-        normalized(source.get(key)) == normalized(current.get(key))
-        for key in COMPARE_KEYS if key in source
-    )
 
 
 def build_plan(selected_groups, operation, options):
@@ -187,169 +168,27 @@ def build_plan(selected_groups, operation, options):
 
 
 def validate_plan(plan, assignments, employees, leaves, availability=None):
-    problems = []
-    if len(plan["deltas"]) > MAX_ROWS:
-        return [f"Το όριο είναι {MAX_ROWS} εγγραφές ανά εφαρμογή. Επίλεξε λιγότερες μπάρες."]
-    employee_map = {str(e.get("id")): e for e in employees}
-    modified_ids = set(plan["deltas"])
-    combined = [a for a in assignments if str(a.get("id")) not in modified_ids]
-    combined.extend(plan["new"].values())
-    by_employee = {}
-    for a in combined:
-        if not a.get("employeeId") or a.get("is_cancelled", False):
-            continue
-        by_employee.setdefault(str(a["employeeId"]), []).append(a)
-
-    checked = set()
-    for rec_id, record in plan["new"].items():
-        changed_fields = set(plan["deltas"][rec_id])
-        if not changed_fields.intersection({"employeeId", "date", "startTime", "endTime"}):
-            continue
-        if record.get("is_cancelled", False) or not record.get("employeeId"):
-            continue
-        eid = str(record["employeeId"])
-        emp = employee_map.get(eid)
-        if not emp or emp.get("status", "Ενεργός") != "Ενεργός":
-            problems.append(f"Ανενεργός/άγνωστος εργαζόμενος στη βάρδια {rec_id[:8]}.")
-            continue
-        permitted, reason, _ = assess_rules(eid, record, availability)
-        if not permitted:
-            problems.append(f"Μη διαθεσιμότητα: {emp.get('name', eid)} · {as_date(record.get('date')):%d/%m/%Y} · {reason}.")
-            continue
-        try:
-            start, end = time_interval(record)
-        except ValueError as exc:
-            problems.append(str(exc))
-            continue
-        for l in leaves:
-            if str(l.get("employeeId")) != eid:
-                continue
-            first, last = as_date(l.get("startDate")), as_date(l.get("endDate"))
-            if first and last and (first <= start.date() <= last or first <= (end - timedelta(microseconds=1)).date() <= last):
-                problems.append(f"{emp.get('name', eid)} έχει άδεια στις {start:%d/%m/%Y}.")
-                break
-        for other in by_employee[eid]:
-            other_id = str(other.get("id"))
-            if other_id == rec_id:
-                continue
-            pair = tuple(sorted((rec_id, other_id)))
-            if pair in checked:
-                continue
-            checked.add(pair)
-            try:
-                other_start, other_end = time_interval(other)
-            except ValueError:
-                continue
-            if start < other_end and other_start < end:
-                problems.append(f"Επικάλυψη: {emp.get('name', eid)} · {start:%d/%m} {start:%H:%M}–{end:%H:%M}.")
-    return list(dict.fromkeys(problems))
+    if len(plan['deltas']) > MAX_ROWS:
+        return [f'Το όριο είναι {MAX_ROWS} εγγραφές ανά εφαρμογή. Επίλεξε λιγότερες μπάρες.']
+    return validate_changes(list(plan['old'].values()), list(plan['new'].values()), {
+        'assignments': assignments, 'employees': employees, 'leaves': leaves, 'rules': availability,
+    })
 
 
-def fetch_rows(table, ids):
-    rows = []
-    for offset in range(0, len(ids), 100):
-        response = utils.supabase.table(table).select("*").in_("id", ids[offset:offset + 100]).execute()
-        rows.extend(response.data or [])
-    return {str(row["id"]): row for row in rows}
+
 
 
 def save_plan(plan):
-    """Preflight fresh DB data; guarded writes; compensating rollback on failure."""
-    ids = list(plan["deltas"])
-    if not ids:
-        return False, "Δεν υπάρχουν πραγματικές αλλαγές."
-    try:
-        if not utils.supabase:
-            return False, "Δεν υπάρχει σύνδεση με τη Supabase."
-        remote = fetch_rows("assignments", ids)
-        if len(remote) != len(ids):
-            return False, "Κάποιες βάρδιες έχουν ήδη διαγραφεί. Ανανέωσε τη σελίδα."
-        for rid in ids:
-            if not unchanged_fields(plan["old"][rid], remote[rid]):
-                return False, "Βάρδια τροποποιήθηκε από άλλον χρήστη. Ανανέωσε και δημιούργησε νέα προεπισκόπηση."
+    """The whole preview commits once or leaves all selected rows unchanged."""
+    if not plan['deltas']:
+        return False, 'Δεν υπάρχουν πραγματικές αλλαγές.'
+    if len(plan['deltas']) > MAX_ROWS:
+        return False, f'Το όριο είναι {MAX_ROWS} εγγραφές ανά εφαρμογή.'
+    saved = utils.save_assignment_batch(list(plan['old'].values()), list(plan['new'].values()))
+    if saved is None:
+        return False, 'Δεν επιβεβαιώθηκε η μαζική αλλαγή. Ανανέωσε πριν ξαναδοκιμάσεις.'
+    return True, f'Αποθηκεύτηκαν {len(saved)} αλλαγές στη Supabase.'
 
-        # Check changes against current assignments/leaves from the database,
-        # rather than trusting the session's possibly stale availability.
-        if plan["operation"] in (
-            "Αντικατάσταση εργαζομένου", "Μεταφορά ημερομηνίας",
-            "Μετατόπιση ωραρίου", "Κοινό νέο ωράριο",
-        ):
-            candidates = {str(r.get("employeeId")) for r in plan["new"].values() if r.get("employeeId")}
-            if candidates:
-                all_db_assigns = []
-                all_db_leaves = []
-                days = [as_date(r.get("date")) for r in plan["new"].values()]
-                first = min(days) - timedelta(days=1)
-                last = max(days) + timedelta(days=1)
-                emp_list = sorted(candidates)
-                for offset in range(0, len(emp_list), 50):
-                    portion = emp_list[offset:offset + 50]
-                    all_db_assigns.extend((utils.supabase.table("assignments").select("*")
-                        .in_("employeeId", portion).gte("date", first.isoformat())
-                        .lte("date", last.isoformat()).execute().data or []))
-                    all_db_leaves.extend((utils.supabase.table("leaves").select("*")
-                        .in_("employeeId", portion).lte("startDate", last.isoformat())
-                        .gte("endDate", first.isoformat()).execute().data or []))
-                checked_employees = list((utils.supabase.table("employees").select("id,name,status")
-                    .in_("id", emp_list).execute().data or []))
-                latest_rules, availability_error = fetch_rules(utils.supabase)
-                if availability_error:
-                    return False, "Αδυναμία ελέγχου διαθεσιμότητας: " + availability_error
-                problems = validate_plan(plan, all_db_assigns, checked_employees, all_db_leaves, availability=latest_rules)
-                if problems:
-                    return False, "Ακυρώθηκε λόγω αλλαγών διαθεσιμότητας: " + " · ".join(problems[:3])
-
-        applied = []
-        try:
-            for rid in ids:
-                original = remote[rid]
-                changed = dict(plan["deltas"][rid])
-                # Delta sync relies on updated_at. Move it forward explicitly.
-                if "updated_at" in original:
-                    changed["updated_at"] = datetime.now(timezone.utc).isoformat()
-                q = utils.supabase.table("assignments").update(changed).eq("id", rid)
-                if original.get("updated_at"):
-                    q = q.eq("updated_at", original["updated_at"])
-                result = q.execute()
-                if len(result.data or []) != 1:
-                    raise RuntimeError(f"Η βάρδια {rid[:8]} άλλαξε ταυτόχρονα ή δεν αποθηκεύτηκε.")
-                applied.append((rid, original, result.data[0]))
-        except Exception as exc:
-            unsuccessful_rollback = []
-            for rid, before, after in reversed(applied):
-                try:
-                    previous = {field: before.get(field) for field in plan["deltas"][rid]}
-                    if "updated_at" in after:
-                        previous["updated_at"] = datetime.now(timezone.utc).isoformat()
-                    q = utils.supabase.table("assignments").update(previous).eq("id", rid)
-                    if after.get("updated_at"):
-                        q = q.eq("updated_at", after["updated_at"])
-                    reverted = q.execute()
-                    if len(reverted.data or []) != 1:
-                        unsuccessful_rollback.append(rid[:8])
-                except Exception:
-                    unsuccessful_rollback.append(rid[:8])
-            utils.touch_app_sync_state()
-            st.session_state.last_sync_time = None
-            if unsuccessful_rollback:
-                return False, (f"Απέτυχε η μαζική αλλαγή: {exc}. ΕΠΕΙΓΟΝ: "
-                    f"{len(unsuccessful_rollback)} βάρδιες δεν επανήλθαν. "
-                    "Έλεγξε τις βάρδιες: " + ", ".join(unsuccessful_rollback))
-            return False, f"Απέτυχε η αποθήκευση: {exc}. Έγινε προσπάθεια επαναφοράς και οι προηγούμενες αλλαγές αναιρέθηκαν."
-
-        utils.add_transaction([{
-            "type": "update", "table": "assignments",
-            "old_records": [plan["old"][rid] for rid in ids],
-            "new_records": [plan["new"][rid] for rid in ids],
-        }])
-        utils.mark_data_changed()
-        utils.touch_app_sync_state()
-        utils.log_activity("ΜΑΖΙΚΗ ΑΛΛΑΓΗ GANTT", "assignments",
-            f"{len(ids)} βάρδιες · {plan['operation']}")
-        st.session_state.last_sync_time = None
-        return True, f"Αποθηκεύτηκαν {len(ids)} αλλαγές στη Supabase."
-    except Exception as exc:
-        return False, f"Η αποθήκευση ακυρώθηκε: {exc}"
 
 
 st.title("🧩 Μαζικές αλλαγές Gantt")

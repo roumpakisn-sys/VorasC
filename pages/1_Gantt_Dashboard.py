@@ -31,8 +31,6 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
-import scheduling
-from availability_rules import assess_rules, fetch_rules
 import gantt_engine
 import gantt_html
 import gantt_controls
@@ -504,25 +502,6 @@ if not presentation_mode:
                     elif not new_target_dates:
                         pass  # Η επιλογή ημερομηνιών απέτυχε: δεν γίνεται αποθήκευση.
                     else:
-                        # Check all selected employees and dates before any project
-                        # or assignment is written. A restriction blocks the entire save.
-                        qa_rules, qa_rules_error = fetch_rules(utils.supabase)
-                        if qa_rules_error:
-                            st.error("Δεν έγινε καταχώρηση: " + qa_rules_error)
-                            st.stop()
-                        for target_day in new_target_dates:
-                            for emp_id in emp_choices:
-                                permitted, reason, _ = assess_rules(
-                                    emp_id,
-                                    {"date": target_day, "startTime": str_start, "endTime": str_end},
-                                    qa_rules,
-                                )
-                                if not permitted:
-                                    st.error(
-                                        f"Δεν έγινε καταχώρηση: {utils.get_employee_name(emp_id)} "
-                                        f"· {target_day:%d/%m/%Y} · {reason}."
-                                    )
-                                    st.stop()
                         emps_to_process = emp_choices if emp_choices else [""]
                         new_assigns = []
                         pending_new_project = None
@@ -545,45 +524,11 @@ if not presentation_mode:
                         for current_assign_date in new_target_dates:
                             valid_assignments = []
 
-                            for eid in emps_to_process:
-                                if eid:
-                                    emp_name = utils.get_employee_name(eid)
-                                    if scheduling.is_on_leave(eid, current_assign_date, st.session_state.leaves_by_emp):
-                                        valid_assignments.append(
-                                            {"eid": "", "start": str_start, "end": str_end, "msg": f"[Άδεια: {emp_name}]", "emp_name": emp_name}
-                                        )
-                                        st.toast(
-                                            f"Ο/Η {emp_name} έχει άδεια στις {current_assign_date.strftime('%d/%m')}. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.",
-                                            icon="⚠️",
-                                        )
-                                    else:
-                                        day_assigns = st.session_state.assignments_by_date.get(current_assign_date, [])
-                                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                            eid, str_start, str_end, day_assigns
-                                        )
-                                        if is_conflict:
-                                            valid_assignments.append(
-                                                {"eid": "", "start": str_start, "end": str_end, "msg": f"[Εμπλοκή: {emp_name}]", "emp_name": emp_name}
-                                            )
-                                            st.toast(
-                                                f"Διπλοκράτηση {emp_name} στις {current_assign_date.strftime('%d/%m')}. Καταχωρήθηκε ως 'Χωρίς Προσωπικό'.",
-                                                icon="⚠️",
-                                            )
-                                        else:
-                                            permitted, reason, _ = assess_rules(
-                                                eid,
-                                                {"date": current_assign_date, "startTime": adj_start, "endTime": adj_end},
-                                                qa_rules,
-                                            )
-                                            if not permitted:
-                                                st.error(
-                                                    f"Δεν έγινε καταχώρηση: {emp_name} "
-                                                    f"· {current_assign_date:%d/%m/%Y} · {reason}."
-                                                )
-                                                st.stop()
-                                            valid_assignments.append({"eid": eid, "start": adj_start, "end": adj_end, "msg": msg, "emp_name": emp_name})
-                                else:
-                                    valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": "", "emp_name": ""})
+                            valid_assignments = [
+                                {"eid": eid, "start": str_start, "end": str_end, "msg": "",
+                                 "emp_name": utils.get_employee_name(eid) if eid else ""}
+                                for eid in emps_to_process
+                            ]
 
                             for va in valid_assignments:
                                 if va["msg"] == "Allowed Overlap":
@@ -614,25 +559,8 @@ if not presentation_mode:
                                 }
                                 new_assigns.append(new_assign)
 
-                        if pending_new_project:
-                            if not utils.db_insert("projects", pending_new_project, track=False):
-                                st.error("Δεν δημιουργήθηκε το νέο έργο. Δεν καταχωρήθηκε καμία τοποθέτηση.")
-                                st.stop()
-                            st.session_state.projects.append(pending_new_project)
-                        insert_ok = utils.db_insert("assignments", new_assigns, track=False)
-
-                        if insert_ok:
-                            st.session_state.assignments.extend(new_assigns)
-
-                            for new_a in new_assigns:
-                                d = new_a.get("date")
-                                if d:
-                                    if "assignments_by_date" not in st.session_state:
-                                        st.session_state.assignments_by_date = {}
-                                    if d not in st.session_state.assignments_by_date:
-                                        st.session_state.assignments_by_date[d] = []
-                                    st.session_state.assignments_by_date[d].append(new_a)
-
+                        saved = utils.save_assignment_batch([], new_assigns, project=pending_new_project)
+                        if saved is not None:
                             st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {len(new_target_dates)} ημέρα/ες!")
                             utils.mark_data_changed()
 
@@ -728,10 +656,6 @@ if not presentation_mode:
                     move_p_hour = qm_c4.button("🔽 +1 Ώρα", use_container_width=True)
 
                     if any([move_m_day, move_p_day, move_m_hour, move_p_hour]):
-                        move_rules, move_rules_error = fetch_rules(utils.supabase)
-                        if move_rules_error:
-                            st.error("Η μετακίνηση δεν εφαρμόστηκε: " + move_rules_error)
-                            st.stop()
                         delta_days = -1 if move_m_day else (1 if move_p_day else 0)
                         delta_hours = -1 if move_m_hour else (1 if move_p_hour else 0)
                         has_error = False
@@ -766,47 +690,12 @@ if not presentation_mode:
                                         break
                                     new_a["arrivalTime"] = new_arr_dt.strftime("%H:%M")
 
-                            if new_a["employeeId"]:
-                                emp_name = utils.get_employee_name(new_a["employeeId"])
-                                if scheduling.is_on_leave(new_a["employeeId"], new_a["date"], st.session_state.leaves_by_emp):
-                                    st.toast(f"Αδύνατη μετακίνηση: Ο/Η {emp_name} έχει άδεια!", icon="❌")
-                                    has_error = True
-                                    break
-
-                                day_assigns = st.session_state.assignments_by_date.get(new_a["date"], [])
-                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                    new_a["employeeId"],
-                                    new_a["startTime"],
-                                    new_a["endTime"],
-                                    day_assigns,
-                                    exclude_ids=target_group["AssignmentIds"],
-                                )
-                                if is_conflict:
-                                    st.toast(f"Αδύνατη μετακίνηση: Διπλοκράτηση {emp_name}!", icon="⚠️")
-                                    has_error = True
-                                    break
-                                new_a["startTime"], new_a["endTime"] = adj_start, adj_end
-                                permitted, reason, _ = assess_rules(
-                                    new_a["employeeId"], new_a, move_rules
-                                )
-                                if not permitted:
-                                    st.error(
-                                        f"Αδύνατη μετακίνηση: {emp_name} "
-                                        f"· {new_a['date']:%d/%m/%Y} · {reason}."
-                                    )
-                                    has_error = True
-                                    break
-                                if msg == "Allowed Overlap":
-                                    st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
-
                             old_assigns.append(orig_a)
                             new_assigns.append(new_a)
 
                         if not has_error and old_assigns:
-                            for old_a, new_a in zip(old_assigns, new_assigns):
-                                utils.db_update("assignments", new_a["id"], new_a, old_data=old_a, track=False)
-                            st.session_state.assignments = [a for a in st.session_state.assignments if a["id"] not in target_group["AssignmentIds"]]
-                            st.session_state.assignments.extend(new_assigns)
+                            if utils.save_assignment_batch(old_assigns, new_assigns) is None:
+                                st.stop()
                             clear_bar_selection()
                             st.rerun()
 
@@ -1009,23 +898,6 @@ if not presentation_mode:
                                 clear_bar_selection()
                                 st.rerun()
 
-                            # Existing placements may be edited for notes/colors without
-                            # being blocked by a subsequently declared restriction.
-                            check_edit_availability = (
-                                edit_date != target_group["Date"]
-                                or str_start != str(target_group["StartTime"])[:5]
-                                or str_end != str(target_group["EndTime"])[:5]
-                                or selected_emp_ids != original_emp_ids
-                            ) and not e_is_cancelled
-                            edit_rules = []
-                            if check_edit_availability:
-                                edit_rules, edit_rules_error = fetch_rules(utils.supabase)
-                                if edit_rules_error:
-                                    st.error("Δεν έγινε αποθήκευση: " + edit_rules_error)
-                                    st.stop()
-
-                            # Keep current weekly Gantt conflict semantics: allow only overlaps
-                            # which the existing scheduling helper already accepts.
                             original_ids = list(target_group["AssignmentIds"])
                             old_assigns = [
                                 dict(a) for a in st.session_state.assignments
@@ -1035,72 +907,13 @@ if not presentation_mode:
                                 st.error("Η αρχική μπάρα έχει αλλάξει. Κάνε ανανέωση πριν από αποθήκευση.")
                                 st.stop()
 
-                            edit_exclude_ids = set(original_ids)
                             target_recurring_id = target_group.get("RecurringId")
-                            if target_recurring_id:
-                                for a in st.session_state.assignments_by_date.get(target_group["Date"], []):
-                                    if (
-                                        a.get("recurring_id") == target_recurring_id
-                                        and a.get("projectId") == target_group["ProjectId"]
-                                        and str(a.get("startTime", ""))[:5] == str(target_group["StartTime"])[:5]
-                                        and str(a.get("endTime", ""))[:5] == str(target_group["EndTime"])[:5]
-                                        and str(a.get("arrivalTime", ""))[:5] == str(target_group.get("ArrivalTime", ""))[:5]
-                                    ):
-                                        edit_exclude_ids.add(a.get("id"))
-
                             new_assigns = []
                             has_blocking_error = False
                             emps_to_process = selected_emp_ids if selected_emp_ids else [""]
                             for current_edit_date in edit_target_dates:
                                 for eid in emps_to_process:
-                                    if eid:
-                                        emp_name = utils.get_employee_name(eid)
-                                        if scheduling.is_on_leave(
-                                            eid, current_edit_date, st.session_state.leaves_by_emp
-                                        ):
-                                            st.error(
-                                                f"Δεν έγινε αποθήκευση: Ο/Η {emp_name} έχει άδεια "
-                                                f"στις {current_edit_date:%d/%m/%Y}."
-                                            )
-                                            has_blocking_error = True
-                                            break
-
-                                        # Exclude only original bar/sibling rows; no unrelated
-                                        # assignments are ever removed from the day.
-                                        day_assigns = [
-                                            a for a in st.session_state.assignments_by_date.get(current_edit_date, [])
-                                            if a.get("id") not in edit_exclude_ids
-                                            and not a.get("is_cancelled", False)
-                                        ]
-                                        day_assigns += [
-                                            a for a in new_assigns if a.get("date") == current_edit_date
-                                        ]
-                                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                            eid, str_start, str_end, day_assigns
-                                        )
-                                        if is_conflict:
-                                            st.error(
-                                                f"Δεν έγινε αποθήκευση: Διπλοκράτηση του/της {emp_name} "
-                                                f"στις {current_edit_date:%d/%m/%Y}."
-                                            )
-                                            has_blocking_error = True
-                                            break
-                                        if check_edit_availability:
-                                            permitted, reason, _ = assess_rules(
-                                                eid,
-                                                {"date": current_edit_date, "startTime": adj_start, "endTime": adj_end},
-                                                edit_rules,
-                                            )
-                                            if not permitted:
-                                                st.error(
-                                                    f"Δεν έγινε αποθήκευση: {emp_name} "
-                                                    f"· {current_edit_date:%d/%m/%Y} · {reason}."
-                                                )
-                                                has_blocking_error = True
-                                                break
-                                    else:
-                                        adj_start, adj_end, msg = str_start, str_end, ""
-
+                                    adj_start, adj_end, msg = str_start, str_end, ""
                                     c_notes = preserve_context_notes(
                                         target_group.get("Notes", ""), edit_notes
                                     )
@@ -1136,184 +949,13 @@ if not presentation_mode:
                                 st.error("Απαιτείται σύνδεση στη Supabase για ασφαλή αποθήκευση.")
                                 st.stop()
 
-                            # FAST PATH: A single underlying assignment does not need
-                            # delete + insert + deletion log + a full database refresh.
-                            # Preserve its ID and change only the editable columns.
-                            if len(original_ids) == 1 and len(new_assigns) == 1 and pending_new_project is None:
-                                before = old_assigns[0]
-                                updated_values = {
-                                    key: value for key, value in new_assigns[0].items()
-                                    if key != "id"
-                                }
-                                if "updated_at" in before:
-                                    updated_values["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-                                def _matches_saved_edit(row):
-                                    if not row or str(row.get("id")) != str(before["id"]):
-                                        return False
-                                    for key, wanted in updated_values.items():
-                                        if key == "updated_at":
-                                            continue  # The DB may normalize timestamps.
-                                        actual = row.get(key)
-                                        if key == "date":
-                                            if utils.safe_date_parse(actual) != utils.safe_date_parse(wanted):
-                                                return False
-                                        elif str(actual or "") != str(wanted or ""):
-                                            return False
-                                    return True
-
-                                committed_row = None
-                                write_error = None
-                                try:
-                                    query = (
-                                        utils.supabase.table("assignments")
-                                        .update(utils.serialize_dates(updated_values))
-                                        .eq("id", before["id"])
-                                    )
-                                    if before.get("updated_at"):
-                                        query = query.eq("updated_at", before["updated_at"])
-                                    else:
-                                        query = (
-                                            query.eq("projectId", before["projectId"])
-                                            .eq("date", utils.safe_date_parse(before["date"]).isoformat())
-                                            .eq("startTime", before["startTime"])
-                                            .eq("endTime", before["endTime"])
-                                        )
-                                    response = query.execute()
-                                    rows = response.data or []
-                                    if len(rows) == 1 and _matches_saved_edit(rows[0]):
-                                        committed_row = rows[0]
-                                except Exception as exc:
-                                    # A transport exception does not prove a write failed.
-                                    # Read back once before declaring failure. Never retry a
-                                    # potentially committed mutation blindly.
-                                    write_error = exc
-                                if committed_row is None:
-                                    try:
-                                        checked = (
-                                            utils.supabase.table("assignments")
-                                            .select("*").eq("id", before["id"]).limit(1).execute()
-                                        )
-                                        checked_rows = checked.data or []
-                                        if len(checked_rows) == 1 and _matches_saved_edit(checked_rows[0]):
-                                            committed_row = checked_rows[0]
-                                    except Exception:
-                                        pass
-                                if committed_row is None:
-                                    if write_error:
-                                        st.error(
-                                            "Η σύνδεση με τη Supabase διακόπηκε κατά την ενημέρωση. "
-                                            "Δεν είναι βέβαιο αν ολοκληρώθηκε η αλλαγή. "
-                                            "Μην πατήσεις ξανά Αποθήκευση πριν ανανεώσεις και ελέγξεις τη μπάρα. "
-                                            f"Τεχνική λεπτομέρεια: {write_error}"
-                                        )
-                                    else:
-                                        st.error(
-                                            "Η ενημέρωση δεν επιβεβαιώθηκε. Η εγγραφή ενδέχεται "
-                                            "να άλλαξε από άλλον χρήστη. Ανανέωσε πριν ξαναδοκιμάσεις."
-                                        )
-                                    st.session_state.last_sync_time = None
-                                    st.stop()
-
-                                saved_local = dict(committed_row)
-                                saved_local["date"] = utils.safe_date_parse(saved_local.get("date")) or edit_date
-                                st.session_state.assignments = [
-                                    a if str(a.get("id")) != str(before["id"]) else saved_local
-                                    for a in st.session_state.assignments
-                                ]
-                                utils.add_transaction([{
-                                    "type": "update", "table": "assignments",
-                                    "old_records": [before], "new_records": [saved_local],
-                                }])
-                                utils.mark_data_changed()
-                                utils.touch_app_sync_state()
-                                utils.log_activity(
-                                    "ΕΠΕΞΕΡΓΑΣΙΑ ΜΠΑΡΑΣ", "assignments",
-                                    f"Γρήγορη ενημέρωση μπάρας {before['id']} · {edit_date:%d/%m/%Y}"
-                                )
-                                st.session_state.pop("edit_form_prefill", None)
-                                st.success("Η μπάρα ενημερώθηκε.")
-                                clear_bar_selection()
-                                st.session_state.skip_remote_sync_once = True
-                                st.rerun()
-
-                            # MULTI-ROW FALLBACK: Preserve the existing safe workflow
-                            # for bars whose number of worker records can change.
-                            if pending_new_project:
-                                if not utils.db_insert("projects", pending_new_project, track=False):
-                                    st.error("Δεν δημιουργήθηκε το νέο έργο. Η μπάρα έμεινε ανέπαφη.")
-                                    st.stop()
-                                st.session_state.projects.append(pending_new_project)
-
-                            if not utils.db_insert("assignments", new_assigns, track=False):
-                                st.error("Δεν δημιουργήθηκαν οι νέες τοποθετήσεις. Η παλιά μπάρα έμεινε ανέπαφη.")
-                                st.stop()
-
-                            try:
-                                response = (
-                                    utils.supabase.table("assignments")
-                                    .delete().in_("id", original_ids).execute()
-                                )
-                                remaining = (
-                                    utils.supabase.table("assignments")
-                                    .select("id").in_("id", original_ids).execute()
-                                )
-                                if remaining.data:
-                                    raise RuntimeError("Δεν διαγράφηκαν όλες οι παλιές εγγραφές.")
-                            except Exception as exc:
-                                # Best-effort compensation. Supabase REST does not offer a
-                                # transaction across separate insert/delete requests.
-                                restore_failed = False
-                                try:
-                                    existing = (
-                                        utils.supabase.table("assignments")
-                                        .select("id").in_("id", original_ids).execute()
-                                    )
-                                    still_present = {
-                                        str(a["id"]) for a in (existing.data or [])
-                                    }
-                                    missing_original = [
-                                        a for a in old_assigns
-                                        if str(a["id"]) not in still_present
-                                    ]
-                                    if missing_original:
-                                        utils.supabase.table("assignments").upsert(
-                                            utils.serialize_dates(missing_original)
-                                        ).execute()
-                                except Exception:
-                                    restore_failed = True
-                                try:
-                                    utils.supabase.table("assignments").delete().in_(
-                                        "id", [a["id"] for a in new_assigns]
-                                    ).execute()
-                                except Exception:
-                                    restore_failed = True
-                                if restore_failed:
-                                    st.error(
-                                        "Απαιτείται έλεγχος στη Supabase: η αυτόματη "
-                                        "επαναφορά δεν ολοκληρώθηκε."
-                                    )
-                                st.error(f"Η αντικατάσταση δεν ολοκληρώθηκε: {exc}.")
-                                st.session_state.last_sync_time = None
-                                st.stop()
-
-                            for a in old_assigns:
-                                utils.track_deletion("assignments", a["id"])
-                            utils.add_transaction([
-                                {"type": "delete", "table": "assignments", "records": old_assigns},
-                                {"type": "insert", "table": "assignments", "records": new_assigns},
-                            ])
-                            st.session_state.assignments = [
-                                a for a in st.session_state.assignments
-                                if a.get("id") not in original_ids
-                            ] + new_assigns
-                            utils.mark_data_changed()
-                            utils.touch_app_sync_state()
-                            utils.log_activity(
-                                "ΕΠΕΞΕΡΓΑΣΙΑ ΜΠΑΡΑΣ", "assignments",
-                                f"Αλλαγή μπάρας στις {len(edit_target_dates)} ημερομηνίες: "
-                                + ", ".join(d.strftime("%d/%m/%Y") for d in edit_target_dates)
+                            saved = utils.save_assignment_batch(
+                                old_assigns, new_assigns, project=pending_new_project,
+                                keep_worker_ids=True,
                             )
+                            if saved is None:
+                                st.stop()
+                            new_assigns = saved
                             st.session_state.pop("edit_form_prefill", None)
                             # Local data already has the confirmed replacement rows.
                             # Do not force a full employees/projects/assignments reload.
@@ -1321,3 +963,4 @@ if not presentation_mode:
                             st.success(f"Αποθηκεύτηκαν {len(new_assigns)} τοποθετήσεις σε {len(edit_target_dates)} ημερομηνίες.")
                             clear_bar_selection()
                             st.rerun()
+

@@ -1,3 +1,5 @@
+from assignment_policy import recurring_assignment
+from assignment_store import load_recurring_context
 import ast
 import calendar
 import uuid
@@ -6,14 +8,13 @@ from datetime import date, timedelta
 import streamlit as st
 
 import config
-import scheduling
 
 
 def auto_extend_recurring_patterns():
     """
     Αυτόματη επέκταση επαναλαμβανόμενων εργασιών.
 
-    Μεταφέρθηκε από το utils.py χωρίς αλλαγή λειτουργικότητας.
+    Οι νέες βάρδιες ελέγχονται με τους κοινούς κανόνες διαθεσιμότητας.
     """
     import utils
 
@@ -139,6 +140,16 @@ def auto_extend_recurring_patterns():
                 else:
                     curr_date += timedelta(days=1)
 
+            if not dates_to_assign:
+                continue
+            try:
+                recurring_context = load_recurring_context(
+                    utils.supabase, r_emps, min(dates_to_assign), max(dates_to_assign),
+                )
+            except Exception as exc:
+                st.warning(f"Δεν έγινε αυτόματη επέκταση: αδυναμία ελέγχου διαθεσιμότητας ({exc}).")
+                return
+
             for d in dates_to_assign:
                 if r_type == "Επιλεγμένες Μέρες Εβδομάδας":
                     d_name = day_map_inv[d.weekday()]
@@ -147,38 +158,12 @@ def auto_extend_recurring_patterns():
                     emps_to_process = r_emps
 
                 emps_to_process = emps_to_process if emps_to_process else [""]
-                leaves_dict = st.session_state.get('leaves_by_emp', {})
-                day_assigns = st.session_state.get('assignments_by_date', {}).get(d, [])
 
                 for eid in emps_to_process:
                     final_eid = eid
                     final_start = str_start
                     final_end = str_end
-                    conflict_note = ""
-
-                    if eid:
-                        if scheduling.is_on_leave(eid, d, leaves_dict):
-                            final_eid = ""
-                            emp_name = utils.get_employee_name(eid)
-                            conflict_note = f"[Άδεια: {emp_name}]"
-                        else:
-                            adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                eid,
-                                str_start,
-                                str_end,
-                                day_assigns,
-                            )
-                            if is_conflict:
-                                final_eid = ""
-                                emp_name = utils.get_employee_name(eid)
-                                conflict_note = f"[Εμπλοκή: {emp_name}]"
-                            else:
-                                final_start = adj_start
-                                final_end = adj_end
-
                     combined_notes = r_notes
-                    if conflict_note:
-                        combined_notes = f"{r_notes} {conflict_note}".strip()
 
                     new_assign = {
                         'id': str(uuid.uuid4()),
@@ -197,25 +182,15 @@ def auto_extend_recurring_patterns():
                         'is_general': False,
                     }
 
+                    new_assign, _ = recurring_assignment(new_assign, recurring_context, new_assignments_batch)
                     new_assignments_batch.append(new_assign)
 
-                    if 'assignments_by_date' not in st.session_state:
-                        st.session_state.assignments_by_date = {}
-                    if d not in st.session_state.assignments_by_date:
-                        st.session_state.assignments_by_date[d] = []
-                    st.session_state.assignments_by_date[d].append(new_assign)
-
     if new_assignments_batch:
-        if 'assignments' not in st.session_state:
-            st.session_state.assignments = []
-
+        # Confirm persistence before extending session state. No optimistic background writes.
+        if not utils.db_insert('assignments', new_assignments_batch, track=False):
+            st.session_state.last_sync_time = None
+            return
         st.session_state.assignments.extend(new_assignments_batch)
-        st.session_state.data_dirty = True
-        st.session_state.local_gantt_version = st.session_state.get('local_gantt_version', 0) + 1
-
-        utils.db_insert_bulk_background(
-            'assignments',
-            new_assignments_batch,
-            "ΑΥΤΟΜΑΤΗ ΕΠΕΚΤΑΣΗ",
-            f"Επεκτάθηκαν {len(new_assignments_batch)} βάρδιες στο παρασκήνιο",
-        )
+        for row in new_assignments_batch:
+            st.session_state.setdefault('assignments_by_date', {}).setdefault(row['date'], []).append(row)
+        utils.mark_data_changed()

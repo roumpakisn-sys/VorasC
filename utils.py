@@ -286,6 +286,35 @@ def sync_data_incremental():
 # ΣΥΝΕΧΕΙΑ ΛΕΙΤΟΥΡΓΙΩΝ ΒΑΣΗΣ
 # ==========================================
 
+def save_assignment_batch(before, proposed, project=None, keep_worker_ids=False):
+    """Update session and undo history only after the atomic write is confirmed."""
+    from assignment_store import AssignmentSaveError, preserve_ids, save_changes, undo_actions
+    if keep_worker_ids:
+        proposed = preserve_ids(before, proposed)
+    try:
+        result = save_changes(supabase, before, proposed, project=project)
+    except AssignmentSaveError as exc:
+        st.error(str(exc))
+        st.session_state.last_sync_time = None
+        return None
+    saved = [{**row, 'date': safe_date_parse(row.get('date'))} for row in result['rows']]
+    replaced = {str(r['id']) for r in before} | {str(r['id']) for r in saved}
+    st.session_state.assignments = [r for r in st.session_state.get('assignments', [])
+                                    if str(r.get('id')) not in replaced] + saved
+    if project:
+        st.session_state.projects.append(project)
+    actions = undo_actions(before, saved)
+    if project:
+        actions.insert(0, {'type': 'insert', 'table': 'projects', 'records': [project]})
+    add_transaction(actions)
+    mark_data_changed()
+    touch_app_sync_state()
+    log_activity('ΑΠΟΘΗΚΕΥΣΗ GANTT', 'assignments', f'{len(saved)} βάρδιες')
+    # Rebuild derived indexes on the next rerun from confirmed rows.
+    st.session_state.skip_remote_sync_once = True
+    return saved
+
+
 def db_insert_bulk_background(table, data, log_action="ΜΑΖΙΚΗ ΠΡΟΣΘΗΚΗ", log_details=""):
     if not supabase or not data: return
 
@@ -547,3 +576,4 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     """
     from ui_shell import setup_shared_ui as _setup_shared_ui
     return _setup_shared_ui(show_menu=show_menu, menu_options=menu_options)
+
