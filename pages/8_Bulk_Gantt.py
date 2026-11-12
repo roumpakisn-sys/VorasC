@@ -15,6 +15,7 @@ import streamlit as st
 st.set_page_config(page_title="Μαζικές Αλλαγές Gantt | STAFF.PRO", page_icon="🧩", layout="wide")
 
 import utils
+from availability_rules import assess_rules, fetch_rules
 
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
@@ -185,7 +186,7 @@ def build_plan(selected_groups, operation, options):
     return {"old": old, "new": new, "deltas": deltas, "skipped": skipped, "operation": operation}
 
 
-def validate_plan(plan, assignments, employees, leaves):
+def validate_plan(plan, assignments, employees, leaves, availability=None):
     problems = []
     if len(plan["deltas"]) > MAX_ROWS:
         return [f"Το όριο είναι {MAX_ROWS} εγγραφές ανά εφαρμογή. Επίλεξε λιγότερες μπάρες."]
@@ -210,6 +211,10 @@ def validate_plan(plan, assignments, employees, leaves):
         emp = employee_map.get(eid)
         if not emp or emp.get("status", "Ενεργός") != "Ενεργός":
             problems.append(f"Ανενεργός/άγνωστος εργαζόμενος στη βάρδια {rec_id[:8]}.")
+            continue
+        permitted, reason, _ = assess_rules(eid, record, availability)
+        if not permitted:
+            problems.append(f"Μη διαθεσιμότητα: {emp.get('name', eid)} · {as_date(record.get('date')):%d/%m/%Y} · {reason}.")
             continue
         try:
             start, end = time_interval(record)
@@ -287,7 +292,10 @@ def save_plan(plan):
                         .gte("endDate", first.isoformat()).execute().data or []))
                 checked_employees = list((utils.supabase.table("employees").select("id,name,status")
                     .in_("id", emp_list).execute().data or []))
-                problems = validate_plan(plan, all_db_assigns, checked_employees, all_db_leaves)
+                latest_rules, availability_error = fetch_rules(utils.supabase)
+                if availability_error:
+                    return False, "Αδυναμία ελέγχου διαθεσιμότητας: " + availability_error
+                problems = validate_plan(plan, all_db_assigns, checked_employees, all_db_leaves, availability=latest_rules)
                 if problems:
                     return False, "Ακυρώθηκε λόγω αλλαγών διαθεσιμότητας: " + " · ".join(problems[:3])
 
@@ -457,7 +465,16 @@ if st.button("🔎 Προεπισκόπηση αλλαγών", type="primary", d
     else:
         try:
             candidate = build_plan(chosen, operation, options)
-            problems = validate_plan(candidate, st.session_state.assignments, st.session_state.employees, st.session_state.leaves)
+            latest_rules, availability_error = fetch_rules(utils.supabase)
+            if availability_error:
+                st.error("Αδυναμία ελέγχου διαθεσιμότητας: " + availability_error)
+                st.session_state.pop("bulk_gantt_preview", None)
+                st.stop()
+            problems = validate_plan(
+                candidate, st.session_state.assignments,
+                st.session_state.employees, st.session_state.leaves,
+                availability=latest_rules,
+            )
             if not candidate["deltas"]:
                 st.warning("Δεν προέκυψε καμία αλλαγή στις επιλεγμένες μπάρες.")
                 st.session_state.pop("bulk_gantt_preview", None)
