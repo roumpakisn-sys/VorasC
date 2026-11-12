@@ -10,6 +10,7 @@ from st_click_detector import click_detector
 import config
 import utils
 import scheduling
+from availability_rules import assess_rules, fetch_rules
 import gantt_engine
 import gantt_html
 import gantt_filters
@@ -705,6 +706,24 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
             if str_start >= str_end:
                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
             else:
+                mobile_rules, mobile_rules_error = fetch_rules(utils.supabase)
+                if mobile_rules_error:
+                    st.error("Δεν έγινε καταχώρηση: " + mobile_rules_error)
+                    st.stop()
+                for day_offset in range(int(duration_days)):
+                    target_date = add_date + timedelta(days=day_offset)
+                    for employee_id in emp_choices:
+                        allowed, reason, _ = assess_rules(
+                            employee_id,
+                            {"date": target_date, "startTime": str_start, "endTime": str_end},
+                            mobile_rules,
+                        )
+                        if not allowed:
+                            st.error(
+                                f"Δεν έγινε καταχώρηση: {utils.get_employee_name(employee_id)} "
+                                f"· {target_date:%d/%m/%Y} · {reason}."
+                            )
+                            st.stop()
                 final_proj_id = _make_or_get_project(proj_choice, custom_proj_name, color_choice)
                 emps_to_process = emp_choices if emp_choices else [""]
                 new_assigns = []
@@ -751,6 +770,17 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                                         icon="⚠️",
                                     )
                                 else:
+                                    allowed, reason, _ = assess_rules(
+                                        eid,
+                                        {"date": current_assign_date, "startTime": adj_start, "endTime": adj_end},
+                                        mobile_rules,
+                                    )
+                                    if not allowed:
+                                        st.error(
+                                            f"Δεν έγινε καταχώρηση: {emp_name} "
+                                            f"· {current_assign_date:%d/%m/%Y} · {reason}."
+                                        )
+                                        st.stop()
                                     valid_assignments.append({
                                         "eid": eid,
                                         "start": adj_start,
@@ -973,9 +1003,21 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                     if str_start >= str_end:
                         st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                     else:
-                        final_edit_proj_id = _make_or_get_project(edit_proj, edit_custom_proj_name, edit_color)
-
                         selected_emp_ids = normalize_id_list(edit_emps)
+                        original_emp_ids = normalize_id_list([eid for eid in target_group["EmployeeIds"] if eid])
+                        check_edit_availability = (
+                            edit_date != target_group["Date"]
+                            or str_start != str(target_group["StartTime"])[:5]
+                            or str_end != str(target_group["EndTime"])[:5]
+                            or selected_emp_ids != original_emp_ids
+                        ) and not e_is_cancelled
+                        mobile_edit_rules = []
+                        if check_edit_availability:
+                            mobile_edit_rules, edit_rules_error = fetch_rules(utils.supabase)
+                            if edit_rules_error:
+                                st.error("Δεν έγινε αποθήκευση: " + edit_rules_error)
+                                st.stop()
+                        final_edit_proj_id = _make_or_get_project(edit_proj, edit_custom_proj_name, edit_color)
                         emps_to_process = selected_emp_ids if selected_emp_ids else [""]
 
                         normalized_cancel_reason = e_cancel_reason if e_is_cancelled else ""
@@ -1020,6 +1062,19 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     st.error(f"Δεν έγινε αποθήκευση: Διπλοκράτηση για {emp_name}.")
                                     has_blocking_error = True
                                     break
+                                if check_edit_availability:
+                                    allowed, reason, _ = assess_rules(
+                                        eid,
+                                        {"date": edit_date, "startTime": adj_start, "endTime": adj_end},
+                                        mobile_edit_rules,
+                                    )
+                                    if not allowed:
+                                        st.error(
+                                            f"Δεν έγινε αποθήκευση: {emp_name} "
+                                            f"· {edit_date:%d/%m/%Y} · {reason}."
+                                        )
+                                        has_blocking_error = True
+                                        break
 
                                 valid_assignments.append({
                                     "eid": eid,
