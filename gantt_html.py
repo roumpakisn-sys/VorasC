@@ -6,6 +6,7 @@ import streamlit as st
 
 import config
 import utils
+from availability_rules import fetch_rules, matches, rule_window
 
 
 def get_local_today():
@@ -30,6 +31,15 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     emp_short_names = {}
     employee_details_by_id = {}
     external_crews = []
+    # Always load real persisted rules; an unavailable table must never be treated as all-available.
+    availability_rules, availability_error = fetch_rules(utils.supabase)
+    rules_ready = not availability_error
+    if not rules_ready:
+        st.warning(
+            "Δεν είναι δυνατός ο έλεγχος δηλωμένης διαθεσιμότητας: "
+            + availability_error
+            + " Οι λίστες «ΔΙΑΘΕΣΙΜΟΙ» δεν εμφανίζονται μέχρι να αποκατασταθεί η σύνδεση."
+        )
     for emp in st.session_state.employees:
         eid = emp["id"]
         employee_details_by_id[eid] = emp
@@ -109,6 +119,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         available_after_6 = []
         available_after_10 = []
         unavailable_staff = []
+        restricted_staff = []
         day_assigns = st.session_state.assignments_by_date.get(curr_date, [])
         limit_6 = 6 * 60
         limit_10 = 10 * 60
@@ -134,6 +145,42 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
             latest_end_minutes = max(end_minutes) if end_minutes else None
 
+            # Daily, persistent availability restrictions are distinct from
+            # ordinary shift occupancy and official leave.
+            employee_rules = [
+                r for r in availability_rules
+                if isinstance(r, dict) and matches(r, curr_date, eid)
+                and r.get("kind") in ("unavailable", "only_available")
+            ] if rules_ready else []
+            entire_day_blocked = False
+            partial_rules = []
+            for rule in employee_rules:
+                window = rule_window(rule)
+                if window is None:
+                    # Invalid stored rules must never result in a green "available" label.
+                    entire_day_blocked = True
+                    continue
+                if rule.get("kind") == "unavailable" and window == (0, 1440):
+                    entire_day_blocked = True
+                elif window != (0, 1440):
+                    kind_label = "μόνο" if rule.get("kind") == "only_available" else "όχι"
+                    partial_rules.append(
+                        f"{kind_label} {window[0] // 60:02d}:{window[0] % 60:02d}"
+                        f"–{window[1] // 60:02d}:{window[1] % 60:02d}"
+                    )
+            if entire_day_blocked and not employee_day_assigns:
+                unavailable_staff.append(
+                    f"{html_utils.escape(str(emp_label))} "
+                    "<small style='font-size: 9px; font-weight: normal;'>"
+                    "(δηλωμένη μη διαθεσιμότητα)</small>"
+                )
+            if partial_rules and not entire_day_blocked:
+                restricted_staff.append(
+                    f"{html_utils.escape(str(emp_label))} "
+                    "<small style='font-size: 9px; font-weight: normal;'>"
+                    f"({html_utils.escape(', '.join(partial_rules))})</small>"
+                )
+
             # Δύο κατηγορίες διαθεσιμότητας:
             # 1) ΔΙΑΘΕΣΙΜΟΙ:
             #    δεν έχουν βάρδια στη μέρα ή η τελευταία βάρδια τους λήγει έως 06:00.
@@ -141,10 +188,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             #    η τελευταία βάρδια τους λήγει μετά τις 06:00 και έως 10:00.
             #
             # Διατηρούμε ΑΚΡΙΒΩΣ την υπάρχουσα λογική διαθεσιμότητας.
-            if latest_end_minutes is None or latest_end_minutes <= limit_6:
-                available_after_6.append(emp_label)
-            elif latest_end_minutes <= limit_10:
-                available_after_10.append(emp_label)
+            if rules_ready and not entire_day_blocked and not partial_rules:
+                if latest_end_minutes is None or latest_end_minutes <= limit_6:
+                    available_after_6.append(emp_label)
+                elif latest_end_minutes <= limit_10:
+                    available_after_10.append(emp_label)
 
             # Η τρίτη λίστα περιλαμβάνει ΟΛΟΥΣ όσους έχουν ανατεθεί
             # σε τουλάχιστον μία ενεργή βάρδια, ανεξάρτητα από ώρα λήξης.
@@ -163,9 +211,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 if total_minutes > 0:
                     hours, minutes = divmod(total_minutes, 60)
                     hours_label = f"{hours} ώρ." + (f" {minutes} λ." if minutes else "")
+                    declared_label = " · δηλωμένη μη διαθεσιμότητα" if entire_day_blocked else ""
                     unavailable_staff.append(
                         f"{html_utils.escape(str(emp_label))} "
-                        f"<small style='font-size: 9px; font-weight: normal;'>({hours_label})</small>"
+                        f"<small style='font-size: 9px; font-weight: normal;'>"
+                        f"({hours_label}{declared_label})</small>"
                     )
 
         label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
@@ -175,6 +225,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             label_html += f"<div style='color: #15803d; margin-bottom: 8px; font-size: 11px;'><b>ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(available_after_6)}</div>"
         if available_after_10:
             label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_after_10)}</div>"
+        if restricted_staff:
+            label_html += (
+                "<div style='color: #7c3aed; margin-top: 8px; font-size: 11px;'>"
+                f"<b>ΠΕΡΙΟΡΙΣΜΕΝΗ ΔΙΑΘΕΣΙΜΟΤΗΤΑ:</b><br>{'<br>'.join(restricted_staff)}</div>"
+            )
         if unavailable_staff:
             label_html += f"<div style='color: #b45309; margin-top: 8px; font-size: 11px;'><b>ΜΗ ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(unavailable_staff)}</div>"
 
