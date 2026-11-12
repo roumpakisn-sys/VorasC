@@ -665,8 +665,6 @@ if not presentation_mode:
                     st.session_state.trigger_scroll = True
                     st.session_state.skip_remote_sync_once = True
                     st.session_state.pop("edit_form_prefill", None)
-                    st.session_state["edit_date_mode"] = GANTT_DATES_CONTINUOUS
-                    st.session_state["edit_specific_count"] = 2
                     st.rerun()
 
                 if selected_key != "":
@@ -679,30 +677,10 @@ if not presentation_mode:
                         help="Συμπληρώνει τη φόρμα επεξεργασίας χωρίς αποθήκευση.",
                     ):
                         st.session_state["edit_form_prefill"] = dict(edit_clip)
-                        st.session_state["edit_date_mode"] = edit_clip.get("mode", GANTT_DATES_CONTINUOUS)
-                        st.session_state["edit_specific_count"] = max(
-                            2, len(edit_clip.get("extra_dates", [])) + 1
-                        )
                         st.session_state["edit_form_revision"] = st.session_state.get("edit_form_revision", 0) + 1
                         st.rerun()
                     edit_prefill = st.session_state.get("edit_form_prefill") or {}
-                    edit_mode = st.radio(
-                        "Ημερομηνίες εφαρμογής επεξεργασίας",
-                        [GANTT_DATES_CONTINUOUS, GANTT_DATES_SPECIFIC],
-                        horizontal=True, key="edit_date_mode",
-                    )
-                    edit_specific_count = 1
-                    if edit_mode == GANTT_DATES_SPECIFIC:
-                        edit_specific_count = st.number_input(
-                            "Πόσες συγκεκριμένες ημερομηνίες;",
-                            min_value=2, max_value=20, value=2, step=1,
-                            key="edit_specific_count",
-                        )
-                    st.caption(
-                        "Η αρχική μπάρα ενημερώνεται στην πρώτη ημερομηνία. "
-                        "Στις επιπλέον ημερομηνίες δημιουργούνται νέες, ανεξάρτητες τοποθετήσεις. "
-                        "Οι άλλες υπάρχουσες βάρδιες δεν διαγράφονται."
-                    )
+                    # Η επεξεργασία μπάρας αφορά αποκλειστικά μία ημερομηνία.
                     edit_form_revision = st.session_state.get("edit_form_revision", 0)
                     edit_key = hashlib.sha1(selected_key.encode("utf-8")).hexdigest()[:12]
                     edit_key = f"{edit_key}_{edit_form_revision}"
@@ -784,30 +762,10 @@ if not presentation_mode:
 
                     with st.form(f"quick_edit_{edit_key}"):
                         edit_date = st.date_input(
-                            "Πρώτη ημερομηνία επεξεργασίας",
+                            "Αλλαγή Ημερομηνίας",
                             value=_form_prefill_date(edit_prefill.get("first_date"), target_group["Date"]),
                             key=f"edit_date_{edit_key}",
                         )
-                        edit_duration = 1
-                        extra_edit_dates = []
-                        if edit_mode == GANTT_DATES_CONTINUOUS:
-                            edit_duration = st.number_input(
-                                "Διάρκεια (Συνεχόμενες Ημέρες)",
-                                min_value=1, max_value=365, step=1,
-                                value=max(1, min(365, int(edit_prefill.get("duration", 1)))),
-                                key=f"edit_duration_{edit_key}",
-                            )
-                        else:
-                            saved_extra = edit_prefill.get("extra_dates", [])
-                            for i in range(int(edit_specific_count) - 1):
-                                initial_day = (
-                                    _form_prefill_date(saved_extra[i], edit_date + timedelta(days=i + 1))
-                                    if i < len(saved_extra) else edit_date + timedelta(days=i + 1)
-                                )
-                                extra_edit_dates.append(st.date_input(
-                                    f"{i + 2}η ημερομηνία επεξεργασίας", value=initial_day,
-                                    key=f"edit_specific_{edit_key}_{i}",
-                                ))
                         proj_ids = [p["id"] for p in st.session_state.projects]
                         default_proj_idx = proj_ids.index(target_group["ProjectId"]) if target_group["ProjectId"] in proj_ids else 0
                         edit_proj = st.selectbox(
@@ -918,12 +876,6 @@ if not presentation_mode:
                             )
 
                         st.markdown("---")
-                        confirm_multi_date_edit = st.checkbox(
-                            "Επιβεβαιώνω την εφαρμογή σε περισσότερες από μία ημέρες "
-                            "(η αρχική μπάρα θα ενημερωθεί και θα προστεθούν αντίγραφα).",
-                            value=False,
-                            key=f"edit_confirm_multi_{edit_key}",
-                        )
                         col_btn1, col_btn2, col_btn3 = st.columns(3)
                         with col_btn1:
                             save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
@@ -934,8 +886,8 @@ if not presentation_mode:
 
                         if copy_edit:
                             _save_placement_clipboard(_form_clipboard_payload(
-                                first_date=edit_date, mode=edit_mode,
-                                duration=edit_duration, extra_dates=extra_edit_dates,
+                                first_date=edit_date, mode=GANTT_DATES_CONTINUOUS,
+                                duration=1, extra_dates=[],
                                 project_id=edit_proj, custom_project=edit_custom_proj_name,
                                 employee_ids=edit_emps, color_name=edit_color,
                                 notes=edit_notes, is_general=e_is_general,
@@ -955,24 +907,11 @@ if not presentation_mode:
                             str_arrival = new_t_arrival.strftime("%H:%M") if use_arr_edit else ""
                             str_start = new_t_start.strftime("%H:%M")
                             str_end = new_t_end.strftime("%H:%M")
-                            try:
-                                edit_target_dates = _gantt_target_dates(
-                                    edit_date, edit_mode, edit_duration, extra_edit_dates
-                                )
-                            except ValueError as exc:
-                                st.error(str(exc))
-                                st.stop()
+                            edit_target_dates = [edit_date]
 
                             if str_start >= str_end:
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                                 st.stop()
-                            if len(edit_target_dates) > 1 and not confirm_multi_date_edit:
-                                st.error(
-                                    "Επίλεξες πολλαπλές ημερομηνίες. Ενεργοποίησε "
-                                    "την επιβεβαίωση για να αποθηκευτούν οι επιπλέον τοποθετήσεις."
-                                )
-                                st.stop()
-
                             # Resolve project before calculating anything; don't create it until
                             # all dates/employees have passed the blocking validation.
                             pending_new_project = None
