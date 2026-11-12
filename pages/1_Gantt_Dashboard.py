@@ -32,6 +32,7 @@ if not st.session_state.get("authenticated"):
 import config
 import utils
 import scheduling
+from availability_rules import assess_rules, fetch_rules
 import gantt_engine
 import gantt_html
 import gantt_controls
@@ -503,8 +504,28 @@ if not presentation_mode:
                     elif not new_target_dates:
                         pass  # Η επιλογή ημερομηνιών απέτυχε: δεν γίνεται αποθήκευση.
                     else:
+                        # Check all selected employees and dates before any project
+                        # or assignment is written. A restriction blocks the entire save.
+                        qa_rules, qa_rules_error = fetch_rules(utils.supabase)
+                        if qa_rules_error:
+                            st.error("Δεν έγινε καταχώρηση: " + qa_rules_error)
+                            st.stop()
+                        for target_day in new_target_dates:
+                            for emp_id in emp_choices:
+                                permitted, reason, _ = assess_rules(
+                                    emp_id,
+                                    {"date": target_day, "startTime": str_start, "endTime": str_end},
+                                    qa_rules,
+                                )
+                                if not permitted:
+                                    st.error(
+                                        f"Δεν έγινε καταχώρηση: {utils.get_employee_name(emp_id)} "
+                                        f"· {target_day:%d/%m/%Y} · {reason}."
+                                    )
+                                    st.stop()
                         emps_to_process = emp_choices if emp_choices else [""]
                         new_assigns = []
+                        pending_new_project = None
 
                         if custom_proj_name.strip():
                             c_name = custom_proj_name.strip()
@@ -517,8 +538,7 @@ if not presentation_mode:
                             else:
                                 final_proj_id = str(uuid.uuid4())
                                 new_p = {"id": final_proj_id, "name": c_name, "color": config.BASIC_COLORS[color_choice]}
-                                st.session_state.projects.append(new_p)
-                                utils.db_insert("projects", new_p, track=False)
+                                pending_new_project = new_p
                         else:
                             final_proj_id = proj_choice
 
@@ -550,6 +570,17 @@ if not presentation_mode:
                                                 icon="⚠️",
                                             )
                                         else:
+                                            permitted, reason, _ = assess_rules(
+                                                eid,
+                                                {"date": current_assign_date, "startTime": adj_start, "endTime": adj_end},
+                                                qa_rules,
+                                            )
+                                            if not permitted:
+                                                st.error(
+                                                    f"Δεν έγινε καταχώρηση: {emp_name} "
+                                                    f"· {current_assign_date:%d/%m/%Y} · {reason}."
+                                                )
+                                                st.stop()
                                             valid_assignments.append({"eid": eid, "start": adj_start, "end": adj_end, "msg": msg, "emp_name": emp_name})
                                 else:
                                     valid_assignments.append({"eid": "", "start": str_start, "end": str_end, "msg": "", "emp_name": ""})
@@ -583,6 +614,11 @@ if not presentation_mode:
                                 }
                                 new_assigns.append(new_assign)
 
+                        if pending_new_project:
+                            if not utils.db_insert("projects", pending_new_project, track=False):
+                                st.error("Δεν δημιουργήθηκε το νέο έργο. Δεν καταχωρήθηκε καμία τοποθέτηση.")
+                                st.stop()
+                            st.session_state.projects.append(pending_new_project)
                         insert_ok = utils.db_insert("assignments", new_assigns, track=False)
 
                         if insert_ok:
@@ -692,6 +728,10 @@ if not presentation_mode:
                     move_p_hour = qm_c4.button("🔽 +1 Ώρα", use_container_width=True)
 
                     if any([move_m_day, move_p_day, move_m_hour, move_p_hour]):
+                        move_rules, move_rules_error = fetch_rules(utils.supabase)
+                        if move_rules_error:
+                            st.error("Η μετακίνηση δεν εφαρμόστηκε: " + move_rules_error)
+                            st.stop()
                         delta_days = -1 if move_m_day else (1 if move_p_day else 0)
                         delta_hours = -1 if move_m_hour else (1 if move_p_hour else 0)
                         has_error = False
@@ -746,6 +786,16 @@ if not presentation_mode:
                                     has_error = True
                                     break
                                 new_a["startTime"], new_a["endTime"] = adj_start, adj_end
+                                permitted, reason, _ = assess_rules(
+                                    new_a["employeeId"], new_a, move_rules
+                                )
+                                if not permitted:
+                                    st.error(
+                                        f"Αδύνατη μετακίνηση: {emp_name} "
+                                        f"· {new_a['date']:%d/%m/%Y} · {reason}."
+                                    )
+                                    has_error = True
+                                    break
                                 if msg == "Allowed Overlap":
                                     st.toast(f"ℹ️ Επιτράπηκε επικάλυψη ωραρίου ({emp_name}).", icon="ℹ️")
 
@@ -959,6 +1009,21 @@ if not presentation_mode:
                                 clear_bar_selection()
                                 st.rerun()
 
+                            # Existing placements may be edited for notes/colors without
+                            # being blocked by a subsequently declared restriction.
+                            check_edit_availability = (
+                                edit_date != target_group["Date"]
+                                or str_start != str(target_group["StartTime"])[:5]
+                                or str_end != str(target_group["EndTime"])[:5]
+                                or selected_emp_ids != original_emp_ids
+                            ) and not e_is_cancelled
+                            edit_rules = []
+                            if check_edit_availability:
+                                edit_rules, edit_rules_error = fetch_rules(utils.supabase)
+                                if edit_rules_error:
+                                    st.error("Δεν έγινε αποθήκευση: " + edit_rules_error)
+                                    st.stop()
+
                             # Keep current weekly Gantt conflict semantics: allow only overlaps
                             # which the existing scheduling helper already accepts.
                             original_ids = list(target_group["AssignmentIds"])
@@ -1020,6 +1085,19 @@ if not presentation_mode:
                                             )
                                             has_blocking_error = True
                                             break
+                                        if check_edit_availability:
+                                            permitted, reason, _ = assess_rules(
+                                                eid,
+                                                {"date": current_edit_date, "startTime": adj_start, "endTime": adj_end},
+                                                edit_rules,
+                                            )
+                                            if not permitted:
+                                                st.error(
+                                                    f"Δεν έγινε αποθήκευση: {emp_name} "
+                                                    f"· {current_edit_date:%d/%m/%Y} · {reason}."
+                                                )
+                                                has_blocking_error = True
+                                                break
                                     else:
                                         adj_start, adj_end, msg = str_start, str_end, ""
 
