@@ -63,6 +63,7 @@ def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exc
     emp_assigns = [
         a for a in day_assignments
         if a.get('employeeId') == employee_id and a.get('id') not in exclude_ids
+        and not a.get('is_cancelled', False)
     ]
 
     allowed_overlap = False
@@ -87,3 +88,4 @@ def check_and_resolve_conflict(employee_id, t_start, t_end, day_assignments, exc
                 )
 
     return t_start, t_end, False, "Allowed Overlap" if allowed_overlap else ""
+

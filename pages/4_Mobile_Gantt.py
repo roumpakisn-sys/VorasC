@@ -9,8 +9,6 @@ from st_click_detector import click_detector
 
 import config
 import utils
-import scheduling
-from availability_rules import assess_rules, fetch_rules
 import gantt_engine
 import gantt_html
 import gantt_filters
@@ -242,7 +240,7 @@ def _replace_local_assignments(old_ids, new_assigns=None):
 def _make_or_get_project(project_id, custom_name, color_name):
     custom_name = (custom_name or "").strip()
     if not custom_name:
-        return project_id
+        return project_id, None
 
     existing = next(
         (
@@ -252,7 +250,7 @@ def _make_or_get_project(project_id, custom_name, color_name):
         None,
     )
     if existing:
-        return existing["id"]
+        return existing["id"], None
 
     new_project_id = str(uuid.uuid4())
     new_project = {
@@ -260,9 +258,7 @@ def _make_or_get_project(project_id, custom_name, color_name):
         "name": custom_name,
         "color": config.BASIC_COLORS[color_name],
     }
-    st.session_state.projects.append(new_project)
-    utils.db_insert("projects", new_project, track=False)
-    return new_project_id
+    return new_project_id, new_project
 
 
 def _normalize_mobile_project_list(values, allowed_ids):
@@ -706,25 +702,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
             if str_start >= str_end:
                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
             else:
-                mobile_rules, mobile_rules_error = fetch_rules(utils.supabase)
-                if mobile_rules_error:
-                    st.error("Δεν έγινε καταχώρηση: " + mobile_rules_error)
-                    st.stop()
-                for day_offset in range(int(duration_days)):
-                    target_date = add_date + timedelta(days=day_offset)
-                    for employee_id in emp_choices:
-                        allowed, reason, _ = assess_rules(
-                            employee_id,
-                            {"date": target_date, "startTime": str_start, "endTime": str_end},
-                            mobile_rules,
-                        )
-                        if not allowed:
-                            st.error(
-                                f"Δεν έγινε καταχώρηση: {utils.get_employee_name(employee_id)} "
-                                f"· {target_date:%d/%m/%Y} · {reason}."
-                            )
-                            st.stop()
-                final_proj_id = _make_or_get_project(proj_choice, custom_proj_name, color_choice)
+                final_proj_id, pending_new_project = _make_or_get_project(proj_choice, custom_proj_name, color_choice)
                 emps_to_process = emp_choices if emp_choices else [""]
                 new_assigns = []
 
@@ -732,70 +710,11 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                     current_assign_date = add_date + timedelta(days=day_offset)
                     valid_assignments = []
 
-                    for eid in emps_to_process:
-                        if eid:
-                            emp_name = utils.get_employee_name(eid)
-
-                            if scheduling.is_on_leave(eid, current_assign_date, st.session_state.leaves_by_emp):
-                                valid_assignments.append({
-                                    "eid": "",
-                                    "start": str_start,
-                                    "end": str_end,
-                                    "msg": f"[Άδεια: {emp_name}]",
-                                    "emp_name": emp_name,
-                                })
-                                st.toast(
-                                    f"Ο/Η {emp_name} έχει άδεια στις {current_assign_date.strftime('%d/%m')}. Καταχωρήθηκε ως χωρίς προσωπικό.",
-                                    icon="⚠️",
-                                )
-                            else:
-                                day_assigns = st.session_state.assignments_by_date.get(current_assign_date, [])
-                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                    eid,
-                                    str_start,
-                                    str_end,
-                                    day_assigns,
-                                )
-
-                                if is_conflict:
-                                    valid_assignments.append({
-                                        "eid": "",
-                                        "start": str_start,
-                                        "end": str_end,
-                                        "msg": f"[Εμπλοκή: {emp_name}]",
-                                        "emp_name": emp_name,
-                                    })
-                                    st.toast(
-                                        f"Διπλοκράτηση {emp_name} στις {current_assign_date.strftime('%d/%m')}. Καταχωρήθηκε ως χωρίς προσωπικό.",
-                                        icon="⚠️",
-                                    )
-                                else:
-                                    allowed, reason, _ = assess_rules(
-                                        eid,
-                                        {"date": current_assign_date, "startTime": adj_start, "endTime": adj_end},
-                                        mobile_rules,
-                                    )
-                                    if not allowed:
-                                        st.error(
-                                            f"Δεν έγινε καταχώρηση: {emp_name} "
-                                            f"· {current_assign_date:%d/%m/%Y} · {reason}."
-                                        )
-                                        st.stop()
-                                    valid_assignments.append({
-                                        "eid": eid,
-                                        "start": adj_start,
-                                        "end": adj_end,
-                                        "msg": msg,
-                                        "emp_name": emp_name,
-                                    })
-                        else:
-                            valid_assignments.append({
-                                "eid": "",
-                                "start": str_start,
-                                "end": str_end,
-                                "msg": "",
-                                "emp_name": "",
-                            })
+                    valid_assignments = [
+                        {"eid": eid, "start": str_start, "end": str_end, "msg": "",
+                         "emp_name": utils.get_employee_name(eid) if eid else ""}
+                        for eid in emps_to_process
+                    ]
 
                     for va in valid_assignments:
                         if va["msg"] == "Allowed Overlap":
@@ -825,11 +744,8 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "is_general": bool(is_general),
                         })
 
-                insert_ok = utils.db_insert("assignments", new_assigns, track=False)
-
-                if insert_ok:
-                    _add_assignment_to_local_indexes(new_assigns)
-                    utils.mark_data_changed()
+                saved = utils.save_assignment_batch([], new_assigns, project=pending_new_project)
+                if saved is not None:
                     st.session_state.mobile_qa_rc += 1
                     clear_mobile_selection()
                     st.session_state.skip_remote_sync_once = True
@@ -1005,19 +921,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                     else:
                         selected_emp_ids = normalize_id_list(edit_emps)
                         original_emp_ids = normalize_id_list([eid for eid in target_group["EmployeeIds"] if eid])
-                        check_edit_availability = (
-                            edit_date != target_group["Date"]
-                            or str_start != str(target_group["StartTime"])[:5]
-                            or str_end != str(target_group["EndTime"])[:5]
-                            or selected_emp_ids != original_emp_ids
-                        ) and not e_is_cancelled
-                        mobile_edit_rules = []
-                        if check_edit_availability:
-                            mobile_edit_rules, edit_rules_error = fetch_rules(utils.supabase)
-                            if edit_rules_error:
-                                st.error("Δεν έγινε αποθήκευση: " + edit_rules_error)
-                                st.stop()
-                        final_edit_proj_id = _make_or_get_project(edit_proj, edit_custom_proj_name, edit_color)
+                        final_edit_proj_id, pending_new_project = _make_or_get_project(edit_proj, edit_custom_proj_name, edit_color)
                         emps_to_process = selected_emp_ids if selected_emp_ids else [""]
 
                         normalized_cancel_reason = e_cancel_reason if e_is_cancelled else ""
@@ -1025,72 +929,11 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                         valid_assignments = []
                         has_blocking_error = False
 
-                        for eid in emps_to_process:
-                            if eid:
-                                emp_name = utils.get_employee_name(eid)
-
-                                if scheduling.is_on_leave(eid, edit_date, st.session_state.leaves_by_emp):
-                                    st.error(f"Δεν έγινε αποθήκευση: Ο/Η {emp_name} έχει άδεια.")
-                                    has_blocking_error = True
-                                    break
-
-                                day_assigns = st.session_state.assignments_by_date.get(edit_date, [])
-                                edit_exclude_ids = list(target_group["AssignmentIds"])
-                                target_recurring_id = target_group.get("RecurringId")
-
-                                if target_recurring_id:
-                                    for a in day_assigns:
-                                        if (
-                                            a.get("recurring_id") == target_recurring_id
-                                            and a.get("projectId") == target_group["ProjectId"]
-                                            and str(a.get("startTime", ""))[:5] == str(target_group["StartTime"])[:5]
-                                            and str(a.get("endTime", ""))[:5] == str(target_group["EndTime"])[:5]
-                                            and str(a.get("arrivalTime", ""))[:5] == str(target_group.get("ArrivalTime", ""))[:5]
-                                        ):
-                                            if a.get("id") not in edit_exclude_ids:
-                                                edit_exclude_ids.append(a.get("id"))
-
-                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(
-                                    eid,
-                                    str_start,
-                                    str_end,
-                                    day_assigns,
-                                    exclude_ids=edit_exclude_ids,
-                                )
-
-                                if is_conflict:
-                                    st.error(f"Δεν έγινε αποθήκευση: Διπλοκράτηση για {emp_name}.")
-                                    has_blocking_error = True
-                                    break
-                                if check_edit_availability:
-                                    allowed, reason, _ = assess_rules(
-                                        eid,
-                                        {"date": edit_date, "startTime": adj_start, "endTime": adj_end},
-                                        mobile_edit_rules,
-                                    )
-                                    if not allowed:
-                                        st.error(
-                                            f"Δεν έγινε αποθήκευση: {emp_name} "
-                                            f"· {edit_date:%d/%m/%Y} · {reason}."
-                                        )
-                                        has_blocking_error = True
-                                        break
-
-                                valid_assignments.append({
-                                    "eid": eid,
-                                    "start": adj_start,
-                                    "end": adj_end,
-                                    "msg": msg,
-                                    "emp_name": emp_name,
-                                })
-                            else:
-                                valid_assignments.append({
-                                    "eid": "",
-                                    "start": str_start,
-                                    "end": str_end,
-                                    "msg": "",
-                                    "emp_name": "",
-                                })
+                        valid_assignments = [
+                            {"eid": eid, "start": str_start, "end": str_end, "msg": "",
+                             "emp_name": utils.get_employee_name(eid) if eid else ""}
+                            for eid in emps_to_process
+                        ]
 
                         if not has_blocking_error:
                             old_assigns = [
@@ -1127,18 +970,12 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "is_general": bool(e_is_general),
                                 })
 
-                            _replace_local_assignments(target_group["AssignmentIds"], new_assigns)
-
-                            utils.db_delete_in(
-                                "assignments",
-                                "id",
-                                target_group["AssignmentIds"],
-                                deleted_records=old_assigns,
-                                track=False,
-                            )
-                            utils.db_insert("assignments", new_assigns, track=False)
-
-                            utils.mark_data_changed()
+                            if utils.save_assignment_batch(
+                                old_assigns, new_assigns, project=pending_new_project,
+                                keep_worker_ids=True,
+                            ) is None:
+                                st.stop()
                             clear_mobile_selection()
                             st.success("Η μπάρα αποθηκεύτηκε.")
                             st.rerun()
+

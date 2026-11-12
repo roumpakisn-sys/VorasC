@@ -1,3 +1,5 @@
+from assignment_policy import recurring_assignment
+from assignment_store import load_recurring_context
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -14,7 +16,6 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
-import scheduling
 
 utils.init_data_and_sync()
 
@@ -861,6 +862,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                 elif not r_custom_proj_name.strip() and not r_proj:
                     st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                 else:
+                    try:
+                        recurring_context = load_recurring_context(
+                            utils.supabase, selected_weekdays_data if r_type == "Επιλεγμένες Μέρες Εβδομάδας" else r_emps,
+                            r_start_date, r_start_date + timedelta(days=365),
+                        )
+                    except Exception as exc:
+                        st.error(f"Δεν έγινε αποθήκευση: αδυναμία ελέγχου διαθεσιμότητας ({exc}).")
+                        st.stop()
                     actions = []
                     if r_custom_proj_name.strip():
                         c_name = r_custom_proj_name.strip()
@@ -920,26 +929,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 final_end = str_end
                                 final_notes = r_notes
 
-                                if eid:
-                                    emp_name = utils.get_employee_name(eid)
-                                    if scheduling.is_on_leave(eid, d, st.session_state.leaves_by_emp):
-                                        conflict_count += 1
-                                        conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια → Χωρίς προσωπικό)")
-                                        final_eid = ""
-                                        final_notes = f"{r_notes} [Άδεια: {emp_name}]".strip()
-                                    else:
-                                        day_assigns = st.session_state.assignments_by_date.get(d, [])
-                                        adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
-
-                                        if is_conflict:
-                                            conflict_count += 1
-                                            conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη → Χωρίς προσωπικό)")
-                                            final_eid = ""
-                                            final_notes = f"{r_notes} [Εμπλοκή: {emp_name}]".strip()
-                                        else:
-                                            final_start = adj_start
-                                            final_end = adj_end
-
                                 new_assign = {
                                     'id': str(uuid.uuid4()),
                                     'recurring_id': pattern_id,
@@ -956,6 +945,12 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                     'cancel_reason': "",
                                     'is_general': False,
                                 }
+                                new_assign, unavailable_reason = recurring_assignment(
+                                    new_assign, recurring_context, new_assignments_batch,
+                                )
+                                if unavailable_reason:
+                                    conflict_count += 1
+                                    conflict_details.append(f"{d:%d/%m/%Y} · {utils.get_employee_name(eid)} · {unavailable_reason} → Χωρίς προσωπικό")
                                 new_assignments_batch.append(new_assign)
                                 success_count += 1
 
@@ -989,7 +984,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         time.sleep(1.5)
                         st.rerun()
                     if conflict_count > 0:
-                        st.warning(f"{conflict_count} ανάθεση/εις είχαν άδεια ή σύγκρουση και καταχωρήθηκαν ως 'Χωρίς προσωπικό'.")
+                        st.warning(f"{conflict_count} ανάθεση/εις δεν ήταν διαθέσιμες και καταχωρήθηκαν ως 'Χωρίς προσωπικό'.")
                         with st.expander("Δείτε τις συγκρούσεις"):
                             for c in conflict_details:
                                 st.write(f"⚠️ {c}")
@@ -1241,6 +1236,14 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                         elif not e_r_custom_proj_name.strip() and not e_r_proj:
                             st.error("Παρακαλώ επιλέξτε ή πληκτρολογήστε ένα Έργο.")
                         else:
+                            try:
+                                recurring_context = load_recurring_context(
+                                    utils.supabase, e_selected_weekdays_data if e_r_type == "Επιλεγμένες Μέρες Εβδομάδας" else e_r_emps,
+                                    e_r_start_date, e_r_start_date + timedelta(days=365),
+                                )
+                            except Exception as exc:
+                                st.error(f"Δεν έγινε αποθήκευση: αδυναμία ελέγχου διαθεσιμότητας ({exc}).")
+                                st.stop()
                             actions = []
                             if e_r_custom_proj_name.strip():
                                 c_name = e_r_custom_proj_name.strip()
@@ -1279,6 +1282,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 if _is_current_series_on_or_after_effective_date(a)
                             ]
                             old_assign_ids = [a['id'] for a in old_assigns_to_replace if a.get('id')]
+                            recurring_context['assignments'] = [a for a in recurring_context['assignments'] if a['id'] not in old_assign_ids]
 
                             # Ασφαλής σειρά:
                             # Πρώτα υπολογίζουμε τις νέες βάρδιες σε προσωρινές λίστες.
@@ -1339,26 +1343,6 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                         final_end = str_end
                                         final_notes = e_r_notes
 
-                                        if eid:
-                                            emp_name = utils.get_employee_name(eid)
-                                            if scheduling.is_on_leave(eid, d, st.session_state.leaves_by_emp):
-                                                conflict_count += 1
-                                                conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Άδεια → Χωρίς προσωπικό)")
-                                                final_eid = ""
-                                                final_notes = f"{e_r_notes} [Άδεια: {emp_name}]".strip()
-                                            else:
-                                                day_assigns = live_assignments_by_date.get(d, [])
-                                                adj_start, adj_end, is_conflict, msg = scheduling.check_and_resolve_conflict(eid, str_start, str_end, day_assigns)
-
-                                                if is_conflict:
-                                                    conflict_count += 1
-                                                    conflict_details.append(f"{d.strftime('%d/%m/%Y')} - {emp_name} (Επικάλυψη → Χωρίς προσωπικό)")
-                                                    final_eid = ""
-                                                    final_notes = f"{e_r_notes} [Εμπλοκή: {emp_name}]".strip()
-                                                else:
-                                                    final_start = adj_start
-                                                    final_end = adj_end
-
                                         new_assign = {
                                             'id': str(uuid.uuid4()),
                                             'recurring_id': selected_pattern_id,
@@ -1375,6 +1359,12 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                             'cancel_reason': "",
                                             'is_general': False,
                                         }
+                                        new_assign, unavailable_reason = recurring_assignment(
+                                            new_assign, recurring_context, new_assignments_batch,
+                                        )
+                                        if unavailable_reason:
+                                            conflict_count += 1
+                                            conflict_details.append(f"{d:%d/%m/%Y} · {utils.get_employee_name(eid)} · {unavailable_reason} → Χωρίς προσωπικό")
                                         new_assignments_batch.append(new_assign)
                                         live_assignments_by_date.setdefault(d, []).append(new_assign)
                                         success_count += 1
@@ -1424,7 +1414,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 time.sleep(1.5)
                                 st.rerun()
                             if conflict_count > 0:
-                                st.warning(f"{conflict_count} ανάθεση/εις είχαν άδεια ή σύγκρουση και καταχωρήθηκαν ως 'Χωρίς προσωπικό'.")
+                                st.warning(f"{conflict_count} ανάθεση/εις δεν ήταν διαθέσιμες και καταχωρήθηκαν ως 'Χωρίς προσωπικό'.")
                                 with st.expander("Δείτε τις συγκρούσεις"):
                                     for c in conflict_details:
                                         st.write(f"⚠️ {c}")
@@ -1603,3 +1593,4 @@ elif menu == "Καταγραφή Κινήσεων":
                 "Λεπτομέρειες": utils.parse_old_log_details(log.get('table_name', ''), log.get('details', '-'))
             })
         st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+
