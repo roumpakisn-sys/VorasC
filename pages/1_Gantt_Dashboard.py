@@ -1,6 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import uuid
 import textwrap
 import time
@@ -1136,8 +1136,109 @@ if not presentation_mode:
                                 st.error("Απαιτείται σύνδεση στη Supabase για ασφαλή αποθήκευση.")
                                 st.stop()
 
-                            # Save new rows first, then remove ONLY the original bar.
-                            # This avoids deleting history if an insert fails.
+                            # FAST PATH: A single underlying assignment does not need
+                            # delete + insert + deletion log + a full database refresh.
+                            # Preserve its ID and change only the editable columns.
+                            if len(original_ids) == 1 and len(new_assigns) == 1 and pending_new_project is None:
+                                before = old_assigns[0]
+                                updated_values = {
+                                    key: value for key, value in new_assigns[0].items()
+                                    if key != "id"
+                                }
+                                if "updated_at" in before:
+                                    updated_values["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+                                def _matches_saved_edit(row):
+                                    if not row or str(row.get("id")) != str(before["id"]):
+                                        return False
+                                    for key, wanted in updated_values.items():
+                                        if key == "updated_at":
+                                            continue  # The DB may normalize timestamps.
+                                        actual = row.get(key)
+                                        if key == "date":
+                                            if utils.safe_date_parse(actual) != utils.safe_date_parse(wanted):
+                                                return False
+                                        elif str(actual or "") != str(wanted or ""):
+                                            return False
+                                    return True
+
+                                committed_row = None
+                                write_error = None
+                                try:
+                                    query = (
+                                        utils.supabase.table("assignments")
+                                        .update(utils.serialize_dates(updated_values))
+                                        .eq("id", before["id"])
+                                    )
+                                    if before.get("updated_at"):
+                                        query = query.eq("updated_at", before["updated_at"])
+                                    else:
+                                        query = (
+                                            query.eq("projectId", before["projectId"])
+                                            .eq("date", utils.safe_date_parse(before["date"]).isoformat())
+                                            .eq("startTime", before["startTime"])
+                                            .eq("endTime", before["endTime"])
+                                        )
+                                    response = query.execute()
+                                    rows = response.data or []
+                                    if len(rows) == 1 and _matches_saved_edit(rows[0]):
+                                        committed_row = rows[0]
+                                except Exception as exc:
+                                    # A transport exception does not prove a write failed.
+                                    # Read back once before declaring failure. Never retry a
+                                    # potentially committed mutation blindly.
+                                    write_error = exc
+                                if committed_row is None:
+                                    try:
+                                        checked = (
+                                            utils.supabase.table("assignments")
+                                            .select("*").eq("id", before["id"]).limit(1).execute()
+                                        )
+                                        checked_rows = checked.data or []
+                                        if len(checked_rows) == 1 and _matches_saved_edit(checked_rows[0]):
+                                            committed_row = checked_rows[0]
+                                    except Exception:
+                                        pass
+                                if committed_row is None:
+                                    if write_error:
+                                        st.error(
+                                            "Η σύνδεση με τη Supabase διακόπηκε κατά την ενημέρωση. "
+                                            "Δεν είναι βέβαιο αν ολοκληρώθηκε η αλλαγή. "
+                                            "Μην πατήσεις ξανά Αποθήκευση πριν ανανεώσεις και ελέγξεις τη μπάρα. "
+                                            f"Τεχνική λεπτομέρεια: {write_error}"
+                                        )
+                                    else:
+                                        st.error(
+                                            "Η ενημέρωση δεν επιβεβαιώθηκε. Η εγγραφή ενδέχεται "
+                                            "να άλλαξε από άλλον χρήστη. Ανανέωσε πριν ξαναδοκιμάσεις."
+                                        )
+                                    st.session_state.last_sync_time = None
+                                    st.stop()
+
+                                saved_local = dict(committed_row)
+                                saved_local["date"] = utils.safe_date_parse(saved_local.get("date")) or edit_date
+                                st.session_state.assignments = [
+                                    a if str(a.get("id")) != str(before["id"]) else saved_local
+                                    for a in st.session_state.assignments
+                                ]
+                                utils.add_transaction([{
+                                    "type": "update", "table": "assignments",
+                                    "old_records": [before], "new_records": [saved_local],
+                                }])
+                                utils.mark_data_changed()
+                                utils.touch_app_sync_state()
+                                utils.log_activity(
+                                    "ΕΠΕΞΕΡΓΑΣΙΑ ΜΠΑΡΑΣ", "assignments",
+                                    f"Γρήγορη ενημέρωση μπάρας {before['id']} · {edit_date:%d/%m/%Y}"
+                                )
+                                st.session_state.pop("edit_form_prefill", None)
+                                st.success("Η μπάρα ενημερώθηκε.")
+                                clear_bar_selection()
+                                st.session_state.skip_remote_sync_once = True
+                                st.rerun()
+
+                            # MULTI-ROW FALLBACK: Preserve the existing safe workflow
+                            # for bars whose number of worker records can change.
                             if pending_new_project:
                                 if not utils.db_insert("projects", pending_new_project, track=False):
                                     st.error("Δεν δημιουργήθηκε το νέο έργο. Η μπάρα έμεινε ανέπαφη.")
@@ -1214,7 +1315,9 @@ if not presentation_mode:
                                 + ", ".join(d.strftime("%d/%m/%Y") for d in edit_target_dates)
                             )
                             st.session_state.pop("edit_form_prefill", None)
-                            st.session_state.last_sync_time = None
+                            # Local data already has the confirmed replacement rows.
+                            # Do not force a full employees/projects/assignments reload.
+                            st.session_state.skip_remote_sync_once = True
                             st.success(f"Αποθηκεύτηκαν {len(new_assigns)} τοποθετήσεις σε {len(edit_target_dates)} ημερομηνίες.")
                             clear_bar_selection()
                             st.rerun()
