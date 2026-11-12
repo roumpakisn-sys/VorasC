@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import utils
+from availability_rules import fetch_rules
 from replacement_engine import (
     as_date,
     candidate_assessment,
@@ -110,11 +111,16 @@ def assign_replacement(vacant, selected_employee, options):
             .gte("endDate", shift_date.isoformat()).execute()
         )
         project = read_db_row("projects", target.get("projectId"))
+        latest_rules, rule_error = fetch_rules(utils.supabase)
+        if rule_error:
+            st.error("Η ανάθεση σταμάτησε: " + rule_error)
+            return
         report = candidate_assessment(
             fresh_emp, target, busy_resp.data or [], leave_resp.data or [],
             travel_buffer_minutes=options["travel_buffer_minutes"],
             maximum_day_hours=options["maximum_day_hours"],
             today=local_today(),
+            availability=latest_rules,
         )
         if not report["eligible"]:
             st.error(f"Δεν έγινε ανάθεση. Ο εργαζόμενος δεν είναι πλέον διαθέσιμος: {report['reason']}")
@@ -172,11 +178,17 @@ def assign_replacement(vacant, selected_employee, options):
 
 
 st.title("🧩 Έξυπνος βοηθός αντικαταστάσεων")
-st.caption("Προτάσεις για ακάλυπτες βάρδιες με βάση πραγματικά ωράρια, άδειες, ημερήσιο φόρτο και ιστορικό έργων.")
+st.caption("Προτάσεις βάσει ωραρίων, αδειών, ημερήσιου φόρτου, εμπειρίας και δηλωμένης διαθεσιμότητας.")
 
 if st.session_state.pop("smart_replacement_success", None) is not None:
     # It is a confirmation of the successful DB update in the previous run.
     st.success("Η τελευταία αντικατάσταση αποθηκεύτηκε στη Supabase.")
+
+rules, availability_error = fetch_rules(utils.supabase)
+if availability_error:
+    st.error("Αδυναμία φόρτωσης διαθεσιμότητας: " + availability_error)
+    st.info("Για την ενεργοποίηση των νέων λειτουργιών εκτέλεσε πρώτα το sql/employee_availability_rules.sql στη Supabase.")
+    st.stop()
 
 selected_date = st.date_input("📅 Ημερομηνία προς κάλυψη", value=local_today(), key="smart_replace_day")
 
@@ -220,6 +232,7 @@ if vacancies:
         travel_buffer_minutes=travel_buffer,
         maximum_day_hours=max_day_hours,
         today=local_today(),
+        availability=rules,
     )
     st.markdown(f"#### ✅ Προτεινόμενοι εργαζόμενοι ({len(eligible)})")
     if eligible:
