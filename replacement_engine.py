@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from availability_rules import assess_rules
+
 
 def as_date(value: Any) -> date | None:
     if isinstance(value, datetime):
@@ -103,6 +105,7 @@ def candidate_assessment(
     travel_buffer_minutes: int = 0,
     maximum_day_hours: float = 10,
     today: date | None = None,
+    availability: list[dict] | None = None,
 ) -> dict:
     """Assess availability and transparent, advisory score.
 
@@ -133,6 +136,10 @@ def candidate_assessment(
         return result
     if leave_dates_hit(eid, vacant, all_leaves):
         result["reason"] = "Άδεια την ημέρα της βάρδιας"
+        return result
+    available, availability_reason, preference_points = assess_rules(eid, vacant, availability)
+    if not available:
+        result["reason"] = availability_reason
         return result
 
     target_day = as_date(vacant.get("date"))
@@ -187,7 +194,7 @@ def candidate_assessment(
         and as_date(a.get("date")) < cutoff
     }
     result["experience_days"] = len(history)
-    result["score"] = round(60 + min(40, len(history) * 8) - day_mins / 60 * 3)
+    result["score"] = round(60 + min(40, len(history) * 8) - day_mins / 60 * 3 + preference_points)
     result["eligible"] = True
     result["reason"] = (
         f"{result['experience_days']} προηγ. ημέρες στο έργο · "
@@ -206,6 +213,7 @@ def rank_candidates(
     travel_buffer_minutes: int = 0,
     maximum_day_hours: float = 10,
     today: date | None = None,
+    availability: list[dict] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     eligible = []
     blocked = []
@@ -221,6 +229,7 @@ def rank_candidates(
             travel_buffer_minutes=travel_buffer_minutes,
             maximum_day_hours=maximum_day_hours,
             today=today,
+            availability=availability,
         )
         (eligible if report["eligible"] else blocked).append(report)
     eligible.sort(key=lambda x: (-x["score"], x["projected_hours"], x["name"].casefold()))
