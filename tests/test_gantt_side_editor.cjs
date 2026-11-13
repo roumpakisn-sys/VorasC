@@ -89,3 +89,11 @@ test('streaming the next bar never captures the previous form as its baseline', 
   assert.equal(next.allowLeave('a'), true);
   assert.equal(f.prompts(), 0); f.cleanup();
 });
+
+test('switching desktop/mobile starts a fresh baseline even for the same bar', () => {
+  const f = fixture(); f.get('notes').value = 'desktop draft'; f.state.allowLeave('b');
+  const pane = f.win.document.querySelector('.st-key-test');
+  pane.classList.add('st-key-mobile'); f.get('notes').value = 'mobile original';
+  const next = install(f.win, {selector: '.st-key-mobile', identity: 'bar-a', barId: 'a'});
+  assert.equal(next.allowLeave('b'), true); assert.equal(f.prompts(), 1); f.cleanup();
+});

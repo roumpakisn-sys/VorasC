@@ -19,8 +19,8 @@
     let win, doc;
     try { win = frame.parent; doc = win.document; } catch (_) { return; }
     const previous = win.staffProSideEditor;
-    const same = previous && previous.identity === config.identity;
-    const state = {identity: config.identity, dirty: same ? previous.dirty : false,
+    const same = previous && previous.identity === config.identity && previous.selector === config.selector;
+    const state = {identity: config.identity, selector: config.selector, dirty: same ? previous.dirty : false,
       baseline: same ? previous.baseline : null};
     if (previous) previous.cleanup();
     let pane, form, timer, observer, style, disposed = false, wasAttached = false;
