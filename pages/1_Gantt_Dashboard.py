@@ -37,6 +37,7 @@ import gantt_controls
 import gantt_export
 import gantt_excel_export
 import gantt_filters
+import gantt_side_editor
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -112,6 +113,8 @@ def preserve_context_notes(original_notes, edited_notes):
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
+
+side_editor_enabled = gantt_side_editor.render_toggle(is_full_admin and not presentation_mode)
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
 # Κρύβει/εμφανίζει μόνο τις μπάρες που προέρχονται από επαναλαμβανόμενες εργασίες.
@@ -253,6 +256,8 @@ elif clicked_safe_id:
         st.session_state.last_clicked_safe_id = clicked_safe_id
 
         if real_clicked_key:
+            if side_editor_enabled:
+                st.session_state.pop("edit_form_prefill", None)
             st.session_state.clicked_key = real_clicked_key
             st.session_state.edit_bar_select_widget = real_clicked_key
             st.session_state.trigger_scroll = True
@@ -572,9 +577,14 @@ if not presentation_mode:
                         else:
                             st.error("Δεν έγινε αποθήκευση στη βάση. Δοκιμάστε ξανά ή πατήστε Άμεση Ανανέωση πριν ξανακαταχωρήσετε.")
 
-        with col_edit:
+        with col_edit, gantt_side_editor.editor(
+            side_editor_enabled, st.session_state.clicked_key if st.session_state.clicked_key in wk_groups else None,
+            page="desktop", on_close=clear_bar_selection,
+        ):
             st.subheader("✏️ Επεξεργασία Μπάρας της Εβδομάδας")
 
+            if side_editor_enabled:
+                st.session_state.trigger_scroll = False
             if st.session_state.get("trigger_scroll"):
                 components.html(
                     f"""
@@ -606,7 +616,7 @@ if not presentation_mode:
                     st.session_state.edit_bar_select_widget = ""
                     st.session_state.reset_edit_bar_select_next_run = False
 
-                if st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
+                if not side_editor_enabled and st.session_state.clicked_key and st.session_state.clicked_key in group_keys:
                     st.session_state.edit_bar_select_widget = st.session_state.clicked_key
 
                 options_for_select = [""] + group_keys
@@ -815,6 +825,17 @@ if not presentation_mode:
                             )
 
                         st.markdown("---")
+                        if side_editor_enabled:
+                            gantt_side_editor.preview_bar(
+                                target_group, bar_key=selected_key, employee_name=utils.get_employee_name,
+                                original_notes=target_clean_note, day=edit_date,
+                                project=edit_custom_proj_name.strip() or utils.get_project_name(edit_proj),
+                                employees=[utils.get_employee_name(e) for e in edit_emps],
+                                arrival=new_t_arrival.strftime("%H:%M") if use_arr_edit else "",
+                                start=new_t_start, end=new_t_end, color=edit_color, notes=edit_notes,
+                                general=e_is_general, cancelled=e_is_cancelled, reason=e_cancel_reason,
+                            )
+
                         col_btn1, col_btn2, col_btn3 = st.columns(3)
                         with col_btn1:
                             save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
