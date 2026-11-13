@@ -9,10 +9,11 @@
 
   function snapshot(form) {
     return JSON.stringify(Array.from(form.querySelectorAll(
-      'input, textarea, select, [role="spinbutton"], [data-baseweb="select"]'
+      'input, textarea, select, [role="spinbutton"], [data-baseweb="select"], [role="group"][aria-label="Selected values"]'
     )).map(el => [el.tagName, el.type || '', el.checked || false,
       el.getAttribute('aria-valuenow') || '',
-      el.matches('[data-baseweb="select"]') ? el.textContent : el.value || el.textContent]));
+      el.matches('[data-baseweb="select"], [role="group"][aria-label="Selected values"]')
+        ? el.textContent : el.value || el.textContent]));
   }
 
   function install(frame, config) {
@@ -139,7 +140,7 @@
       }
     }
     listen(doc, 'click', onClick, true);
-    listen(doc, 'mousedown', onMouseDown, true);
+    listen(doc, 'pointerdown', onMouseDown, true);
     listen(doc, 'keydown', onKey, true);
     listen(win, 'beforeunload', event => {
       refreshDirty();
