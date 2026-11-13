@@ -74,7 +74,7 @@ test('navigation away cleans up, reverting a field is clean', async () => {
 
 test('checkbox mouse gesture prompts once and cancellation prevents mutation', () => {
   const f = fixture(); f.get('notes').value = 'draft';
-  const down = () => f.get('toggle').dispatchEvent(new f.win.MouseEvent('mousedown', {bubbles:true,cancelable:true}));
+  const down = () => f.get('toggle').dispatchEvent(new f.win.MouseEvent('pointerdown', {bubbles:true,cancelable:true}));
   assert.equal(down(), false); assert.equal(f.get('toggle').checked, false);
   f.accept(); assert.equal(down(), true); f.get('toggle').click();
   assert.equal(f.prompts(), 2); assert.equal(f.get('toggle').checked, true); f.cleanup();
@@ -96,4 +96,17 @@ test('switching desktop/mobile starts a fresh baseline even for the same bar', (
   pane.classList.add('st-key-mobile'); f.get('notes').value = 'mobile original';
   const next = install(f.win, {selector: '.st-key-mobile', identity: 'bar-a', barId: 'a'});
   assert.equal(next.allowLeave('b'), true); assert.equal(f.prompts(), 1); f.cleanup();
+});
+
+test('current Streamlit selected-value groups protect employee-only changes', () => {
+  const f = fixture();
+  const select = f.get('workers').parentElement;
+  select.removeAttribute('data-baseweb');
+  select.setAttribute('role', 'group'); select.setAttribute('aria-label', 'Selected values');
+  f.state.cleanup();
+  const state = install(f.win, {selector: '.st-key-test', identity: 'bar-a', barId: 'a'});
+  f.get('workers').textContent = 'Α';
+  assert.equal(state.allowLeave('b'), false); assert.equal(f.prompts(), 1);
+  f.get('workers').textContent = 'Α, Β';
+  assert.equal(state.allowLeave('b'), true); f.cleanup();
 });
