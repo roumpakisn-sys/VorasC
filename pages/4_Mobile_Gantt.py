@@ -12,6 +12,7 @@ import utils
 import gantt_engine
 import gantt_html
 import gantt_filters
+import gantt_side_editor
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -88,6 +89,7 @@ components.html(
 )
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
+side_editor_enabled = gantt_side_editor.render_toggle(is_full_admin)
 active_employee_ids = [
     e["id"]
     for e in st.session_state.get("employees", [])
@@ -187,7 +189,7 @@ if "mobile_app_scale_pct" not in st.session_state:
 def clear_mobile_selection():
     st.session_state.mobile_clicked_key = None
     st.session_state.mobile_last_clicked_safe_id = ""
-    st.session_state.mobile_edit_select_widget = ""
+    # Reset before the widget is created on the next run (also after a save).
     st.session_state.mobile_reset_edit_select_next_run = True
     st.session_state.mobile_detector_version = st.session_state.get("mobile_detector_version", 0) + 1
 
@@ -758,7 +760,10 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
 # =========================================================
 # EDIT ASSIGNMENT BAR
 # =========================================================
-with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.session_state.get("mobile_clicked_key"))):
+with gantt_side_editor.editor(
+    side_editor_enabled, st.session_state.mobile_clicked_key if st.session_state.mobile_clicked_key in wk_groups else None,
+    page="mobile", on_close=clear_mobile_selection,
+), st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.session_state.get("mobile_clicked_key"))):
     if not wk_groups:
         st.info("Δεν υπάρχουν μπάρες αυτή την εβδομάδα.")
     else:
@@ -769,7 +774,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
             st.session_state.mobile_edit_select_widget = ""
             st.session_state.mobile_reset_edit_select_next_run = False
 
-        if st.session_state.mobile_clicked_key and st.session_state.mobile_clicked_key in group_keys:
+        if not side_editor_enabled and st.session_state.mobile_clicked_key and st.session_state.mobile_clicked_key in group_keys:
             st.session_state.mobile_edit_select_widget = st.session_state.mobile_clicked_key
 
         options_for_select = [""] + group_keys
@@ -801,7 +806,8 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                 f"{target_group['StartTime']}-{target_group['EndTime']}"
             )
 
-            with st.form("mobile_quick_edit"):
+            edit_suffix = "_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12] if side_editor_enabled else ""
+            with st.form("mobile_quick_edit" + edit_suffix):
                 edit_date = st.date_input("Ημερομηνία", value=target_group["Date"])
 
                 proj_ids = [p["id"] for p in st.session_state.get("projects", [])]
@@ -853,7 +859,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                 edit_notes = st.text_input("Παρατηρήσεις", value=target_clean_note)
 
                 existing_arr = target_group.get("ArrivalTime", "")
-                use_arr_edit = st.checkbox("Με προσέλευση", value=bool(existing_arr), key="mobile_edit_use_arr")
+                use_arr_edit = st.checkbox("Με προσέλευση", value=bool(existing_arr), key=f"mobile_edit_use_arr{edit_suffix}")
 
                 def_arr = (
                     datetime.strptime(existing_arr, "%H:%M").time()
@@ -861,35 +867,46 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                     else datetime.strptime(str(target_group["StartTime"])[:5], "%H:%M").time()
                 )
 
-                new_t_arrival = st.time_input("Ώρα προσέλευσης", value=def_arr, key="mobile_edit_arrival")
+                new_t_arrival = st.time_input("Ώρα προσέλευσης", value=def_arr, key=f"mobile_edit_arrival{edit_suffix}")
                 new_t_start = st.time_input(
                     "Έναρξη",
                     value=datetime.strptime(str(target_group["StartTime"])[:5], "%H:%M").time(),
-                    key="mobile_edit_start",
+                    key=f"mobile_edit_start{edit_suffix}",
                 )
                 new_t_end = st.time_input(
                     "Λήξη",
                     value=datetime.strptime(str(target_group["EndTime"])[:5], "%H:%M").time(),
-                    key="mobile_edit_end",
+                    key=f"mobile_edit_end{edit_suffix}",
                 )
 
                 e_is_general = st.checkbox(
                     "Γενικός",
                     value=bool(target_group.get("IsGeneral", False)),
-                    key="mobile_edit_is_general",
+                    key=f"mobile_edit_is_general{edit_suffix}",
                 )
 
                 e_is_cancelled = st.checkbox(
                     "Ακυρωμένη",
                     value=bool(target_group.get("is_cancelled", False)),
-                    key="mobile_edit_is_cancelled",
+                    key=f"mobile_edit_is_cancelled{edit_suffix}",
                 )
 
                 e_cancel_reason = st.text_input(
                     "Λόγος ακύρωσης",
                     value=target_group.get("cancel_reason", ""),
-                    key="mobile_edit_cancel_reason",
+                    key=f"mobile_edit_cancel_reason{edit_suffix}",
                 )
+
+                if side_editor_enabled:
+                    gantt_side_editor.preview_bar(
+                        target_group, bar_key=selected_key, employee_name=utils.get_employee_name,
+                        original_notes=target_clean_note, day=edit_date,
+                        project=edit_custom_proj_name.strip() or utils.get_project_name(edit_proj),
+                        employees=[utils.get_employee_name(e) for e in edit_emps],
+                        arrival=new_t_arrival.strftime("%H:%M") if use_arr_edit else "",
+                        start=new_t_start, end=new_t_end, color=edit_color, notes=edit_notes,
+                        general=e_is_general, cancelled=e_is_cancelled, reason=e_cancel_reason,
+                    )
 
                 save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
                 delete_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή", use_container_width=True)

@@ -691,6 +691,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         if (link && (window.gIsDragging || moved)) {
           e.preventDefault();
           e.stopPropagation();
+        } else if (link) {
+          // Optional side editor: do not discard a draft on another bar click.
+          // Standalone exports and the original inline editor have no guard.
+          try {
+            var editor = window.parent.staffProSideEditor;
+            if (editor && !editor.allowLeave(link.id)) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+            }
+          } catch (_) { /* Cross-origin export: normal click handling. */ }
         }
       }
 
@@ -735,3 +745,4 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     html += f"<img src='x' style='display:none;' onerror='eval(atob(\"{b64_js}\"))'>"
 
     return html
+
