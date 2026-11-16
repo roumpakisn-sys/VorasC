@@ -68,18 +68,18 @@ class ContactStorageTests(unittest.TestCase):
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")
 class ContactFormTests(unittest.TestCase):
-    def app(self, view="desktop", add=False, enabled=True, records=None):
-        app = AppTest.from_file(str(ROOT / "tests/fixtures/side_editor_app.py"))
+    def app(self, view="desktop", add=False, records=None, clipboard=None):
+        app = AppTest.from_file(str(ROOT / "tests/fixtures/gantt_forms_app.py"))
         app.session_state["fixture_headless"] = True
         app.session_state["fixture_persist"] = True
         app.session_state["fixture_show_add"] = add
         if records is not None:
             app.session_state["assignments"] = deepcopy(records)
+        if clipboard is not None:
+            app.session_state["gantt_placement_clipboard"] = deepcopy(clipboard)
         app.run()
         if view == "mobile":
             next(s for s in app.selectbox if s.label == "Έκδοση").set_value(view).run()
-        if enabled:
-            app.toggle[0].set_value(True).run()
         self.assertFalse(app.exception)
         return app
 
@@ -99,44 +99,39 @@ class ContactFormTests(unittest.TestCase):
         for key, value in contacts.items():
             self.text(app, key).set_value(value)
 
-    def test_save_reload_and_clear_contacts_for_two_workers_with_drawer_on_or_off(self):
-        for view in ("desktop", "mobile"):
-            for enabled in (True, False):
-                with self.subTest(view=view, enabled=enabled):
-                    app = self.app(view, enabled=enabled)
-                    self.select(app, view)
-                    self.fill(app)
-                    self.button(app, "💾 Αποθήκευση").click().run()
-                    self.assertFalse(app.exception)
-                    saved = app.session_state.save_calls[-1]["new"]
-                    self.assertEqual({r["employeeId"] for r in saved}, {"e1", "e2"})
-                    for record in saved:
-                        self.assertEqual(roles.split_notes(record["notes"])[1], CONTACTS)
-                    # Recreate the session from confirmed records, as on page refresh.
-                    app = self.app(view, enabled=enabled, records=app.session_state.assignments)
-                    self.select(app, view)
-                    for key, value in CONTACTS.items():
-                        self.assertEqual(self.text(app, key).value, value)
-                    self.fill(app, roles.normalize())
-                    self.button(app, "💾 Αποθήκευση").click().run()
-                    self.assertFalse(app.exception)
-                    app = self.app(view, enabled=enabled, records=app.session_state.assignments)
-                    self.select(app, view)
-                    for key in CONTACTS:
-                        self.assertEqual(self.text(app, key).value, "")
-                    self.assertEqual(len(app.session_state.assignments), 4)
-
-    def test_preview_lists_contacts_without_saving_and_failed_save_retains_draft(self):
+    def test_save_reload_and_clear_contacts_for_two_workers(self):
         for view in ("desktop", "mobile"):
             with self.subTest(view=view):
                 app = self.app(view)
                 self.select(app, view)
                 self.fill(app)
-                self.button(app, "🔎 Προεπισκόπηση αλλαγών").click().run()
+                self.button(app, "💾 Αποθήκευση").click().run()
                 self.assertFalse(app.exception)
-                self.assertEqual(set(app.table[0].value["Πεδίο"]), set(roles.LABELS.values()))
-                self.assertEqual(app.session_state.save_calls, [])
+                saved = app.session_state.save_calls[-1]["new"]
+                self.assertEqual({r["employeeId"] for r in saved}, {"e1", "e2"})
+                for record in saved:
+                    self.assertEqual(roles.split_notes(record["notes"])[1], CONTACTS)
+                # Recreate the session from confirmed records, as on page refresh.
+                app = self.app(view, records=app.session_state.assignments)
+                self.select(app, view)
+                for key, value in CONTACTS.items():
+                    self.assertEqual(self.text(app, key).value, value)
+                self.fill(app, roles.normalize())
+                self.button(app, "💾 Αποθήκευση").click().run()
+                self.assertFalse(app.exception)
+                app = self.app(view, records=app.session_state.assignments)
+                self.select(app, view)
+                for key in CONTACTS:
+                    self.assertEqual(self.text(app, key).value, "")
+                self.assertEqual(len(app.session_state.assignments), 4)
+
+    def test_failed_save_retains_contact_draft(self):
+        for view in ("desktop", "mobile"):
+            with self.subTest(view=view):
+                app = self.app(view)
+                self.select(app, view)
                 app.checkbox(key="fail_save").set_value(True).run()
+                self.fill(app)
                 self.button(app, "💾 Αποθήκευση").click().run()
                 self.assertFalse(app.exception)
                 for key, value in CONTACTS.items():
@@ -151,6 +146,7 @@ class ContactFormTests(unittest.TestCase):
                 self.select(app, view)
                 self.fill(app)
                 self.button(app, "💾 Αποθήκευση").click().run()
+                app = self.app(view, records=app.session_state.assignments)
                 self.select(app, view, index=2)
                 for key in CONTACTS:
                     self.assertEqual(self.text(app, key).value, "")
@@ -181,17 +177,14 @@ class ContactFormTests(unittest.TestCase):
         self.button(app, "📋 Αντιγραφή στοιχείων").click().run()
         self.assertEqual(app.session_state.gantt_placement_clipboard["support_roles"], CONTACTS)
         self.assertEqual(app.session_state.save_calls, [])
-        self.button(app, "✕ Κλείσιμο επεξεργασίας").click().run()
-        app.session_state["fixture_show_add"] = True
-        app.run()
+        app = self.app(add=True, clipboard=app.session_state.gantt_placement_clipboard)
         self.button(app, "📥 Επικόλληση όλων των στοιχείων").click().run()
         self.assertFalse(app.exception)
         for key, value in CONTACTS.items():
             self.assertEqual(self.text(app, key).value, value)
         self.text(app, "supervisor").set_value("Άλλος επόπτης")
         self.button(app, "📋 Αντιγραφή στοιχείων").click().run()
-        app.session_state["fixture_show_add"] = False
-        app.run()
+        app = self.app(clipboard=app.session_state.gantt_placement_clipboard)
         self.select(app)
         self.button(app, "📥 Επικόλληση όλων των στοιχείων").click().run()
         self.assertFalse(app.exception)

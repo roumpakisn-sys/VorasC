@@ -163,6 +163,36 @@ def _format_viber_employees(employee_labels):
     return " ".join(formatted_labels)
 
 
+def _group_viber_assignments(assignments, day_assignments):
+    """One entry per project/shift, even when leave notes differ by worker.
+
+Notes describe the shift; they do not create another staffing slot. Keep all
+distinct notes and show 'without staff' only if the entire group is unstaffed.
+This changes the export only, never the underlying assignment/leave records.
+"""
+    groups = {}
+    for assignment in assignments:
+        if assignment.get("is_cancelled"):
+            continue
+        project_id = assignment.get("projectId")
+        start = str(assignment.get("startTime") or "")[:5]
+        end = str(assignment.get("endTime") or "")[:5]
+        arrival = str(assignment.get("arrivalTime") or "")[:5]
+        key = (str(assignment.get("date") or "")[:10], project_id,
+               start, end, arrival, bool(assignment.get("is_general", False)))
+        group = groups.setdefault(key, {
+            "project": _project_name(project_id), "start": start, "end": end,
+            "arrival": arrival, "employees": [], "notes": [],
+        })
+        employee = _employee_viber_label(assignment, day_assignments)
+        if employee and employee != "Χωρίς Προσωπικό" and employee not in group["employees"]:
+            group["employees"].append(employee)
+        note = str(assignment.get("notes") or "").strip()
+        if note and note not in group["notes"]:
+            group["notes"].append(note)
+    return list(groups.values())
+
+
 # --- ΚΑΘΑΡΙΣΜΟΣ ΜΝΗΜΗΣ CHECKBOXES ΟΤΑΝ ΑΛΛΑΖΕΙ Η ΜΕΡΑ ---
 # Αν ο χρήστης αλλάξει μέρα, θέλουμε όλα τα έργα να είναι ξανά προεπιλεγμένα (True).
 if "viber_last_date" not in st.session_state or st.session_state.viber_last_date != target_date:
@@ -229,22 +259,7 @@ filtered_assigns = [
     if a.get("projectId") in selected_project_ids
 ]
 
-groups = {}
-for a in filtered_assigns:
-    proj_name = _project_name(a.get("projectId"))
-    emp_name = _employee_viber_label(a, day_assigns)
-    start = str(a.get("startTime", ""))[:5]
-    end = str(a.get("endTime", ""))[:5]
-    arr = str(a.get("arrivalTime", ""))[:5]
-    notes = a.get("notes", "")
-
-    # Ομαδοποίηση ατόμων που είναι στο ίδιο έργο, την ίδια ώρα
-    key = (start, end, proj_name, arr, notes)
-    if key not in groups:
-        groups[key] = []
-
-    if emp_name and emp_name != "Χωρίς Προσωπικό":
-        groups[key].append(emp_name)
+groups = _group_viber_assignments(filtered_assigns, day_assigns)
 
 day_leaves = [
     l for l in st.session_state.leaves
@@ -260,7 +275,10 @@ else:
     if not groups and (day_leaves and include_leaves):
         viber_msg += "Δεν έχουν επιλεγεί/βρεθεί βάρδιες έργων.\n\n"
 
-    for (start, end, proj, arr, notes), emps in groups.items():
+    for group in groups:
+        start, end, proj = group["start"], group["end"], group["project"]
+        arr, notes = group["arrival"], " | ".join(group["notes"])
+        emps = group["employees"]
         # Ώρες με αστερίσκους, έργο χωρίς αστερίσκους
         viber_msg += f"⏰ *{start} - {end}* | 🏗️ {proj}\n"
 
@@ -290,3 +308,4 @@ if day_leaves and include_leaves:
 st.subheader("🚀 Αυτόματο Μήνυμα (Γρήγορο)")
 st.info("Το παρακάτω μήνυμα παράγεται αυτόματα και ανανεώνεται μόλις ξε-τικάρεις ένα έργο. Είναι έτοιμο για αντιγραφή.")
 st.code(viber_msg, language="markdown")
+

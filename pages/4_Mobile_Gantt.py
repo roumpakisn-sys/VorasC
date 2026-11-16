@@ -12,7 +12,6 @@ import utils
 import gantt_engine
 import gantt_html
 import gantt_filters
-import gantt_side_editor
 import placement_roles
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
@@ -90,7 +89,6 @@ components.html(
 )
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
-side_editor_enabled = gantt_side_editor.render_toggle(is_full_admin)
 active_employee_ids = [
     e["id"]
     for e in st.session_state.get("employees", [])
@@ -763,10 +761,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
 # =========================================================
 # EDIT ASSIGNMENT BAR
 # =========================================================
-with gantt_side_editor.editor(
-    side_editor_enabled, st.session_state.mobile_clicked_key if st.session_state.mobile_clicked_key in wk_groups else None,
-    page="mobile", on_close=clear_mobile_selection,
-), st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.session_state.get("mobile_clicked_key"))):
+with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.session_state.get("mobile_clicked_key"))):
     if not wk_groups:
         st.info("Δεν υπάρχουν μπάρες αυτή την εβδομάδα.")
     else:
@@ -776,9 +771,6 @@ with gantt_side_editor.editor(
         if st.session_state.get("mobile_reset_edit_select_next_run"):
             st.session_state.mobile_edit_select_widget = ""
             st.session_state.mobile_reset_edit_select_next_run = False
-
-        if not side_editor_enabled and st.session_state.mobile_clicked_key and st.session_state.mobile_clicked_key in group_keys:
-            st.session_state.mobile_edit_select_widget = st.session_state.mobile_clicked_key
 
         options_for_select = [""] + group_keys
         if st.session_state.mobile_edit_select_widget not in options_for_select:
@@ -809,7 +801,7 @@ with gantt_side_editor.editor(
                 f"{target_group['StartTime']}-{target_group['EndTime']}"
             )
 
-            edit_suffix = "_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12] if side_editor_enabled else ""
+            edit_suffix = "_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12]
             with st.form("mobile_quick_edit" + edit_suffix):
                 edit_date = st.date_input("Ημερομηνία", value=target_group["Date"])
 
@@ -905,18 +897,6 @@ with gantt_side_editor.editor(
                     value=target_group.get("cancel_reason", ""),
                     key=f"mobile_edit_cancel_reason{edit_suffix}",
                 )
-
-                if side_editor_enabled:
-                    gantt_side_editor.preview_bar(
-                        target_group, bar_key=selected_key, employee_name=utils.get_employee_name,
-                        original_notes=target_clean_note, day=edit_date,
-                        project=edit_custom_proj_name.strip() or utils.get_project_name(edit_proj),
-                        employees=[utils.get_employee_name(e) for e in edit_emps],
-                        arrival=new_t_arrival.strftime("%H:%M") if use_arr_edit else "",
-                        start=new_t_start, end=new_t_end, color=edit_color, notes=edit_notes,
-                        general=e_is_general, cancelled=e_is_cancelled, reason=e_cancel_reason,
-                        support_roles=edit_support_roles,
-                    )
 
                 save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
                 delete_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή", use_container_width=True)

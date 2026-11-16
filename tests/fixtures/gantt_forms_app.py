@@ -1,7 +1,7 @@
 """Run the real edit blocks with synthetic records and an in-memory save spy.
 
 No config/database modules or credentials are imported. Suitable for AppTest
-and manual layout QA: streamlit run tests/fixtures/side_editor_app.py.
+and manual layout QA: streamlit run tests/fixtures/gantt_forms_app.py.
 """
 import ast
 from copy import deepcopy
@@ -19,14 +19,12 @@ from st_click_detector import click_detector
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-import gantt_side_editor
 import placement_roles
 from gantt_helpers import normalize_id_list, clean_conflict_leave_notes
 
 st.set_page_config(layout="wide")
-st.title("Δοκιμή πλαϊνής επεξεργασίας — συνθετικά δεδομένα")
+st.title("Δοκιμή φορμών Gantt — συνθετικά δεδομένα")
 view = st.sidebar.selectbox("Έκδοση", ["desktop", "mobile"])
-side_editor_enabled = gantt_side_editor.render_toggle()
 st.sidebar.checkbox("Προσομοίωση αποτυχίας αποθήκευσης", key="fail_save")
 for key, value in {
     "clicked_key": None, "mobile_clicked_key": None, "trigger_scroll": False,
@@ -105,7 +103,7 @@ GANTT_DATES_SPECIFIC = "Συγκεκριμένες ημερομηνίες"
 prefix = "bar_" if view == "desktop" else "mobile_bar_"
 mapping = {prefix + hashlib.md5(k.encode()).hexdigest(): k for k in wk_groups}
 links = ''.join(f'<a class="mygantt-bar" id="{ident}" href="#" style="display:block;padding:14px;margin:8px;background:#15803d;color:white">{key} · Έργο · Α, Β</a>' for ident,key in mapping.items())
-clicked = "" if st.session_state.get("fixture_headless") else click_detector('<div>'+links+'</div><script>document.addEventListener("click", function(e) {const a=e.target.closest("a"); const guard=window.parent.staffProSideEditor; if(a && guard && !guard.allowLeave(a.id)){e.preventDefault();e.stopImmediatePropagation();}},true);</script>', key="fixture_bars")
+clicked = "" if st.session_state.get("fixture_headless") else click_detector('<div>'+links+'</div>', key="fixture_bars")
 state_key = "clicked_key" if view == "desktop" else "mobile_clicked_key"
 select_key = "edit_bar_select_widget" if view == "desktop" else "mobile_edit_select_widget"
 if clicked and clicked != st.session_state.get("fixture_last"):
@@ -137,5 +135,6 @@ else:
         exec(compile(ast.Module(body=[add], type_ignores=[]), str(path), "exec"), globals())
     edit = next(n for n in tree.body if isinstance(n, ast.With)
                 and isinstance(n.items[0].context_expr, ast.Call)
-                and ast.unparse(n.items[0].context_expr.func) == "gantt_side_editor.editor")
+                and ast.unparse(n.items[0].context_expr.func) == "st.expander"
+                and n.items[0].context_expr.args[0].value == "✏️ Επεξεργασία Μπάρας")
 exec(compile(ast.Module(body=[edit], type_ignores=[]), str(path), "exec"), globals())
