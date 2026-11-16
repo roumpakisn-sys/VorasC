@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 import textwrap
 import re
+import placement_roles
 
 
 def get_local_today():
@@ -103,6 +104,7 @@ def generate_gantt_chart(
             c_hex = a.get("colorHex") or (proj.get("color") if proj else "#999999") or "#999999"
             c_name = a.get("colorName", "Προεπιλογή")
             notes = a.get("notes", "") or ""
+            _, support_roles = placement_roles.split_notes(notes)
             is_canc = bool(a.get("is_cancelled", False))
             c_reason = a.get("cancel_reason", "") or ""
             is_general = bool(a.get("is_general", False))
@@ -117,7 +119,7 @@ def generate_gantt_chart(
             key = (
                 f"{curr_date}_{project_id}_{start_time}_{end_time}_{c_hex}_"
                 f"{is_canc}_{c_reason}_{arrival_time}_{is_general}"
-            )
+            ) + placement_roles.group_suffix(support_roles)
 
             if key not in groups:
                 legend_val = f"{project_name} ({c_name})"
@@ -139,6 +141,7 @@ def generate_gantt_chart(
                     "Notes_List": [],
                     "Notes_Raw": "",
                     "Notes": "",
+                    "SupportRoles": support_roles,
                     "is_cancelled": is_canc,
                     "cancel_reason": c_reason,
                     "LegendGroup": legend_val,
@@ -195,7 +198,12 @@ def generate_gantt_chart(
                 g["Employees"] = ["ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"]
 
             g["Notes_Raw"] = " | ".join(g["Notes_List"])
-            g["Notes"] = _clean_leave_note_from_bar(g["Notes_Raw"])
+            free_notes = list(dict.fromkeys(
+                placement_roles.split_notes(note)[0] for note in g["Notes_List"]
+            ))
+            g["Notes"] = _clean_leave_note_from_bar(placement_roles.combine_notes(
+                " | ".join(note for note in free_notes if note), g["SupportRoles"]
+            ))
 
             export_data.append({
                 "Ημερομηνία": curr_date.strftime("%d/%m/%Y"),
@@ -215,3 +223,4 @@ def generate_gantt_chart(
 
     # Συμβατότητα με την παλιά επιστροφή fig, wk_groups, export_data.
     return None, wk_groups, export_data
+

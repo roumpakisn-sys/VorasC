@@ -13,6 +13,7 @@ import gantt_engine
 import gantt_html
 import gantt_filters
 import gantt_side_editor
+import placement_roles
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -664,6 +665,8 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
             key=f"mqa_emps_{qa_rc}",
         )
 
+        add_support_roles = placement_roles.inputs(key=f"mqa_roles_{qa_rc}", stacked=True)
+
         color_choice = st.selectbox(
             "Χρώμα",
             options=list(config.BASIC_COLORS.keys()),
@@ -739,7 +742,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "endTime": va["end"],
                             "colorName": color_choice,
                             "colorHex": config.BASIC_COLORS[color_choice],
-                            "notes": final_notes,
+                            "notes": placement_roles.combine_notes(final_notes, add_support_roles),
                             "is_cancelled": False,
                             "cancel_reason": "",
                             "recurring_id": None,
@@ -855,7 +858,13 @@ with gantt_side_editor.editor(
                     index=default_color_idx,
                 )
 
-                target_clean_note = clean_conflict_leave_notes(target_group.get("Notes", ""))
+                target_free_notes, target_support_roles = placement_roles.split_notes(target_group.get("Notes", ""))
+                target_support_roles = target_group.get("SupportRoles", target_support_roles)
+                edit_support_roles = placement_roles.inputs(
+                    key="mobile_edit_roles_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12],
+                    defaults=target_support_roles, stacked=True,
+                )
+                target_clean_note = clean_conflict_leave_notes(target_free_notes)
                 edit_notes = st.text_input("Παρατηρήσεις", value=target_clean_note)
 
                 existing_arr = target_group.get("ArrivalTime", "")
@@ -906,6 +915,7 @@ with gantt_side_editor.editor(
                         arrival=new_t_arrival.strftime("%H:%M") if use_arr_edit else "",
                         start=new_t_start, end=new_t_end, color=edit_color, notes=edit_notes,
                         general=e_is_general, cancelled=e_is_cancelled, reason=e_cancel_reason,
+                        support_roles=edit_support_roles,
                     )
 
                 save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
@@ -980,7 +990,7 @@ with gantt_side_editor.editor(
                                     "endTime": va["end"],
                                     "colorName": edit_color,
                                     "colorHex": config.BASIC_COLORS[edit_color],
-                                    "notes": final_notes,
+                                    "notes": placement_roles.combine_notes(final_notes, edit_support_roles),
                                     "is_cancelled": bool(e_is_cancelled),
                                     "cancel_reason": normalized_cancel_reason,
                                     "recurring_id": target_group.get("RecurringId"),
