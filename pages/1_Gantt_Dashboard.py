@@ -38,6 +38,7 @@ import gantt_export
 import gantt_excel_export
 import gantt_filters
 import gantt_side_editor
+import placement_roles
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -315,7 +316,8 @@ def _form_prefill_date(raw, fallback):
 def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
                             project_id, custom_project, employee_ids, color_name,
                             notes, is_general, use_arrival, arrival_time,
-                            start_time, end_time, is_cancelled=False, cancel_reason=""):
+                            start_time, end_time, is_cancelled=False, cancel_reason="",
+                            support_roles=None):
     return {
         "first_date": first_date,
         "mode": mode,
@@ -326,6 +328,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
         "employee_ids": list(employee_ids),
         "color": color_name,
         "notes": notes,
+        "support_roles": placement_roles.normalize(support_roles),
         "is_general": bool(is_general),
         "use_arrival": bool(use_arrival),
         "arrival_time": arrival_time.strftime("%H:%M"),
@@ -431,6 +434,10 @@ if not presentation_mode:
                     key=f"qa_emps_{qa_rc}",
                 )
 
+                add_support_roles = placement_roles.inputs(
+                    key=f"qa_roles_{qa_rc}", defaults=qa_prefill.get("support_roles")
+                )
+
                 c_color, c_notes = st.columns(2)
                 with c_color:
                     color_choice = st.selectbox(
@@ -485,6 +492,7 @@ if not presentation_mode:
                         project_id=proj_choice, custom_project=custom_proj_name,
                         employee_ids=emp_choices, color_name=color_choice,
                         notes=add_notes, is_general=is_general,
+                        support_roles=add_support_roles,
                         use_arrival=use_arr, arrival_time=t_arrival,
                         start_time=t_start, end_time=t_end,
                     ))
@@ -556,7 +564,7 @@ if not presentation_mode:
                                     "endTime": va["end"],
                                     "colorName": color_choice,
                                     "colorHex": config.BASIC_COLORS[color_choice],
-                                    "notes": c_notes,
+                                    "notes": placement_roles.combine_notes(c_notes, add_support_roles),
                                     "is_cancelled": False,
                                     "cancel_reason": "",
                                     "recurring_id": None,
@@ -761,6 +769,15 @@ if not presentation_mode:
                             key=f"edit_emps_{edit_key}",
                         )
 
+                        target_free_notes, target_support_roles = placement_roles.split_notes(
+                            target_group.get("Notes", "")
+                        )
+                        target_support_roles = target_group.get("SupportRoles", target_support_roles)
+                        edit_support_roles = placement_roles.inputs(
+                            key=f"edit_roles_{edit_key}",
+                            defaults=(edit_prefill.get("support_roles") if edit_prefill else target_support_roles),
+                        )
+
                         e_color_col, e_notes_col = st.columns(2)
                         with e_color_col:
                             default_color_idx = list(config.BASIC_COLORS.keys()).index(target_group["ColorName"]) if target_group["ColorName"] in config.BASIC_COLORS else 0
@@ -771,7 +788,7 @@ if not presentation_mode:
                                 key=f"edit_color_{edit_key}",
                             )
                         with e_notes_col:
-                            target_clean_note = clean_conflict_leave_notes(target_group.get("Notes", ""))
+                            target_clean_note = clean_conflict_leave_notes(target_free_notes)
                             edit_notes = st.text_input(
                                 "Παρατηρήσεις (Προαιρετικό)",
                                 value=str(edit_prefill.get("notes", target_clean_note)),
@@ -834,6 +851,7 @@ if not presentation_mode:
                                 arrival=new_t_arrival.strftime("%H:%M") if use_arr_edit else "",
                                 start=new_t_start, end=new_t_end, color=edit_color, notes=edit_notes,
                                 general=e_is_general, cancelled=e_is_cancelled, reason=e_cancel_reason,
+                                support_roles=edit_support_roles,
                             )
 
                         col_btn1, col_btn2, col_btn3 = st.columns(3)
@@ -851,6 +869,7 @@ if not presentation_mode:
                                 project_id=edit_proj, custom_project=edit_custom_proj_name,
                                 employee_ids=edit_emps, color_name=edit_color,
                                 notes=edit_notes, is_general=e_is_general,
+                                support_roles=edit_support_roles,
                                 use_arrival=use_arr_edit, arrival_time=new_t_arrival,
                                 start_time=new_t_start, end_time=new_t_end,
                                 is_cancelled=e_is_cancelled, cancel_reason=e_cancel_reason,
@@ -910,6 +929,7 @@ if not presentation_mode:
                                 and str_end == str(target_group["EndTime"])[:5]
                                 and edit_color == target_group["ColorName"]
                                 and edit_notes == target_clean_note
+                                and placement_roles.normalize(edit_support_roles) == placement_roles.normalize(target_support_roles)
                                 and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                 and normalized_cancel_reason == target_cancel_reason
                                 and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
@@ -951,7 +971,7 @@ if not presentation_mode:
                                         "endTime": adj_end,
                                         "colorName": edit_color,
                                         "colorHex": config.BASIC_COLORS[edit_color],
-                                        "notes": c_notes,
+                                        "notes": placement_roles.combine_notes(c_notes, edit_support_roles),
                                         "is_cancelled": e_is_cancelled,
                                         "cancel_reason": normalized_cancel_reason,
                                         # Additional dates are independent placements, not

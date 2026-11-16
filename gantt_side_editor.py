@@ -101,6 +101,7 @@ def preview(original, proposed):
 
 def preview_bar(group, *, bar_key, employee_name, original_notes, **draft):
     import streamlit as st
+    import placement_roles
 
     # The marker follows all input fields. The client must not take a baseline
     # from the previous bar while Streamlit streams the replacement form.
@@ -113,11 +114,14 @@ def preview_bar(group, *, bar_key, employee_name, original_notes, **draft):
         end=group["EndTime"], color=group["ColorName"], notes=original_notes,
         general=group.get("IsGeneral", False), cancelled=group.get("is_cancelled", False),
         reason=group.get("cancel_reason", ""),
+        support_roles=group.get("SupportRoles", placement_roles.split_notes(group.get("Notes", ""))[1]),
     ), summary(**draft))
 
 
 def summary(*, day, project, employees, arrival, start, end, color, notes,
-            general, cancelled, reason):
+            general, cancelled, reason, support_roles=None):
+    import placement_roles
+
     return {
         "Ημερομηνία": day.strftime("%d/%m/%Y"), "Έργο": project,
         "Προσωπικό": ", ".join(sorted(employees)) or "Χωρίς ανάθεση",
@@ -126,4 +130,5 @@ def summary(*, day, project, employees, arrival, start, end, color, notes,
         "Γενικός": "Ναι" if general else "Όχι",
         "Ακυρωμένη": "Ναι" if cancelled else "Όχι",
         "Λόγος ακύρωσης": (reason or "") if cancelled else "",
+        **{placement_roles.LABELS[key]: value for key, value in placement_roles.normalize(support_roles).items()},
     }

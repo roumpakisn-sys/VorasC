@@ -84,6 +84,23 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(result['rows'][0]['created_at'], before[0]['created_at'])
         self.assertNotEqual(result['rows'][0]['updated_at'], before[0]['updated_at'])
 
+    def test_optional_contacts_round_trip_and_clear_with_existing_schema(self):
+        from placement_roles import combine_notes, split_notes, normalize
+        contacts = {'transfer_driver': 'Νίκος', 'return_driver': 'Γιάννης', 'supervisor': 'Ελένη'}
+        before, after = self.expected(), self.proposed()
+        for record in after:
+            record['notes'] = combine_notes('Κλειδιά [Άδεια: Μαρία]', contacts)
+        self.save(before, after)
+        for record in self.expected():
+            self.assertEqual(split_notes(record['notes']), ('Κλειδιά [Άδεια: Μαρία]', contacts))
+        before, after = self.expected(), self.proposed()
+        for record in after:
+            record['notes'] = combine_notes(record['notes'], {})
+        self.save(before, after)
+        self.assertEqual([r['employeeId'] for r in self.expected()], ['e', 'e2'])
+        for record in self.expected():
+            self.assertEqual(split_notes(record['notes']), ('Κλειδιά [Άδεια: Μαρία]', normalize()))
+
     def test_second_row_failure_rolls_back_first_and_project(self):
         before, after = self.expected(), self.proposed()
         self.db.execute('''create or replace function inject_failure() returns trigger language plpgsql as $$

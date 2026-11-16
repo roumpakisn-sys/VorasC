@@ -20,6 +20,7 @@ from st_click_detector import click_detector
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import gantt_side_editor
+import placement_roles
 from gantt_helpers import normalize_id_list, clean_conflict_leave_notes
 
 st.set_page_config(layout="wide")
@@ -35,6 +36,8 @@ for key, value in {
                                        {"id": "e2", "name": "Εργαζόμενος Β"},
                                        {"id": "e3", "name": "Εργαζόμενος Γ"}],
     "projects": [{"id": "p1", "name": "Δοκιμαστικό έργο"}],
+    "view_week_date": date(2026, 11, 16), "mobile_view_date": date(2026, 11, 16),
+    "mobile_qa_rc": 0,
 }.items():
     st.session_state.setdefault(key, value)
 active_employee_ids = ["e1", "e2", "e3"]
@@ -47,9 +50,22 @@ wk_groups = {key: {
 } for i, key in enumerate(["bar-a", "bar-b"])}
 st.session_state.setdefault("assignments", [
     {"id": ident, "employeeId": eid, "projectId": g["ProjectId"], "date": g["Date"],
-     "startTime": g["StartTime"], "endTime": g["EndTime"], "notes": g["Notes"]}
+     "startTime": g["StartTime"], "endTime": g["EndTime"], "notes": g["Notes"],
+     "colorName": g["ColorName"], "colorHex": "#15803d"}
     for g in wk_groups.values() for ident, eid in zip(g["AssignmentIds"], g["EmployeeIds"])
 ])
+if st.session_state.get("fixture_persist"):
+    from gantt_engine import generate_gantt_chart
+    by_day = {}
+    for row in st.session_state.assignments:
+        by_day.setdefault(row["date"], []).append(row)
+    _, wk_groups, _ = generate_gantt_chart(
+        date(2026, 11, 16), 1, False, 0, by_day, [],
+        st.session_state.employees, st.session_state.projects,
+        {e["id"]: e for e in st.session_state.employees},
+        {p["id"]: p for p in st.session_state.projects},
+    )
+st.session_state["fixture_group_keys"] = sorted(wk_groups, key=lambda key: (wk_groups[key]["Date"], wk_groups[key]["StartTime"]))
 
 
 def save_batch(old, new, **kwargs):
@@ -57,6 +73,12 @@ def save_batch(old, new, **kwargs):
     if st.session_state.fail_save:
         st.error("Δοκιμαστική αποτυχία: δεν αποθηκεύτηκε τίποτα.")
         return None
+    if st.session_state.get("fixture_persist"):
+        from assignment_store import preserve_ids
+        if kwargs.get("keep_worker_ids"):
+            new = preserve_ids(old, new)
+        old_ids = {r["id"] for r in old}
+        st.session_state.assignments = [r for r in st.session_state.assignments if r["id"] not in old_ids] + deepcopy(new)
     return new
 
 
@@ -66,6 +88,7 @@ utils = SimpleNamespace(
     get_project_name=lambda pid: "Δοκιμαστικό έργο", supabase=object(),
     safe_date_parse=lambda value: value if isinstance(value, date) else date.fromisoformat(value) if value else None,
     save_assignment_batch=save_batch,
+    mark_data_changed=lambda: None,
     db_delete_in=lambda *args, **kwargs: st.error("Η διαγραφή δεν υποστηρίζεται στη δοκιμή."),
 )
 
@@ -73,11 +96,12 @@ path = ROOT / "pages" / ("1_Gantt_Dashboard.py" if view == "desktop" else "4_Mob
 tree = ast.parse(path.read_text())
 names = {"clear_bar_selection", "preserve_context_notes", "_form_time", "_form_prefill_date",
          "_save_placement_clipboard", "_form_clipboard_payload", "clear_mobile_selection",
-         "_time_to_str", "_make_or_get_project", "_replace_local_assignments"}
+         "_time_to_str", "_make_or_get_project", "_replace_local_assignments", "_gantt_target_dates"}
 for node in tree.body:
     if isinstance(node, ast.FunctionDef) and node.name in names:
         exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), globals())
 GANTT_DATES_CONTINUOUS = "Συνεχόμενες ημέρες"
+GANTT_DATES_SPECIFIC = "Συγκεκριμένες ημερομηνίες"
 prefix = "bar_" if view == "desktop" else "mobile_bar_"
 mapping = {prefix + hashlib.md5(k.encode()).hexdigest(): k for k in wk_groups}
 links = ''.join(f'<a class="mygantt-bar" id="{ident}" href="#" style="display:block;padding:14px;margin:8px;background:#15803d;color:white">{key} · Έργο · Α, Β</a>' for ident,key in mapping.items())
@@ -93,12 +117,24 @@ st.caption("Οι πραγματικές φόρμες ακολουθούν. Κα�
 
 if view == "desktop":
     col_add, col_edit = st.columns(2)
-    with col_add:
-        st.info("Χώρος υπάρχουσας φόρμας νέας τοποθέτησης")
+    if st.session_state.get("fixture_show_add"):
+        add = next(n for n in ast.walk(tree) if isinstance(n, ast.With)
+                   and isinstance(n.items[0].context_expr, ast.Name)
+                   and n.items[0].context_expr.id == "col_add")
+        exec(compile(ast.Module(body=[add], type_ignores=[]), str(path), "exec"), globals())
+    else:
+        with col_add:
+            st.info("Χώρος υπάρχουσας φόρμας νέας τοποθέτησης")
     edit = next(n for n in ast.walk(tree) if isinstance(n, ast.With)
                 and isinstance(n.items[0].context_expr, ast.Name)
                 and n.items[0].context_expr.id == "col_edit")
 else:
+    if st.session_state.get("fixture_show_add"):
+        add = next(n for n in tree.body if isinstance(n, ast.With)
+                   and isinstance(n.items[0].context_expr, ast.Call)
+                   and ast.unparse(n.items[0].context_expr.func) == "st.expander"
+                   and n.items[0].context_expr.args[0].value == "➕ Νέα Τοποθέτηση")
+        exec(compile(ast.Module(body=[add], type_ignores=[]), str(path), "exec"), globals())
     edit = next(n for n in tree.body if isinstance(n, ast.With)
                 and isinstance(n.items[0].context_expr, ast.Call)
                 and ast.unparse(n.items[0].context_expr.func) == "gantt_side_editor.editor")
