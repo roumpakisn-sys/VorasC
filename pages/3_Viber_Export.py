@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
+import re
 from datetime import datetime, date
 import utils
+import placement_roles
 
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
@@ -163,13 +165,30 @@ def _format_viber_employees(employee_labels):
     return " ".join(formatted_labels)
 
 
+def _clean_viber_notes(notes):
+    """Hide generated leave annotations under projects; keep ordinary notes."""
+    clean = re.sub(r"\[Άδεια:\s*[^\]]*\]", "", notes or "", flags=re.IGNORECASE)
+    if clean == (notes or ""):
+        return clean.strip()
+    # Removing an annotation must not leave an empty note or separator behind.
+    return " | ".join(re.sub(r"[ \t]{2,}", " ", part).strip()
+                      for part in clean.split("|") if part.strip())
+
+
+def _format_viber_contacts(contacts):
+    """Separate, bold Viber lines, omitting empty optional contact fields."""
+    icons = {"transfer_driver": "🚐", "return_driver": "🚐", "supervisor": "👤"}
+    return [f"{icons[key]} *{label}: {', '.join(contacts.get(key, []))}*"
+            for key, label in placement_roles.LABELS.items() if contacts.get(key)]
+
+
 def _group_viber_assignments(assignments, day_assignments):
     """One entry per project/shift, even when leave notes differ by worker.
 
-Notes describe the shift; they do not create another staffing slot. Keep all
-distinct notes and show 'without staff' only if the entire group is unstaffed.
-This changes the export only, never the underlying assignment/leave records.
-"""
+    Notes describe the shift; they do not create another staffing slot. Keep
+    ordinary notes and separate contacts, hiding leave annotations under projects.
+    This changes the export only, never the underlying assignment/leave records.
+    """
     groups = {}
     for assignment in assignments:
         if assignment.get("is_cancelled"):
@@ -183,13 +202,18 @@ This changes the export only, never the underlying assignment/leave records.
         group = groups.setdefault(key, {
             "project": _project_name(project_id), "start": start, "end": end,
             "arrival": arrival, "employees": [], "notes": [],
+            "support_roles": {key: [] for key in placement_roles.LABELS},
         })
         employee = _employee_viber_label(assignment, day_assignments)
         if employee and employee != "Χωρίς Προσωπικό" and employee not in group["employees"]:
             group["employees"].append(employee)
-        note = str(assignment.get("notes") or "").strip()
+        free_notes, contacts = placement_roles.split_notes(str(assignment.get("notes") or ""))
+        note = _clean_viber_notes(free_notes)
         if note and note not in group["notes"]:
             group["notes"].append(note)
+        for role, name in contacts.items():
+            if name and name not in group["support_roles"][role]:
+                group["support_roles"][role].append(name)
     return list(groups.values())
 
 
@@ -289,6 +313,9 @@ else:
         # Ώρα προσέλευσης (αν υπάρχει) με αστερίσκους
         if arr:
             viber_msg += f"🚶 Προσέλευση: *{arr}*\n"
+
+        for contact_line in _format_viber_contacts(group["support_roles"]):
+            viber_msg += contact_line + "\n"
 
         if notes:
             viber_msg += f"📝 Σημείωση: {notes}\n"
