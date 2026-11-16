@@ -2,9 +2,11 @@
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
+import re
 from types import SimpleNamespace
 import unittest
 
+import placement_roles
 from test_regression_smoke import get_source_functions
 
 try:
@@ -25,8 +27,9 @@ class ViberGroupingTests(unittest.TestCase):
     def setUp(self):
         self.env = get_source_functions(ROOT / "pages/3_Viber_Export.py",
             ("_project_name", "_employee_name", "_employee_viber_label", "_group_after_project_labels",
-             "_format_viber_employees", "_group_viber_assignments"),
-            {"utils": SimpleNamespace(
+             "_format_viber_employees", "_clean_viber_notes", "_format_viber_contacts",
+             "_group_viber_assignments"),
+            {"re": re, "placement_roles": placement_roles, "utils": SimpleNamespace(
                 get_project_info=lambda pid: {"name": "Προηγούμενο" if pid == "previous" else "Έργο"},
                 get_employee_name=lambda eid: {"e1": "Άννα", "e2": "Ελένη"}.get(eid, "Χωρίς Προσωπικό"))})
 
@@ -42,7 +45,7 @@ class ViberGroupingTests(unittest.TestCase):
         for rows in ([empty, replacement], [replacement, empty]):
             group, = self.groups(rows)
             self.assertEqual(group["employees"], ["Άννα"])
-            self.assertEqual(set(group["notes"]), {"[Άδεια: Μαρία]", "Κλειδιά στη ρεσεψιόν"})
+            self.assertEqual(group["notes"], ["Κλειδιά στη ρεσεψιόν"])
             text = self.env["_format_viber_employees"](group["employees"])
             self.assertEqual(text, "*Άννα*")
             self.assertNotIn("Χωρίς Προσωπικό", text)
@@ -50,6 +53,7 @@ class ViberGroupingTests(unittest.TestCase):
     def test_actual_unstaffed_shift_remains_unstaffed(self):
         group, = self.groups([assignment(notes="[Άδεια: Μαρία]")])
         self.assertEqual(self.env["_format_viber_employees"](group["employees"]), "*Χωρίς Προσωπικό*")
+        self.assertEqual(group["notes"], [])
 
     def test_different_shift_or_project_or_day_does_not_hide_unstaffed_work(self):
         empty = assignment(notes="[Άδεια: Μαρία]")
@@ -81,8 +85,27 @@ class ViberGroupingTests(unittest.TestCase):
             assignment("a", "e1", notes=contacts), assignment("b", "e2", notes=contacts),
             assignment("c", "e1", notes="Άλλη παρατήρηση")])
         self.assertEqual(group["employees"], ["Άννα", "Ελένη"])
-        self.assertEqual(group["notes"].count(contacts), 1)
-        self.assertIn("Άλλη παρατήρηση", group["notes"])
+        self.assertEqual(group["notes"], ["Άλλη παρατήρηση"])
+        self.assertEqual(group["support_roles"], {
+            "transfer_driver": ["Νίκος"], "return_driver": ["Γιώργος"], "supervisor": ["Σοφία"]})
+        self.assertEqual(self.env["_format_viber_contacts"](group["support_roles"]), [
+            "🚐 *Οδηγός μεταφοράς: Νίκος*", "🚐 *Οδηγός επιστροφής: Γιώργος*", "👤 *Επόπτης: Σοφία*"])
+
+    def test_leave_cleanup_preserves_real_notes_and_other_annotations(self):
+        raw = "[Άδεια: Μαρία] | Κλειδιά [Άδεια: Νίκος] στην είσοδο | [Εμπλοκή: Άννα] |"
+        self.assertEqual(self.env["_clean_viber_notes"](raw),
+                         "Κλειδιά στην είσοδο | [Εμπλοκή: Άννα]")
+        self.assertEqual(self.env["_clean_viber_notes"]("[Άδεια: Μαρία] | [Άδεια: Νίκος] |"), "")
+
+    def test_distinct_contact_names_survive_grouping_without_duplicates(self):
+        contacts = {"transfer_driver": "Νίκος [εφεδρικός]", "supervisor": "Σοφία"}
+        group, = self.groups([
+            assignment("a", "e1", notes=placement_roles.combine_notes("", contacts)),
+            assignment("b", "e2", notes=placement_roles.combine_notes("", {**contacts, "transfer_driver": "Πέτρος"})),
+        ])
+        self.assertEqual(self.env["_format_viber_contacts"](group["support_roles"]), [
+            "🚐 *Οδηγός μεταφοράς: Νίκος [εφεδρικός], Πέτρος*", "👤 *Επόπτης: Σοφία*"])
+        self.assertEqual(group["notes"], [])
 
     def test_after_project_styling_uses_full_day_even_when_previous_is_filtered(self):
         replacement = assignment("replacement", "e1", startTime="10:00", endTime="13:00")
@@ -94,9 +117,13 @@ class ViberGroupingTests(unittest.TestCase):
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")
 class ViberPageTests(unittest.TestCase):
-    def app(self, covered=True):
+    def app(self, covered=True, contacts=None, notes=None, duplicate=False):
         app = AppTest.from_file(str(ROOT / "tests/fixtures/viber_export_app.py"))
         app.session_state["fixture_covered"] = covered
+        app.session_state["fixture_contacts"] = contacts or {}
+        app.session_state["fixture_duplicate_worker"] = duplicate
+        if notes is not None:
+            app.session_state["fixture_notes"] = notes
         app.run()
         self.assertFalse(app.exception)
         return app
@@ -111,6 +138,8 @@ class ViberPageTests(unittest.TestCase):
         self.assertIn("🌴 *Άδειες / Απουσίες*", message)
         self.assertIn("🔸 Μαρία (Αντικαταστάτης: Άννα)", message)
         self.assertIn("Κλειδιά στη ρεσεψιόν", message)
+        self.assertNotIn("Μαρία", message.split("🌴 *Άδειες / Απουσίες*")[0])
+        self.assertIn("[Άδεια: Μαρία]", app.session_state.assignments[0]["notes"])
         self.assertEqual(len(app.session_state.assignments), 2)
 
     def test_project_and_leave_filters_still_control_message(self):
@@ -127,3 +156,28 @@ class ViberPageTests(unittest.TestCase):
         app = self.app(covered=False)
         self.assertEqual(app.code[0].value.count("🏗️ Έργο"), 1)
         self.assertIn("👥 Προσωπικό: *Χωρίς Προσωπικό*", app.code[0].value)
+        self.assertNotIn("📝 Σημείωση:", app.code[0].value)
+
+    def test_contacts_are_bold_separate_lines_and_not_notes(self):
+        contacts = {"transfer_driver": "Νίκος", "return_driver": "Γιώργος", "supervisor": "Σοφία"}
+        app = self.app(contacts=contacts, notes="", duplicate=True)
+        message = app.code[0].value
+        self.assertEqual(message.count("🏗️ Έργο"), 1)
+        for line in ["🚐 *Οδηγός μεταφοράς: Νίκος*", "🚐 *Οδηγός επιστροφής: Γιώργος*", "👤 *Επόπτης: Σοφία*"]:
+            self.assertEqual(message.count(line), 1)
+            self.assertIn(line, message.splitlines())
+        self.assertNotIn("📝 Σημείωση:", message)
+        self.assertNotIn("[Οδηγός", message)
+        self.assertNotIn("[Επόπτης:", message)
+        self.assertNotIn("Μαρία", message.split("🌴 *Άδειες / Απουσίες*")[0])
+        self.assertIn("Άννα", message)
+        self.assertIn("Ελένη", message)
+
+    def test_only_filled_roles_are_shown_and_real_notes_stay_notes(self):
+        app = self.app(contacts={"supervisor": "Σοφία"})
+        message = app.code[0].value
+        self.assertIn("👤 *Επόπτης: Σοφία*\n", message)
+        self.assertNotIn("Οδηγός", message)
+        self.assertIn("📝 Σημείωση: Κλειδιά στη ρεσεψιόν\n", message)
+        app.checkbox(key="chk_include_leaves").set_value(False).run()
+        self.assertNotIn("Μαρία", app.code[0].value)
