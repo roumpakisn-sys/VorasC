@@ -1,5 +1,6 @@
 from datetime import date, time
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -17,8 +18,8 @@ class PreviewTests(unittest.TestCase):
         for value in ("0", "false", "OFF", " no "):
             self.assertFalse(editor.feature_available({"STAFFPRO_SIDE_EDITOR_ENABLED": value}))
 
-    def test_disabled_wrapper_does_not_load_streamlit_or_call_close(self):
-        with patch.dict('sys.modules', {'streamlit': None}):
+    def test_disabled_wrapper_without_prior_edit_emits_nothing(self):
+        with patch.dict('sys.modules', {'streamlit': SimpleNamespace(session_state={})}):
             with editor.editor(False, "bar", page="desktop", on_close=lambda: self.fail("closed")):
                 pass
 
@@ -73,6 +74,7 @@ class RealFormTests(unittest.TestCase):
                 self.assertFalse(app.exception)
                 self.assertEqual(app.session_state.save_calls, [])
                 self.assertEqual(len(app.time_input), 0)
+                self.assertNotIn(editor._SESSION_KEY, app.session_state)
 
     def test_enabled_save_keeps_same_atomic_api_and_both_workers(self):
         for view in ("desktop", "mobile"):
@@ -123,6 +125,7 @@ class RealFormTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertFalse(any("Κλείσιμο" in b.label or "Προεπισκόπηση" in b.label for b in app.button))
         self.assertTrue(any(b.label == "💾 Αποθήκευση" for b in app.button))
+        self.assertNotIn(editor._SESSION_KEY, app.session_state)
 
     def test_global_disable_hides_switch_even_if_session_was_enabled(self):
         app = self.app()
@@ -131,3 +134,38 @@ class RealFormTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.toggle), 0)
         self.assertFalse(any("Κλείσιμο" in b.label for b in app.button))
+
+    def test_confirmed_save_retires_edit_and_reopening_gets_a_new_session(self):
+        for view in ("desktop", "mobile"):
+            with self.subTest(view=view):
+                app = self.app(view)
+                token = app.session_state[editor._SESSION_KEY]["token"]
+                app.time_input[-1].set_value(time(13))
+                self.button(app, "💾 Αποθήκευση").click().run()
+                self.assertFalse(app.exception)
+                self.assertNotIn(editor._SESSION_KEY, app.session_state)
+                html = "\n".join(e.proto.srcdoc for e in app.get("iframe"))
+                self.assertIn(f'StaffProSideEditor.retire(window, "{token}")', html)
+                select = "edit_bar_select_widget" if view == "desktop" else "mobile_edit_select_widget"
+                app.selectbox(key=select).set_value("bar-a").run()
+                self.assertFalse(app.exception)
+                self.assertNotEqual(app.session_state[editor._SESSION_KEY]["token"], token)
+
+    def test_preview_validation_and_failed_save_do_not_retire_edit(self):
+        for view in ("desktop", "mobile"):
+            with self.subTest(view=view):
+                app = self.app(view)
+                token = app.session_state[editor._SESSION_KEY]["token"]
+                app.time_input[-1].set_value(time(13))
+                self.button(app, "🔎 Προεπισκόπηση αλλαγών").click().run()
+                self.assertEqual(app.session_state[editor._SESSION_KEY]["token"], token)
+                app.time_input[-1].set_value(time(8))
+                self.button(app, "💾 Αποθήκευση").click().run()
+                self.assertEqual(app.session_state[editor._SESSION_KEY]["token"], token)
+                app.checkbox(key="fail_save").set_value(True).run()
+                app.time_input[-1].set_value(time(13))
+                self.button(app, "💾 Αποθήκευση").click().run()
+                self.assertFalse(app.exception)
+                self.assertEqual(app.session_state[editor._SESSION_KEY]["token"], token)
+                html = "\n".join(e.proto.srcdoc for e in app.get("iframe"))
+                self.assertNotIn('StaffProSideEditor.retire(window,', html)

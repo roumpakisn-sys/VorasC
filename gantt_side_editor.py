@@ -8,6 +8,20 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import uuid
+
+
+_SESSION_KEY = "_gantt_side_editor_session"
+
+
+def _render_script(method, argument):
+    import streamlit.components.v1 as components
+
+    script = Path(__file__).with_suffix(".js").read_text(encoding="utf-8")
+    components.html(
+        f"<script>{script}\nStaffProSideEditor.{method}(window, {json.dumps(argument)});</script>",
+        height=0, width=0,
+    )
 
 
 def feature_available(environ=None):
@@ -31,26 +45,31 @@ def render_toggle(allowed=True):
 
 @contextmanager
 def editor(enabled, selected_key, *, page, on_close):
-    """Wrap, never duplicate, the existing form. Disabled mode emits nothing."""
+    """Wrap the existing form, retiring its guard when selection is cleared."""
+    import streamlit as st
+
     if not enabled or not selected_key:
+        previous = st.session_state.pop(_SESSION_KEY, None)
+        if previous:
+            # Runs after confirmed save/close on the next Streamlit pass, never
+            # merely on pressing Save (validation and write failures keep selection).
+            _render_script("retire", previous["token"])
         yield
         return
-
-    import streamlit as st
-    import streamlit.components.v1 as components
 
     pane_key = f"gantt_side_editor_{page}"
     identity = hashlib.sha256(str(selected_key).encode()).hexdigest()
     bar_prefix = "mobile_bar_" if page == "mobile" else "bar_"
-    config = json.dumps({"selector": f".st-key-{pane_key}", "identity": identity,
-                         "barId": bar_prefix + hashlib.md5(str(selected_key).encode()).hexdigest()})
-    script = Path(__file__).with_suffix(".js").read_text(encoding="utf-8")
+    previous = st.session_state.get(_SESSION_KEY)
+    if not previous or previous["page"] != page or previous["identity"] != identity:
+        previous = {"page": page, "identity": identity, "token": uuid.uuid4().hex}
+        st.session_state[_SESSION_KEY] = previous
+    config = {"selector": f".st-key-{pane_key}", "identity": identity,
+              "token": previous["token"],
+              "barId": bar_prefix + hashlib.md5(str(selected_key).encode()).hexdigest()}
     with st.container(key=pane_key):
         # Installed before the form so validation st.stop() cannot skip the guard.
-        components.html(
-            f"<script>{script}\nStaffProSideEditor.install(window, {config});</script>",
-            height=0, width=0,
-        )
+        _render_script("install", config)
         if st.button("✕ Κλείσιμο επεξεργασίας", key=f"{pane_key}_close"):
             on_close()
             st.session_state.skip_remote_sync_once = True

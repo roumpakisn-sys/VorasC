@@ -16,12 +16,22 @@
         ? el.textContent : el.value || el.textContent]));
   }
 
+  function retire(frame, token) {
+    try {
+      const state = frame.parent.staffProSideEditor;
+      // A delayed completion must not retire a newly opened edit of the same bar.
+      if (state && state.token === token) state.cleanup();
+    } catch (_) { /* Parent access unavailable: the inline form stays usable. */ }
+  }
+
   function install(frame, config) {
     let win, doc;
     try { win = frame.parent; doc = win.document; } catch (_) { return; }
     const previous = win.staffProSideEditor;
-    const same = previous && previous.identity === config.identity && previous.selector === config.selector;
-    const state = {identity: config.identity, selector: config.selector, dirty: same ? previous.dirty : false,
+    const same = previous && previous.identity === config.identity && previous.selector === config.selector
+      && previous.token === config.token;
+    const state = {identity: config.identity, selector: config.selector, token: config.token,
+      dirty: same ? previous.dirty : false,
       baseline: same ? previous.baseline : null};
     if (previous) previous.cleanup();
     let pane, form, timer, observer, style, disposed = false, wasAttached = false;
@@ -33,13 +43,17 @@
     };
 
     state.allowLeave = function (barId) {
+      // Streamlit can remove/reuse the form before the observer fires. A saved
+      // or closed form must never keep blocking the next Gantt interaction.
+      if (!refreshDirty()) return true;
       if (barId && barId === config.barId) return true;
-      refreshDirty();
       return !state.dirty || win.confirm(MESSAGE);
     };
     state.cleanup = function () {
       if (disposed) return;
       disposed = true;
+      state.dirty = false;
+      state.baseline = null;
       win.clearInterval(timer);
       if (observer) observer.disconnect();
       listeners.forEach(remove => remove());
@@ -50,14 +64,21 @@
     win.staffProSideEditor = state;
 
     function refreshDirty() {
-      if (!pane || !pane.isConnected) return;
+      if (disposed) return false;
+      const currentPane = doc.querySelector(selector);
+      if (!currentPane) {
+        if (wasAttached) state.cleanup();
+        return false;
+      }
+      pane = currentPane;
       form = pane.querySelector('[data-testid="stForm"]');
-      if (!form || !form.querySelector('[data-staffpro-form="' + config.identity + '"]')) return;
-      if (!form || !Array.from(form.querySelectorAll('button')).some(
-        b => b.textContent.includes('Αποθήκευση'))) return;
+      if (!form || !form.querySelector('[data-staffpro-form="' + config.identity + '"]')) return false;
+      if (!Array.from(form.querySelectorAll('button')).some(
+        b => b.textContent.includes('Αποθήκευση'))) return false;
       const current = snapshot(form);
       if (state.baseline === null) state.baseline = current;
       else state.dirty = current !== state.baseline;
+      return true;
     }
 
     function attach() {
@@ -131,6 +152,7 @@
       }
     }
     function onKey(event) {
+      if (!refreshDirty()) return;
       if (event.key === 'Escape' && !doc.querySelector('[data-baseweb="popover"]')) {
         const close = pane && pane.querySelector('button');
         if (close) { stop(event); close.click(); }
@@ -143,8 +165,7 @@
     listen(doc, 'pointerdown', onMouseDown, true);
     listen(doc, 'keydown', onKey, true);
     listen(win, 'beforeunload', event => {
-      refreshDirty();
-      if (state.dirty) { event.preventDefault(); event.returnValue = ''; }
+      if (refreshDirty() && state.dirty) { event.preventDefault(); event.returnValue = ''; }
     });
     // The Gantt is an iframe; its click handler explicitly consults this guard.
     listen(frame, 'pagehide', () => {
@@ -159,5 +180,5 @@
     attach();
     return state;
   }
-  return {install, snapshot};
+  return {install, retire, snapshot};
 });

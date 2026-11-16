@@ -1,9 +1,9 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {JSDOM} = require('jsdom');
-const {install} = require('../gantt_side_editor.js');
+const {install, retire} = require('../gantt_side_editor.js');
 
-function fixture() {
+function fixture(options = {}) {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <button id="other">Other bar</button><label><input id="toggle" type="checkbox"></label>
     <div class="st-key-test"><button id="close">Close</button>
@@ -15,7 +15,7 @@ function fixture() {
   const win = dom.window;
   let prompts = 0, accept = false;
   win.confirm = () => {prompts++; return accept;};
-  const state = install(win, {selector: '.st-key-test', identity: 'bar-a', barId: 'a'});
+  const state = install(win, {selector: '.st-key-test', identity: 'bar-a', barId: 'a', ...options});
   return {win, state, get: id => win.document.getElementById(id),
     prompts: () => prompts, accept: () => {accept = true;},
     cleanup: () => {win.staffProSideEditor?.cleanup(); win.close();}};
@@ -109,4 +109,57 @@ test('current Streamlit selected-value groups protect employee-only changes', ()
   assert.equal(state.allowLeave('b'), false); assert.equal(f.prompts(), 1);
   f.get('workers').textContent = 'Α, Β';
   assert.equal(state.allowLeave('b'), true); f.cleanup();
+});
+
+test('saved form removed from a reused container cannot warn on the next bar', t => {
+  const f = fixture(); f.get('notes').value = 'saved edit';
+  t.after(f.cleanup);
+  f.state.allowLeave('b'); const before = f.prompts();
+  f.win.document.querySelector('[data-testid="stForm"]').remove();
+  assert.equal(f.state.allowLeave('b'), true);
+  assert.equal(f.prompts(), before); f.cleanup();
+});
+
+test('a recycled container losing its drawer class cannot retain a dirty guard', t => {
+  const f = fixture(); f.get('notes').value = 'saved edit';
+  t.after(f.cleanup);
+  f.state.allowLeave('b'); const before = f.prompts();
+  f.win.document.querySelector('.st-key-test').className = 'st-key-other';
+  assert.equal(f.state.allowLeave('b'), true);
+  assert.equal(f.win.staffProSideEditor, undefined);
+  assert.equal(f.prompts(), before); f.cleanup();
+});
+
+test('a removed drawer is inactive even before its observer runs', t => {
+  const f = fixture(); f.get('notes').value = 'saved edit';
+  t.after(f.cleanup);
+  f.state.allowLeave('b'); const before = f.prompts();
+  f.win.document.querySelector('.st-key-test').remove();
+  assert.equal(f.state.allowLeave('b'), true);
+  const event = new f.win.Event('beforeunload', {cancelable:true});
+  assert.equal(f.win.dispatchEvent(event), true);
+  assert.equal(f.prompts(), before); f.cleanup();
+});
+
+test('confirmed completion retires the old draft even if its DOM is still present', t => {
+  const f = fixture({token:'open-1'}); t.after(f.cleanup);
+  f.get('notes').value = 'saved edit'; f.state.allowLeave('b');
+  const before = f.prompts(); retire(f.win, 'open-1');
+  f.get('other').click();
+  assert.equal(f.state.allowLeave('b'), true);
+  assert.equal(f.win.staffProSideEditor, undefined);
+  assert.equal(f.prompts(), before);
+});
+
+test('reopening a saved bar resets its baseline and ignores late old completion', t => {
+  const f = fixture({token:'open-1'}); t.after(f.cleanup);
+  f.get('notes').value = 'confirmed saved value'; f.state.allowLeave('b');
+  const next = install(f.win, {selector:'.st-key-test', identity:'bar-a', barId:'a', token:'open-2'});
+  const before = f.prompts();
+  assert.equal(next.allowLeave('b'), true);
+  retire(f.win, 'open-1');
+  assert.equal(f.win.staffProSideEditor, next);
+  assert.equal(f.prompts(), before);
+  f.get('notes').value = 'second unsaved edit';
+  assert.equal(next.allowLeave('b'), false);
 });
