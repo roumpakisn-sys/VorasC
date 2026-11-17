@@ -67,9 +67,13 @@ def counted_hours(assignment):
 def inputs(*, key, default=None):
     import streamlit as st
 
+    # Keep the widget nullable even when editing a saved numeric value.
+    # A numeric widget default otherwise restores itself when the user clears it.
+    if key not in st.session_state:
+        st.session_state[key] = normalize(default)
     return st.number_input(
         'Πραγματικές ώρες εργασίας (προαιρετικό)', min_value=0.0, max_value=24.0,
-        value=normalize(default), step=0.25, format='%.2f', key=key,
+        value=None, step=0.25, format='%.2f', key=key,
         placeholder='Κενό = διάρκεια μπάρας',
         help='Σύνολο ωρών ανά εργαζόμενο και ανά ημέρα αυτής της μπάρας. '
              'Π.χ. 6,5 = 6 ώρες και 30 λεπτά. Κενό: μετρά το ωράριο της μπάρας. '
