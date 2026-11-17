@@ -3,6 +3,7 @@ from datetime import date
 
 import placement_details
 import placement_roles
+import placement_hours
 
 
 def format_assignment_changes(before, after, employees=(), projects=()):
@@ -25,6 +26,7 @@ def format_assignment_changes(before, after, employees=(), projects=()):
     def fields(row):
         notes, roles = placement_roles.split_notes(row.get('notes'))
         notes, details = placement_details.split_notes(notes)
+        notes, actual_hours = placement_hours.split_notes(notes)
         return {
             'Εργαζόμενος': name(row.get('employeeId'), employee_names, 'Χωρίς προσωπικό'),
             'Έργο': name(row.get('projectId'), project_names, 'Άγνωστο έργο'),
@@ -39,6 +41,7 @@ def format_assignment_changes(before, after, employees=(), projects=()):
             'Γενικός καθαρισμός': 'Ναι' if row.get('is_general') else 'Όχι',
             'Επαναλαμβανόμενη σειρά': row.get('recurring_id') or '',
             'Παρατηρήσεις': notes,
+            'Πραγματικές ώρες': f'{actual_hours:g}' if actual_hours is not None else '',
             **{label: roles[key] for key, label in placement_roles.LABELS.items()},
             **{label: details[key] for key, label in placement_details.LABELS.items()},
         }

@@ -833,6 +833,7 @@ def build_employee_day_schedule_rows(assignments, employees, projects, selected_
     """
     from collections import defaultdict
     import utils
+    import placement_hours
 
     emp_names = {str(e.get("id")): str(e.get("name") or "Άγνωστος εργαζόμενος")
                  for e in employees if isinstance(e, dict)}
@@ -853,8 +854,8 @@ def build_employee_day_schedule_rows(assignments, employees, projects, selected_
         end_minutes = _employee_day_minutes(a.get("endTime"))
         if start_minutes is None or end_minutes is None:
             continue  # Ακυρο ωράριο, όχι πλασματικές ώρες
-        duration_minutes = (end_minutes - start_minutes) % (24 * 60)
-        if duration_minutes == 0:
+        duration_minutes = placement_hours.counted_minutes(a)
+        if duration_minutes == 0 and placement_hours.split_notes(a.get("notes"))[1] is None:
             continue
 
         employee_name = emp_names.get(str(eid), "Άγνωστος εργαζόμενος")
@@ -1087,3 +1088,4 @@ def render_employee_day_excel_export(default_date):
             use_container_width=True,
             key="employee_day_excel_download",
         )
+
