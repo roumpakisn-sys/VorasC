@@ -12,6 +12,7 @@ import utils
 import gantt_engine
 import gantt_html
 import gantt_filters
+import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
@@ -188,11 +189,20 @@ if "mobile_app_scale_pct" not in st.session_state:
 
 
 def clear_mobile_selection():
+    st.session_state.pop("mobile_search_target", None)
     st.session_state.mobile_clicked_key = None
     st.session_state.mobile_last_clicked_safe_id = ""
     # Reset before the widget is created on the next run (also after a save).
     st.session_state.mobile_reset_edit_select_next_run = True
     st.session_state.mobile_detector_version = st.session_state.get("mobile_detector_version", 0) + 1
+
+
+def open_search_result(day, assignment_id):
+    clear_mobile_selection()
+    st.session_state.mobile_view_date = day
+    st.session_state.mobile_week_date_input = day
+    st.session_state.mobile_search_target = (day, assignment_id)
+    st.session_state.mobile_search_pending = True
 
 
 def _start_of_week(d):
@@ -358,6 +368,7 @@ def _get_mobile_visible_recurring_project_ids(projects, recurring_patterns):
 
 # --- HEADER / CONTROLS ---
 st.title("📱 Mobile Gantt")
+gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="mobile_search")
 
 st.markdown(
     """
@@ -534,6 +545,10 @@ filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_
     assignments_by_date=st.session_state.assignments_by_date,
     visible_project_ids=visible_recurring_project_ids,
 )
+search_target = st.session_state.get("mobile_search_target")
+filtered_assignments_by_date = gantt_search.reveal_search_project(
+    filtered_assignments_by_date, st.session_state.assignments_by_date, search_target
+)
 
 recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_recurring_project_ids)
 
@@ -569,7 +584,8 @@ def get_mobile_cached_data(
 wk_groups, export_data = get_mobile_cached_data(
     start_of_week,
     zoom_factor,
-    f"{st.session_state.get('local_gantt_version', 0)}_{start_of_week.isoformat()}_{zoom_factor}_{app_scale}_{recurring_filter_version}",
+    (st.session_state.get('local_gantt_version', 0), start_of_week, zoom_factor, app_scale,
+     recurring_filter_version, search_target),
     filtered_assignments_by_date,
     st.session_state.leaves,
     st.session_state.employees,
@@ -577,6 +593,16 @@ wk_groups, export_data = get_mobile_cached_data(
     st.session_state.emp_map,
     st.session_state.proj_map,
 )
+
+search_bar_key = gantt_search.find_search_bar(wk_groups, search_target)
+opening_search_result = st.session_state.pop("mobile_search_pending", False)
+if opening_search_result:
+    if not search_bar_key:
+        st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
+    elif is_full_admin:
+        st.session_state.mobile_reset_edit_select_next_run = False
+        st.session_state.mobile_clicked_key = search_bar_key
+        st.session_state.mobile_edit_select_widget = search_bar_key
 
 safe_mapping = {}
 key_to_safe_id = {}
@@ -594,6 +620,8 @@ html_chart = gantt_html.build_html_gantt(
     zoom_factor,
     key_to_safe_id,
     gantt_height_px,
+    focused_key=search_bar_key if not is_full_admin or st.session_state.mobile_clicked_key == search_bar_key else None,
+    scroll_to_focus=opening_search_result,
 )
 
 clicked_safe_id = click_detector(

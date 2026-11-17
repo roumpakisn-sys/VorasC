@@ -94,7 +94,7 @@ def render_gantt_controls(clear_bar_selection):
         )
         st.session_state.gantt_zoom_level = zoom_level
     with col_pres:
-        presentation_mode = st.checkbox("📺 Πλήρης Προβολή")
+        presentation_mode = st.checkbox("📺 Πλήρης Προβολή", key="gantt_presentation_mode")
 
     if "gantt_height_px" not in st.session_state:
         st.session_state.gantt_height_px = 650
@@ -122,3 +122,4 @@ def render_gantt_controls(clear_bar_selection):
     zoom_factor = zoom_level / 100.0
 
     return start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px
+
