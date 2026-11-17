@@ -29,10 +29,11 @@ class SessionTests(unittest.TestCase):
                     if isinstance(n, ast.FunctionDef) and n.name == 'save_assignment_batch')
         self.state = State(assignments=[row()], projects=[])
         self.history = Mock()
+        self.audit = Mock()
         env = {'st': SimpleNamespace(session_state=self.state, error=Mock()),
                'supabase': object(), 'safe_date_parse': date.fromisoformat,
                'add_transaction': self.history, 'mark_data_changed': Mock(),
-               'touch_app_sync_state': Mock(), 'log_activity': Mock()}
+               'touch_app_sync_state': Mock(), 'log_activity': self.audit}
         exec(compile(ast.Module(body=[node], type_ignores=[]), 'utils.py', 'exec'), env)
         return env['save_assignment_batch']
 
@@ -44,6 +45,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.state.assignments, original['assignments'])
         self.assertEqual(self.state.projects, [])
         self.history.assert_not_called()
+        self.audit.assert_not_called()
 
     def test_success_uses_confirmed_rows_and_updates_undo_once(self):
         save = self.wrapper()
@@ -53,6 +55,9 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(result[0]['notes'], 'confirmed')
         self.assertEqual(self.state.assignments[0]['updated_at'], saved['updated_at'])
         self.history.assert_called_once()
+        self.audit.assert_called_once()
+        self.assertIn('Παρατηρήσεις: (κενό) → confirmed', self.audit.call_args.args[2])
+        self.assertIsNone(self.audit.call_args.kwargs['max_length'])
 
     def test_receipt_with_missing_or_wrong_rows_is_not_success(self):
         self.assertFalse(confirmed_result({'request_id': 'r'}, 'r', [row()]))
