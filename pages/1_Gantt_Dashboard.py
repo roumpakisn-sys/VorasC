@@ -37,6 +37,7 @@ import gantt_controls
 import gantt_export
 import gantt_excel_export
 import gantt_filters
+import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
@@ -83,12 +84,24 @@ if "view_week_date" not in st.session_state:
 
 
 def clear_bar_selection():
+    st.session_state.pop("gantt_search_target", None)
     st.session_state.clicked_key = None
     st.session_state.trigger_scroll = False
     st.session_state.last_clicked_safe_id = ""
     st.session_state.suppress_next_detector_click = True
     st.session_state.reset_edit_bar_select_next_run = True
     st.session_state.detector_version = st.session_state.get("detector_version", 0) + 1
+
+
+def open_search_result(day, assignment_id):
+    clear_bar_selection()
+    st.session_state.pop("edit_form_prefill", None)
+    st.session_state.view_week_date = day
+    st.session_state.date_picker = day
+    if is_full_admin and st.session_state.get("gantt_presentation_mode"):
+        st.session_state.gantt_presentation_mode = False
+    st.session_state.gantt_search_target = (day, assignment_id)
+    st.session_state.gantt_search_pending = True
 
 
 def preserve_context_notes(original_notes, edited_notes):
@@ -115,6 +128,7 @@ def preserve_context_notes(original_notes, edited_notes):
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
+gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
 # Κρύβει/εμφανίζει μόνο τις μπάρες που προέρχονται από επαναλαμβανόμενες εργασίες.
@@ -127,6 +141,10 @@ visible_recurring_project_ids = gantt_filters.render_recurring_project_visibilit
 filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
     assignments_by_date=st.session_state.assignments_by_date,
     visible_project_ids=visible_recurring_project_ids,
+)
+search_target = st.session_state.get("gantt_search_target")
+filtered_assignments_by_date = gantt_search.reveal_search_project(
+    filtered_assignments_by_date, st.session_state.assignments_by_date, search_target
 )
 recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_recurring_project_ids)
 
@@ -177,6 +195,17 @@ wk_groups, export_data = get_cached_data(
     st.session_state.proj_map,
 )
 
+search_bar_key = gantt_search.find_search_bar(wk_groups, search_target)
+opening_search_result = st.session_state.pop("gantt_search_pending", False)
+if opening_search_result:
+    if not search_bar_key:
+        st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
+    elif is_full_admin:
+        st.session_state.reset_edit_bar_select_next_run = False
+        st.session_state.clicked_key = search_bar_key
+        st.session_state.edit_bar_select_widget = search_bar_key
+        st.session_state.trigger_scroll = True
+
 # Φτιάχνουμε απόλυτα ΜΟΝΑΔΙΚΑ IDs χρησιμοποιώντας HASH, αποκλείοντας συγκρούσεις!
 safe_mapping = {}
 key_to_safe_id = {}
@@ -192,7 +221,11 @@ for real_key in wk_groups.keys():
 
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
-html_chart = gantt_html.build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px)
+html_chart = gantt_html.build_html_gantt(
+    wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
+    focused_key=search_bar_key if not is_full_admin or st.session_state.clicked_key == search_bar_key else None,
+    scroll_to_focus=opening_search_result,
+)
 clicked_safe_id = click_detector(
     html_chart,
     key=f"gantt_detector_{st.session_state.detector_version}_{st.session_state.gantt_height_px}",

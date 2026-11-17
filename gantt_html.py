@@ -17,7 +17,8 @@ def get_local_today():
         return (datetime.utcnow() + timedelta(hours=3)).date()
 
 
-def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px):
+def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
+                     *, focused_key=None, scroll_to_focus=False):
     timeline_width_px = int(2400 * zoom_factor)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
@@ -445,14 +446,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             )
 
             safe_id = key_to_safe_id.get(g["Key"], "")
+            is_focused = g["Key"] == focused_key
+            focus_attr = " data-gantt-search-target='true'" if is_focused and scroll_to_focus else ""
+            focus_style = "outline: 3px solid #2563eb; outline-offset: 2px; z-index: 25;" if is_focused else ""
 
             html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' "
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
                 f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
-                f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center;' title='{tooltip}'>"
+                f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; {focus_style}' title='{tooltip}'>"
                 f"<button type='button' class='gantt-copy-crew-btn' data-crew-text='{crew_text_attr}' data-crew-html='{crew_html_attr}' title='Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων'>👥</button>"
                 f"<button type='button' class='gantt-copy-full-btn' data-full-content='{full_bar_copy_attr}' title='Αντιγραφή όλου του περιεχομένου μπάρας'>⧉</button>"
                 f"<button type='button' class='gantt-copy-project-btn' data-project='{project_copy_attr}' title='Αντιγραφή ονόματος έργου'>📋</button>"
@@ -480,13 +484,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var savedScrollLeft = sessionStorage.getItem('ganttScrollLeft');
       var savedScrollTop = sessionStorage.getItem('ganttScrollTop');
 
-      if (savedScrollLeft !== null) {
+      var target = s.querySelector('[data-gantt-search-target]');
+      if (target) {
+        var bounds = s.getBoundingClientRect();
+        var bar = target.getBoundingClientRect();
+        s.scrollLeft += bar.left - bounds.left - s.clientWidth / 3;
+        s.scrollTop += bar.top - bounds.top - s.clientHeight / 3;
+      } else if (savedScrollLeft !== null) {
           s.scrollLeft = parseFloat(savedScrollLeft);
       } else {
           setTimeout(function(){ s.scrollLeft = s.scrollWidth * 0.10; }, 50);
       }
 
-      if (savedScrollTop !== null) {
+      if (!target && savedScrollTop !== null) {
           s.scrollTop = parseFloat(savedScrollTop);
       }
 
@@ -695,6 +705,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       s.addEventListener('scroll', onScroll);
+      if (target) onScroll();
       s.addEventListener('mousedown', onMouseDown, true);
       s.addEventListener('mousemove', onMouseMoveLocal, true);
       window.addEventListener('mousemove', onMouseMoveWin, true);
