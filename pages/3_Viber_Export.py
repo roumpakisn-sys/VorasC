@@ -4,6 +4,7 @@ import re
 from datetime import datetime, date
 import utils
 import placement_roles
+import placement_details
 
 
 # --- INITIALIZATION & ΑΣΠΙΔΑ ΑΣΦΑΛΕΙΑΣ ---
@@ -189,7 +190,7 @@ def _group_viber_assignments(assignments, day_assignments):
     ordinary notes and separate contacts, hiding leave annotations under projects.
     This changes the export only, never the underlying assignment/leave records.
     """
-    groups = {}
+    groups, prepared, known_details = {}, [], {}
     for assignment in assignments:
         if assignment.get("is_cancelled"):
             continue
@@ -199,15 +200,29 @@ def _group_viber_assignments(assignments, day_assignments):
         arrival = str(assignment.get("arrivalTime") or "")[:5]
         key = (str(assignment.get("date") or "")[:10], project_id,
                start, end, arrival, bool(assignment.get("is_general", False)))
+        free_notes, contacts = placement_roles.split_notes(str(assignment.get("notes") or ""))
+        free_notes, details = placement_details.split_notes(free_notes)
+        prepared.append((key, assignment, free_notes, contacts, details))
+        if any(details.values()):
+            known_details.setdefault(key, set()).add(tuple(details.values()))
+
+    for base_key, assignment, free_notes, contacts, details in prepared:
+        # A leave placeholder often predates the new fields. Attach blank details
+        # only to a single known site; never guess between different addresses.
+        profiles = known_details.get(base_key, set())
+        if not any(details.values()) and len(profiles) == 1:
+            details = dict(zip(placement_details.LABELS, next(iter(profiles))))
+        _, project_id, start, end, arrival, _ = base_key
+        key = base_key + tuple(details.values())
         group = groups.setdefault(key, {
             "project": _project_name(project_id), "start": start, "end": end,
             "arrival": arrival, "employees": [], "notes": [],
+            "project_details": details,
             "support_roles": {key: [] for key in placement_roles.LABELS},
         })
         employee = _employee_viber_label(assignment, day_assignments)
         if employee and employee != "Χωρίς Προσωπικό" and employee not in group["employees"]:
             group["employees"].append(employee)
-        free_notes, contacts = placement_roles.split_notes(str(assignment.get("notes") or ""))
         note = _clean_viber_notes(free_notes)
         if note and note not in group["notes"]:
             group["notes"].append(note)
@@ -300,7 +315,8 @@ else:
         viber_msg += "Δεν έχουν επιλεγεί/βρεθεί βάρδιες έργων.\n\n"
 
     for group in groups:
-        start, end, proj = group["start"], group["end"], group["project"]
+        start, end = group["start"], group["end"]
+        proj = placement_details.project_label(group["project"], group["project_details"])
         arr, notes = group["arrival"], " | ".join(group["notes"])
         emps = group["employees"]
         # Ώρες με αστερίσκους, έργο χωρίς αστερίσκους

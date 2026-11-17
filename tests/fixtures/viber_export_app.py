@@ -10,6 +10,7 @@ import streamlit as st
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
 import placement_roles
+import placement_details
 today = date.today()
 empty = {"id": "empty", "employeeId": "", "projectId": "p1", "date": today,
          "startTime": "09:00", "endTime": "12:00", "arrivalTime": "",
@@ -17,9 +18,10 @@ empty = {"id": "empty", "employeeId": "", "projectId": "p1", "date": today,
 assignments = [empty]
 if st.session_state.get("fixture_covered", True):
     assignments.append({**empty, "id": "replacement", "employeeId": "e2",
-                        "notes": placement_roles.combine_notes(
+                        "notes": placement_details.combine_notes(placement_roles.combine_notes(
                             st.session_state.get("fixture_notes", "Κλειδιά στη ρεσεψιόν"),
-                            st.session_state.get("fixture_contacts", {}))})
+                            st.session_state.get("fixture_contacts", {})),
+                            st.session_state.get("fixture_project_details", {}))})
     if st.session_state.get("fixture_duplicate_worker"):
         assignments.append({**assignments[-1], "id": "second", "employeeId": "e3"})
 st.session_state.setdefault("authenticated", True)

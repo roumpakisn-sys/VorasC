@@ -369,7 +369,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             grouped_employee_labels = _group_employee_labels(g["Employees"])
             emps_plain = ", ".join(grouped_employee_labels).upper()
             emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
-            proj_name = g["Project"].upper()
+            proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
             if "ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ" in emps_plain:
@@ -395,7 +395,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     base_text += f"<br><span style='color:#dc2626;'>[{html_utils.escape(cancel_reason_upper)}]</span>"
 
             bg_color = g["ColorHex"]
-            tooltip = base_text_plain.replace('"', "&quot;").replace("'", "&#39;")
+            tooltip = html_utils.escape(base_text_plain, quote=True)
             project_copy_attr = html_utils.escape(str(g["Project"]), quote=True)
             full_bar_copy_attr = html_utils.escape(base_text_plain, quote=True)
 

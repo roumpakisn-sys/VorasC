@@ -13,6 +13,7 @@ import gantt_engine
 import gantt_html
 import gantt_filters
 import placement_roles
+import placement_details
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -656,6 +657,8 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
             key=f"mqa_custom_proj_{qa_rc}",
         )
 
+        add_project_details = placement_details.inputs(key=f"mqa_details_{qa_rc}", stacked=True)
+
         emp_choices = st.multiselect(
             "Προσωπικό",
             options=active_employee_ids,
@@ -740,7 +743,9 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "endTime": va["end"],
                             "colorName": color_choice,
                             "colorHex": config.BASIC_COLORS[color_choice],
-                            "notes": placement_roles.combine_notes(final_notes, add_support_roles),
+                            "notes": placement_details.combine_notes(
+                                placement_roles.combine_notes(final_notes, add_support_roles), add_project_details
+                            ),
                             "is_cancelled": False,
                             "cancel_reason": "",
                             "recurring_id": None,
@@ -780,7 +785,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
             "Μπάρα",
             options=options_for_select,
             key="mobile_edit_select_widget",
-            format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} | {wk_groups[x]['Project']} | {wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']}",
+            format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} | {wk_groups[x].get('ProjectDisplay', wk_groups[x]['Project'])} | {wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']}",
         )
 
         if selected_key == "" and st.session_state.mobile_clicked_key is not None:
@@ -797,7 +802,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
 
             st.caption(
                 f"{target_group['Date'].strftime('%d/%m/%Y')} | "
-                f"{target_group['Project']} | "
+                f"{target_group.get('ProjectDisplay', target_group['Project'])} | "
                 f"{target_group['StartTime']}-{target_group['EndTime']}"
             )
 
@@ -816,6 +821,14 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                 )
 
                 edit_custom_proj_name = st.text_input("Νέο έργο αντί επιλογής από λίστα")
+
+                _, target_project_details = placement_details.split_notes(
+                    target_group.get("Notes_Raw") or target_group.get("Notes", "")
+                )
+                target_project_details = target_group.get("ProjectDetails", target_project_details)
+                edit_project_details = placement_details.inputs(
+                    key="mobile_edit_details" + edit_suffix, defaults=target_project_details, stacked=True
+                )
 
                 valid_emp_ids = normalize_id_list([eid for eid in target_group["EmployeeIds"] if eid])
                 note_emp_ids = []
@@ -852,6 +865,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
 
                 target_free_notes, target_support_roles = placement_roles.split_notes(target_group.get("Notes", ""))
                 target_support_roles = target_group.get("SupportRoles", target_support_roles)
+                target_free_notes, _ = placement_details.split_notes(target_free_notes)
                 edit_support_roles = placement_roles.inputs(
                     key="mobile_edit_roles_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12],
                     defaults=target_support_roles, stacked=True,
@@ -970,7 +984,9 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "endTime": va["end"],
                                     "colorName": edit_color,
                                     "colorHex": config.BASIC_COLORS[edit_color],
-                                    "notes": placement_roles.combine_notes(final_notes, edit_support_roles),
+                                    "notes": placement_details.combine_notes(
+                                        placement_roles.combine_notes(final_notes, edit_support_roles), edit_project_details
+                                    ),
                                     "is_cancelled": bool(e_is_cancelled),
                                     "cancel_reason": normalized_cancel_reason,
                                     "recurring_id": target_group.get("RecurringId"),

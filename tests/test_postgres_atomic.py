@@ -113,6 +113,26 @@ class PostgresTests(unittest.TestCase):
         self.assertEqual(self.db.execute("select count(*) from projects where id='newp'").fetchone()[0], 0)
         self.assertEqual(self.db.execute('select count(*) from assignment_write_receipts').fetchone()[0], 0)
 
+    def test_address_phone_update_and_clear_preserve_contacts_and_workers(self):
+        import placement_details
+        import placement_roles
+        values = {'address': 'Εγνατία 10 [2ος]', 'contact_phone': '+30 02310 123456'}
+        before, after = self.expected(), self.proposed()
+        for record in after:
+            record['notes'] = placement_details.combine_notes(
+                placement_roles.combine_notes('Κλειδιά', {'supervisor': 'Σοφία'}), values)
+        self.save(before, after)
+        self.assertTrue(all(placement_details.split_notes(r['notes'])[1] == values for r in self.expected()))
+        before, after = self.expected(), self.proposed()
+        for record in after:
+            record['notes'] = placement_details.combine_notes(record['notes'], {})
+        self.save(before, after)
+        self.assertEqual([r['employeeId'] for r in self.expected()], ['e', 'e2'])
+        for record in self.expected():
+            self.assertEqual(record['projectId'], 'p')
+            self.assertFalse(any(placement_details.split_notes(record['notes'])[1].values()))
+            self.assertEqual(placement_roles.split_notes(record['notes'])[1]['supervisor'], 'Σοφία')
+
     def test_changed_original_rejects_entire_group(self):
         before, after = self.expected(), self.proposed()
         self.db.execute("update assignments set notes='other user' where id='b'")

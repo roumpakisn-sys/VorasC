@@ -38,6 +38,7 @@ import gantt_export
 import gantt_excel_export
 import gantt_filters
 import placement_roles
+import placement_details
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -313,7 +314,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
                             project_id, custom_project, employee_ids, color_name,
                             notes, is_general, use_arrival, arrival_time,
                             start_time, end_time, is_cancelled=False, cancel_reason="",
-                            support_roles=None):
+                            support_roles=None, project_details=None):
     return {
         "first_date": first_date,
         "mode": mode,
@@ -325,6 +326,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
         "color": color_name,
         "notes": notes,
         "support_roles": placement_roles.normalize(support_roles),
+        "project_details": placement_details.normalize(project_details),
         "is_general": bool(is_general),
         "use_arrival": bool(use_arrival),
         "arrival_time": arrival_time.strftime("%H:%M"),
@@ -422,6 +424,9 @@ if not presentation_mode:
                     value=str(qa_prefill.get("custom_project") or ""),
                     key=f"qa_cproj_{qa_rc}",
                 )
+                add_project_details = placement_details.inputs(
+                    key=f"qa_details_{qa_rc}", defaults=qa_prefill.get("project_details")
+                )
                 emp_choices = st.multiselect(
                     "Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)",
                     options=active_employee_ids,
@@ -489,6 +494,7 @@ if not presentation_mode:
                         employee_ids=emp_choices, color_name=color_choice,
                         notes=add_notes, is_general=is_general,
                         support_roles=add_support_roles,
+                        project_details=add_project_details,
                         use_arrival=use_arr, arrival_time=t_arrival,
                         start_time=t_start, end_time=t_end,
                     ))
@@ -560,7 +566,9 @@ if not presentation_mode:
                                     "endTime": va["end"],
                                     "colorName": color_choice,
                                     "colorHex": config.BASIC_COLORS[color_choice],
-                                    "notes": placement_roles.combine_notes(c_notes, add_support_roles),
+                                    "notes": placement_details.combine_notes(
+                                        placement_roles.combine_notes(c_notes, add_support_roles), add_project_details
+                                    ),
                                     "is_cancelled": False,
                                     "cancel_reason": "",
                                     "recurring_id": None,
@@ -623,7 +631,7 @@ if not presentation_mode:
                     "Επιλέξτε Μπάρα (Ημέρα & Έργο)",
                     options=options_for_select,
                     key="edit_bar_select_widget",
-                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x]['Project']} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})",
+                    format_func=lambda x: "Επιλέξτε..." if x == "" else f"{wk_groups[x]['Date'].strftime('%d/%m')} - {wk_groups[x].get('ProjectDisplay', wk_groups[x]['Project'])} ({wk_groups[x]['StartTime']}-{wk_groups[x]['EndTime']})",
                 )
 
                 if selected_key == "" and st.session_state.clicked_key is not None:
@@ -729,6 +737,15 @@ if not presentation_mode:
                             key=f"edit_custom_project_{edit_key}",
                         )
 
+                        _, target_project_details = placement_details.split_notes(
+                            target_group.get("Notes_Raw") or target_group.get("Notes", "")
+                        )
+                        target_project_details = target_group.get("ProjectDetails", target_project_details)
+                        edit_project_details = placement_details.inputs(
+                            key=f"edit_details_{edit_key}",
+                            defaults=(edit_prefill.get("project_details") if edit_prefill else target_project_details),
+                        )
+
                         # Μόνο οι πραγματικά τοποθετημένοι υπάλληλοι μπαίνουν ως προεπιλογή.
                         # Όσοι αναφέρονται μέσα σε notes τύπου [Άδεια: ...] / [Εμπλοκή: ...]
                         # μπαίνουν μόνο ως διαθέσιμες επιλογές, όχι ως ήδη επιλεγμένοι.
@@ -761,6 +778,7 @@ if not presentation_mode:
                             target_group.get("Notes", "")
                         )
                         target_support_roles = target_group.get("SupportRoles", target_support_roles)
+                        target_free_notes, _ = placement_details.split_notes(target_free_notes)
                         edit_support_roles = placement_roles.inputs(
                             key=f"edit_roles_{edit_key}",
                             defaults=(edit_prefill.get("support_roles") if edit_prefill else target_support_roles),
@@ -846,6 +864,7 @@ if not presentation_mode:
                                 employee_ids=edit_emps, color_name=edit_color,
                                 notes=edit_notes, is_general=e_is_general,
                                 support_roles=edit_support_roles,
+                                project_details=edit_project_details,
                                 use_arrival=use_arr_edit, arrival_time=new_t_arrival,
                                 start_time=new_t_start, end_time=new_t_end,
                                 is_cancelled=e_is_cancelled, cancel_reason=e_cancel_reason,
@@ -906,6 +925,7 @@ if not presentation_mode:
                                 and edit_color == target_group["ColorName"]
                                 and edit_notes == target_clean_note
                                 and placement_roles.normalize(edit_support_roles) == placement_roles.normalize(target_support_roles)
+                                and placement_details.normalize(edit_project_details) == placement_details.normalize(target_project_details)
                                 and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                 and normalized_cancel_reason == target_cancel_reason
                                 and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
@@ -947,7 +967,9 @@ if not presentation_mode:
                                         "endTime": adj_end,
                                         "colorName": edit_color,
                                         "colorHex": config.BASIC_COLORS[edit_color],
-                                        "notes": placement_roles.combine_notes(c_notes, edit_support_roles),
+                                        "notes": placement_details.combine_notes(
+                                            placement_roles.combine_notes(c_notes, edit_support_roles), edit_project_details
+                                        ),
                                         "is_cancelled": e_is_cancelled,
                                         "cancel_reason": normalized_cancel_reason,
                                         # Additional dates are independent placements, not
