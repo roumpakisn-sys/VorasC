@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 import placement_roles
+import placement_details
 from test_regression_smoke import get_source_functions
 
 try:
@@ -29,7 +30,8 @@ class ViberGroupingTests(unittest.TestCase):
             ("_project_name", "_employee_name", "_employee_viber_label", "_group_after_project_labels",
              "_format_viber_employees", "_clean_viber_notes", "_format_viber_contacts",
              "_group_viber_assignments"),
-            {"re": re, "placement_roles": placement_roles, "utils": SimpleNamespace(
+            {"re": re, "placement_roles": placement_roles, "placement_details": placement_details,
+             "utils": SimpleNamespace(
                 get_project_info=lambda pid: {"name": "Προηγούμενο" if pid == "previous" else "Έργο"},
                 get_employee_name=lambda eid: {"e1": "Άννα", "e2": "Ελένη"}.get(eid, "Χωρίς Προσωπικό"))})
 
@@ -114,13 +116,34 @@ class ViberGroupingTests(unittest.TestCase):
         self.assertEqual(self.env["_format_viber_employees"](group["employees"]),
                          "_ΜΕΤΑ ΑΠΟ 'Προηγούμενο' >_ *Άννα*")
 
+    def test_blank_leave_placeholder_joins_replacement_with_site_details(self):
+        site = {"address": "Εγνατία 10", "contact_phone": "+30 2310 123456"}
+        replacement = assignment("replacement", "e1", notes=placement_details.combine_notes("Κλειδιά", site))
+        empty = assignment(notes="[Άδεια: Μαρία]")
+        for records in ([empty, replacement], [replacement, empty]):
+            group, = self.groups(records)
+            self.assertEqual(group["project_details"], site)
+            self.assertEqual(group["employees"], ["Άννα"])
+            self.assertEqual(group["notes"], ["Κλειδιά"])
+
+    def test_distinct_sites_are_not_combined_and_ambiguous_vacancy_is_retained(self):
+        rows = [assignment("a", "e1", notes=placement_details.combine_notes("", {"address": "Εγνατία 10"})),
+                assignment("b", "e2", notes=placement_details.combine_notes("", {"address": "Εγνατία 20"}))]
+        groups = self.groups(rows)
+        self.assertEqual(len(groups), 2)
+        self.assertEqual({g["project_details"]["address"] for g in groups}, {"Εγνατία 10", "Εγνατία 20"})
+        groups = self.groups([assignment(notes="[Άδεια: Μαρία]"), *rows])
+        self.assertEqual(len(groups), 3)
+        self.assertEqual(sum(not g["employees"] for g in groups), 1)
+
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")
 class ViberPageTests(unittest.TestCase):
-    def app(self, covered=True, contacts=None, notes=None, duplicate=False):
+    def app(self, covered=True, contacts=None, notes=None, duplicate=False, site=None):
         app = AppTest.from_file(str(ROOT / "tests/fixtures/viber_export_app.py"))
         app.session_state["fixture_covered"] = covered
         app.session_state["fixture_contacts"] = contacts or {}
+        app.session_state["fixture_project_details"] = site or {}
         app.session_state["fixture_duplicate_worker"] = duplicate
         if notes is not None:
             app.session_state["fixture_notes"] = notes
@@ -181,3 +204,26 @@ class ViberPageTests(unittest.TestCase):
         self.assertIn("📝 Σημείωση: Κλειδιά στη ρεσεψιόν\n", message)
         app.checkbox(key="chk_include_leaves").set_value(False).run()
         self.assertNotIn("Μαρία", app.code[0].value)
+
+    def test_address_and_phone_appear_beside_project_only_once(self):
+        site = {"address": "Εγνατία 10", "contact_phone": "0030 2310 123456"}
+        app = self.app(site=site, contacts={"supervisor": "Σοφία"}, notes="Κλειδιά", duplicate=True)
+        message = app.code[0].value
+        header = next(line for line in message.splitlines() if "🏗️" in line)
+        self.assertIn("🏗️ Έργο | 📍 Εγνατία 10 | ☎️ Τηλ. υπευθύνου: 0030 2310 123456", header)
+        self.assertEqual(message.count("🏗️"), 1)
+        self.assertEqual(message.count("Εγνατία 10"), 1)
+        self.assertEqual(message.count("0030 2310 123456"), 1)
+        self.assertIn("👤 *Επόπτης: Σοφία*", message)
+        self.assertIn("📝 Σημείωση: Κλειδιά\n", message)
+        self.assertNotIn("Χωρίς Προσωπικό", message)
+        self.assertNotIn("Μαρία", message.split("🌴 *Άδειες / Απουσίες*")[0])
+
+    def test_partial_site_details_do_not_emit_empty_labels(self):
+        for site in ({"address": "Εγνατία 10"}, {"contact_phone": "02310123456"}, {}):
+            with self.subTest(site=site):
+                app = self.app(site=site, notes="")
+                header = next(line for line in app.code[0].value.splitlines() if "🏗️" in line)
+                self.assertEqual("📍" in header, bool(site.get("address")))
+                self.assertEqual("Τηλ. υπευθύνου:" in header, bool(site.get("contact_phone")))
+                self.assertNotIn("📝 Σημείωση:", app.code[0].value)

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 import placement_roles as roles
+import placement_details
 from assignment_store import save_changes
 from test_assignment_store import Client
 from test_assignment_policy import row
@@ -59,7 +60,7 @@ class ContactStorageTests(unittest.TestCase):
     def test_bulk_note_replacement_preserves_contacts_and_leave_annotation(self):
         tree = ast.parse((ROOT / "pages/8_Bulk_Gantt.py").read_text())
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_delta")
-        env = {"re": re, "placement_roles": roles}
+        env = {"re": re, "placement_roles": roles, "placement_details": placement_details}
         exec(compile(ast.Module(body=[function], type_ignores=[]), "bulk", "exec"), env)
         saved = roles.combine_notes("Παλιά [Άδεια: Μαρία]", CONTACTS)
         delta = env["build_delta"]({"notes": saved}, "Αντικατάσταση παρατήρησης", {"notes": "Νέα"})
@@ -200,7 +201,8 @@ class GroupingTests(unittest.TestCase):
         from test_regression_smoke import get_source_functions
         env = get_source_functions(ROOT / "gantt_engine.py",
             ("generate_gantt_chart", "get_project_info", "get_employee_name", "_to_time_dt", "_clean_leave_note_from_bar"),
-            {"datetime": datetime, "date": date, "timedelta": timedelta, "re": re, "placement_roles": roles})
+            {"datetime": datetime, "date": date, "timedelta": timedelta, "re": re,
+             "placement_roles": roles, "placement_details": placement_details})
         day = date(2026, 11, 16)
         staff = [{"id": "e", "name": "Α"}, {"id": "e2", "name": "Β"}]
         projects = [{"id": "p", "name": "Έργο"}]
@@ -218,6 +220,7 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(roles.group_suffix({}), "")
         bulk = get_source_functions(ROOT / "pages/8_Bulk_Gantt.py", ("bar_groups", "fmt", "as_date"),
                                     {"datetime": datetime, "date": date, "placement_roles": roles,
+                                     "placement_details": placement_details,
                                      "utils": SimpleNamespace(safe_date_parse=lambda value: value)})
         grouped = bulk["bar_groups"](rows, projects, day, day, [], False)
         self.assertEqual({frozenset(r["id"] for r in group) for group in grouped},

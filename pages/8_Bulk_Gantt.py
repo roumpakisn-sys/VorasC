@@ -16,6 +16,7 @@ st.set_page_config(page_title="Μαζικές Αλλαγές Gantt | STAFF.PRO",
 
 import utils
 import placement_roles
+import placement_details
 from availability_rules import fetch_rules
 from assignment_policy import validate_changes
 
@@ -95,6 +96,7 @@ def bar_groups(assignments, projects, start_day, end_day, selected_projects, hid
             str(a.get("cancel_reason") or ""), fmt(a.get("arrivalTime")),
             bool(a.get("is_general", False)),
             placement_roles.group_suffix(placement_roles.split_notes(a.get("notes"))[1]),
+            placement_details.group_suffix(placement_details.split_notes(a.get("notes"))[1]),
         )
         groups.setdefault(key, []).append(a)
     return sorted(groups.values(), key=lambda g: (
@@ -132,7 +134,8 @@ def build_delta(record, operation, options):
             if tag not in text:
                 text = f"{text} {tag}".strip()
         roles = placement_roles.split_notes(record.get("notes"))[1]
-        return {"notes": placement_roles.combine_notes(text, roles)}
+        details = placement_details.split_notes(record.get("notes"))[1]
+        return {"notes": placement_details.combine_notes(placement_roles.combine_notes(text, roles), details)}
     raise ValueError("Άγνωστη ενέργεια")
 
 

@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta
 import textwrap
 import re
 import placement_roles
+import placement_details
 
 
 def get_local_today():
@@ -105,6 +106,7 @@ def generate_gantt_chart(
             c_name = a.get("colorName", "Προεπιλογή")
             notes = a.get("notes", "") or ""
             _, support_roles = placement_roles.split_notes(notes)
+            _, project_details = placement_details.split_notes(notes)
             is_canc = bool(a.get("is_cancelled", False))
             c_reason = a.get("cancel_reason", "") or ""
             is_general = bool(a.get("is_general", False))
@@ -119,7 +121,7 @@ def generate_gantt_chart(
             key = (
                 f"{curr_date}_{project_id}_{start_time}_{end_time}_{c_hex}_"
                 f"{is_canc}_{c_reason}_{arrival_time}_{is_general}"
-            ) + placement_roles.group_suffix(support_roles)
+            ) + placement_roles.group_suffix(support_roles) + placement_details.group_suffix(project_details)
 
             if key not in groups:
                 legend_val = f"{project_name} ({c_name})"
@@ -128,6 +130,8 @@ def generate_gantt_chart(
                     "ProjectId": project_id,
                     "Date": curr_date,
                     "Project": project_name,
+                    "ProjectDisplay": placement_details.project_label(project_name, project_details),
+                    "ProjectDetails": project_details,
                     "ArrivalTime": arrival_time,
                     "StartTime": start_time,
                     "EndTime": end_time,
@@ -199,7 +203,7 @@ def generate_gantt_chart(
 
             g["Notes_Raw"] = " | ".join(g["Notes_List"])
             free_notes = list(dict.fromkeys(
-                placement_roles.split_notes(note)[0] for note in g["Notes_List"]
+                placement_details.split_notes(placement_roles.split_notes(note)[0])[0] for note in g["Notes_List"]
             ))
             g["Notes"] = _clean_leave_note_from_bar(placement_roles.combine_notes(
                 " | ".join(note for note in free_notes if note), g["SupportRoles"]
@@ -208,7 +212,7 @@ def generate_gantt_chart(
             export_data.append({
                 "Ημερομηνία": curr_date.strftime("%d/%m/%Y"),
                 "Ημέρα": day_names_gr[i],
-                "Έργο": g["Project"],
+                "Έργο": g["ProjectDisplay"],
                 "Προσωπικό": ", ".join(g["Employees"]),
                 "Ώρα Προσέλευσης": g["ArrivalTime"] if g["ArrivalTime"] else "-",
                 "Ώρα Έναρξης": g["StartTime"],
