@@ -87,6 +87,16 @@ class ActualHoursFormTests(unittest.TestCase):
                 self.assertFalse(app.exception)
                 call = app.session_state['save_calls'][-1]
                 self.assertEqual([hours.counted_hours(r) for r in call['new']], [6.5, 6.5])
+                # Reload confirmed records in a fresh session, as on page refresh.
+                # AppTest retains stale widgets after the save clears the form.
+                records = app.session_state['assignments']
+                app = AppTest.from_file(str(ROOT / 'tests/fixtures/gantt_forms_app.py'))
+                app.session_state['fixture_headless'] = True
+                app.session_state['fixture_persist'] = True
+                app.session_state['assignments'] = records
+                app.run()
+                if view == 'mobile':
+                    next(s for s in app.selectbox if s.label == 'Έκδοση').set_value(view).run()
                 app.selectbox(key=selector).set_value(app.session_state['fixture_group_keys'][0]).run()
                 self.assertEqual(field().value, 6.5)
                 field().set_value(None)
