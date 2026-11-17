@@ -186,7 +186,7 @@ def parse_old_log_details(table_name, details_str):
     except:
         return details_str
 
-def log_activity(action_type, table_name, details_raw):
+def log_activity(action_type, table_name, details_raw, max_length=2000):
     if not supabase or table_name == 'activity_logs': return
     user = st.session_state.get("current_user", "Άγνωστος")
     try:
@@ -201,7 +201,7 @@ def log_activity(action_type, table_name, details_raw):
         "username": user,
         "action_type": action_type,
         "table_name": table_name,
-        "details": str(details_raw)[:2000]
+        "details": str(details_raw)[:max_length]
     }
     try:
         res = supabase.table("activity_logs").insert(log_entry).execute()
@@ -288,6 +288,7 @@ def sync_data_incremental():
 
 def save_assignment_batch(before, proposed, project=None, keep_worker_ids=False):
     """Update session and undo history only after the atomic write is confirmed."""
+    from assignment_audit import format_assignment_changes
     from assignment_store import AssignmentSaveError, preserve_ids, save_changes, undo_actions
     if keep_worker_ids:
         proposed = preserve_ids(before, proposed)
@@ -309,7 +310,10 @@ def save_assignment_batch(before, proposed, project=None, keep_worker_ids=False)
     add_transaction(actions)
     mark_data_changed()
     touch_app_sync_state()
-    log_activity('ΑΠΟΘΗΚΕΥΣΗ GANTT', 'assignments', f'{len(saved)} βάρδιες')
+    details = format_assignment_changes(
+        before, saved, st.session_state.get('employees', []), st.session_state.get('projects', [])
+    )
+    log_activity('ΑΠΟΘΗΚΕΥΣΗ GANTT', 'assignments', details, max_length=None)
     # Rebuild derived indexes on the next rerun from confirmed rows.
     st.session_state.skip_remote_sync_once = True
     return saved
