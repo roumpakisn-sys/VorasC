@@ -65,6 +65,7 @@ def generate_gantt_chart(
     Η σελίδα χρησιμοποιεί κυρίως τα wk_groups και export_data.
     Το πρώτο επιστρεφόμενο αντικείμενο κρατιέται για συμβατότητα με την παλιά Plotly έκδοση.
     """
+    import placement_hours
     export_data = []
     wk_groups = {}
 
@@ -107,6 +108,7 @@ def generate_gantt_chart(
             notes = a.get("notes", "") or ""
             _, support_roles = placement_roles.split_notes(notes)
             _, project_details = placement_details.split_notes(notes)
+            _, actual_hours = placement_hours.split_notes(notes)
             is_canc = bool(a.get("is_cancelled", False))
             c_reason = a.get("cancel_reason", "") or ""
             is_general = bool(a.get("is_general", False))
@@ -121,7 +123,7 @@ def generate_gantt_chart(
             key = (
                 f"{curr_date}_{project_id}_{start_time}_{end_time}_{c_hex}_"
                 f"{is_canc}_{c_reason}_{arrival_time}_{is_general}"
-            ) + placement_roles.group_suffix(support_roles) + placement_details.group_suffix(project_details)
+            ) + placement_roles.group_suffix(support_roles) + placement_details.group_suffix(project_details) + placement_hours.group_suffix(actual_hours)
 
             if key not in groups:
                 legend_val = f"{project_name} ({c_name})"
@@ -132,6 +134,7 @@ def generate_gantt_chart(
                     "Project": project_name,
                     "ProjectDisplay": placement_details.project_label(project_name, project_details),
                     "ProjectDetails": project_details,
+                    "ActualHours": actual_hours,
                     "ArrivalTime": arrival_time,
                     "StartTime": start_time,
                     "EndTime": end_time,
@@ -203,7 +206,8 @@ def generate_gantt_chart(
 
             g["Notes_Raw"] = " | ".join(g["Notes_List"])
             free_notes = list(dict.fromkeys(
-                placement_details.split_notes(placement_roles.split_notes(note)[0])[0] for note in g["Notes_List"]
+                placement_hours.split_notes(placement_details.split_notes(placement_roles.split_notes(note)[0])[0])[0]
+                for note in g["Notes_List"]
             ))
             g["Notes"] = _clean_leave_note_from_bar(placement_roles.combine_notes(
                 " | ".join(note for note in free_notes if note), g["SupportRoles"]
@@ -217,6 +221,7 @@ def generate_gantt_chart(
                 "Ώρα Προσέλευσης": g["ArrivalTime"] if g["ArrivalTime"] else "-",
                 "Ώρα Έναρξης": g["StartTime"],
                 "Ώρα Λήξης": g["EndTime"],
+                "Πραγματικές Ώρες": g["ActualHours"],
                 "Παρατηρήσεις": g["Notes"],
                 "Γενικός": "ΝΑΙ" if g.get("IsGeneral", False) else "ΟΧΙ",
                 "Ακυρωμένο": "ΝΑΙ" if g["is_cancelled"] else "ΟΧΙ",

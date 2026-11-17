@@ -16,6 +16,7 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
+import placement_hours
 
 utils.init_data_and_sync()
 
@@ -768,9 +769,7 @@ elif menu == "Ώρες Εργασιών":
         d = a['date']
         if d.month == selected_month and d.year == selected_year:
             try:
-                start_h, start_m = map(int, str(a['startTime'])[:5].split(':'))
-                end_h, end_m = map(int, str(a['endTime'])[:5].split(':'))
-                delta_hours = (end_h - start_h) + (end_m - start_m) / 60.0
+                delta_hours = placement_hours.counted_hours(a)
                 if a['employeeId'] in employee_hours:
                     employee_hours[a['employeeId']] += delta_hours
             except:

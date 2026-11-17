@@ -190,6 +190,7 @@ def _group_viber_assignments(assignments, day_assignments):
     ordinary notes and separate contacts, hiding leave annotations under projects.
     This changes the export only, never the underlying assignment/leave records.
     """
+    import placement_hours
     groups, prepared, known_details = {}, [], {}
     for assignment in assignments:
         if assignment.get("is_cancelled"):
@@ -202,6 +203,7 @@ def _group_viber_assignments(assignments, day_assignments):
                start, end, arrival, bool(assignment.get("is_general", False)))
         free_notes, contacts = placement_roles.split_notes(str(assignment.get("notes") or ""))
         free_notes, details = placement_details.split_notes(free_notes)
+        free_notes, _ = placement_hours.split_notes(free_notes)
         prepared.append((key, assignment, free_notes, contacts, details))
         if any(details.values()):
             known_details.setdefault(key, set()).add(tuple(details.values()))

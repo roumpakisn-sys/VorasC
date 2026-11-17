@@ -14,6 +14,7 @@ import gantt_html
 import gantt_filters
 import placement_roles
 import placement_details
+import placement_hours
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -667,6 +668,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
         )
 
         add_support_roles = placement_roles.inputs(key=f"mqa_roles_{qa_rc}", stacked=True)
+        add_actual_hours = placement_hours.inputs(key=f"mqa_actual_hours_{qa_rc}")
 
         color_choice = st.selectbox(
             "Χρώμα",
@@ -743,8 +745,10 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "endTime": va["end"],
                             "colorName": color_choice,
                             "colorHex": config.BASIC_COLORS[color_choice],
-                            "notes": placement_details.combine_notes(
-                                placement_roles.combine_notes(final_notes, add_support_roles), add_project_details
+                            "notes": placement_hours.combine_notes(
+                                placement_details.combine_notes(
+                                    placement_roles.combine_notes(final_notes, add_support_roles), add_project_details
+                                ), add_actual_hours
                             ),
                             "is_cancelled": False,
                             "cancel_reason": "",
@@ -866,6 +870,13 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                 target_free_notes, target_support_roles = placement_roles.split_notes(target_group.get("Notes", ""))
                 target_support_roles = target_group.get("SupportRoles", target_support_roles)
                 target_free_notes, _ = placement_details.split_notes(target_free_notes)
+                target_free_notes, _ = placement_hours.split_notes(target_free_notes)
+                edit_actual_hours = placement_hours.inputs(
+                    key=f"mobile_edit_actual_hours{edit_suffix}",
+                    default=placement_hours.split_notes(
+                        target_group.get("Notes_Raw") or target_group.get("Notes", "")
+                    )[1],
+                )
                 edit_support_roles = placement_roles.inputs(
                     key="mobile_edit_roles_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12],
                     defaults=target_support_roles, stacked=True,
@@ -984,8 +995,10 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "endTime": va["end"],
                                     "colorName": edit_color,
                                     "colorHex": config.BASIC_COLORS[edit_color],
-                                    "notes": placement_details.combine_notes(
-                                        placement_roles.combine_notes(final_notes, edit_support_roles), edit_project_details
+                                    "notes": placement_hours.combine_notes(
+                                        placement_details.combine_notes(
+                                            placement_roles.combine_notes(final_notes, edit_support_roles), edit_project_details
+                                        ), edit_actual_hours
                                     ),
                                     "is_cancelled": bool(e_is_cancelled),
                                     "cancel_reason": normalized_cancel_reason,

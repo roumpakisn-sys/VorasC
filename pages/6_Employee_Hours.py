@@ -110,6 +110,7 @@ def _format_hours(value):
 
 def _get_employee_assignments(employee_id):
     """Επιστρέφει μόνο πραγματικές, μη ακυρωμένες βάρδιες του εργαζομένου."""
+    import placement_hours
     rows = []
 
     for assignment in st.session_state.get("assignments", []):
@@ -128,9 +129,10 @@ def _get_employee_assignments(employee_id):
 
         start_time = str(assignment.get("startTime", "") or "")[:5]
         end_time = str(assignment.get("endTime", "") or "")[:5]
-        hours = _duration_hours(start_time, end_time)
+        hours = placement_hours.counted_hours(assignment)
+        actual_hours = placement_hours.split_notes(assignment.get("notes"))[1]
 
-        if hours <= 0:
+        if hours <= 0 and actual_hours is None:
             continue
 
         rows.append({
@@ -141,7 +143,8 @@ def _get_employee_assignments(employee_id):
             "start": start_time,
             "end": end_time,
             "hours": hours,
-            "notes": assignment.get("notes", "") or "",
+            "actual_hours": actual_hours,
+            "notes": placement_hours.split_notes(assignment.get("notes"))[0],
             "assignment_id": assignment.get("id"),
         })
 
@@ -250,6 +253,7 @@ def _detail_table(rows):
             "Έναρξη",
             "Λήξη",
             "Ώρες",
+            "Υπολογισμός",
             "Παρατηρήσεις",
         ])
 
@@ -262,6 +266,7 @@ def _detail_table(rows):
             "Έναρξη": row["start"],
             "Λήξη": row["end"],
             "Ώρες": _format_hours(row["hours"]),
+            "Υπολογισμός": "Πραγματικές ώρες" if row.get("actual_hours") is not None else "Ωράριο μπάρας",
             "Παρατηρήσεις": row["notes"],
         })
 
@@ -365,3 +370,4 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
 )
+

@@ -39,6 +39,7 @@ import gantt_excel_export
 import gantt_filters
 import placement_roles
 import placement_details
+import placement_hours
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -314,7 +315,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
                             project_id, custom_project, employee_ids, color_name,
                             notes, is_general, use_arrival, arrival_time,
                             start_time, end_time, is_cancelled=False, cancel_reason="",
-                            support_roles=None, project_details=None):
+                            support_roles=None, project_details=None, actual_hours=None):
     return {
         "first_date": first_date,
         "mode": mode,
@@ -327,6 +328,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
         "notes": notes,
         "support_roles": placement_roles.normalize(support_roles),
         "project_details": placement_details.normalize(project_details),
+        "actual_hours": placement_hours.normalize(actual_hours),
         "is_general": bool(is_general),
         "use_arrival": bool(use_arrival),
         "arrival_time": arrival_time.strftime("%H:%M"),
@@ -438,6 +440,9 @@ if not presentation_mode:
                 add_support_roles = placement_roles.inputs(
                     key=f"qa_roles_{qa_rc}", defaults=qa_prefill.get("support_roles")
                 )
+                add_actual_hours = placement_hours.inputs(
+                    key=f"qa_actual_hours_{qa_rc}", default=qa_prefill.get("actual_hours")
+                )
 
                 c_color, c_notes = st.columns(2)
                 with c_color:
@@ -495,6 +500,7 @@ if not presentation_mode:
                         notes=add_notes, is_general=is_general,
                         support_roles=add_support_roles,
                         project_details=add_project_details,
+                        actual_hours=add_actual_hours,
                         use_arrival=use_arr, arrival_time=t_arrival,
                         start_time=t_start, end_time=t_end,
                     ))
@@ -566,8 +572,10 @@ if not presentation_mode:
                                     "endTime": va["end"],
                                     "colorName": color_choice,
                                     "colorHex": config.BASIC_COLORS[color_choice],
-                                    "notes": placement_details.combine_notes(
-                                        placement_roles.combine_notes(c_notes, add_support_roles), add_project_details
+                                    "notes": placement_hours.combine_notes(
+                                        placement_details.combine_notes(
+                                            placement_roles.combine_notes(c_notes, add_support_roles), add_project_details
+                                        ), add_actual_hours
                                     ),
                                     "is_cancelled": False,
                                     "cancel_reason": "",
@@ -779,6 +787,14 @@ if not presentation_mode:
                         )
                         target_support_roles = target_group.get("SupportRoles", target_support_roles)
                         target_free_notes, _ = placement_details.split_notes(target_free_notes)
+                        target_free_notes, _ = placement_hours.split_notes(target_free_notes)
+                        target_actual_hours = placement_hours.split_notes(
+                            target_group.get("Notes_Raw") or target_group.get("Notes", "")
+                        )[1]
+                        edit_actual_hours = placement_hours.inputs(
+                            key=f"edit_actual_hours_{edit_key}",
+                            default=(edit_prefill.get("actual_hours") if edit_prefill else target_actual_hours),
+                        )
                         edit_support_roles = placement_roles.inputs(
                             key=f"edit_roles_{edit_key}",
                             defaults=(edit_prefill.get("support_roles") if edit_prefill else target_support_roles),
@@ -865,6 +881,7 @@ if not presentation_mode:
                                 notes=edit_notes, is_general=e_is_general,
                                 support_roles=edit_support_roles,
                                 project_details=edit_project_details,
+                                actual_hours=edit_actual_hours,
                                 use_arrival=use_arr_edit, arrival_time=new_t_arrival,
                                 start_time=new_t_start, end_time=new_t_end,
                                 is_cancelled=e_is_cancelled, cancel_reason=e_cancel_reason,
@@ -926,6 +943,7 @@ if not presentation_mode:
                                 and edit_notes == target_clean_note
                                 and placement_roles.normalize(edit_support_roles) == placement_roles.normalize(target_support_roles)
                                 and placement_details.normalize(edit_project_details) == placement_details.normalize(target_project_details)
+                                and edit_actual_hours == target_actual_hours
                                 and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                 and normalized_cancel_reason == target_cancel_reason
                                 and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
@@ -967,8 +985,10 @@ if not presentation_mode:
                                         "endTime": adj_end,
                                         "colorName": edit_color,
                                         "colorHex": config.BASIC_COLORS[edit_color],
-                                        "notes": placement_details.combine_notes(
-                                            placement_roles.combine_notes(c_notes, edit_support_roles), edit_project_details
+                                        "notes": placement_hours.combine_notes(
+                                            placement_details.combine_notes(
+                                                placement_roles.combine_notes(c_notes, edit_support_roles), edit_project_details
+                                            ), edit_actual_hours
                                         ),
                                         "is_cancelled": e_is_cancelled,
                                         "cancel_reason": normalized_cancel_reason,
