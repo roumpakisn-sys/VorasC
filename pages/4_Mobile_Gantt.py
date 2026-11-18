@@ -16,8 +16,10 @@ import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
-import periodic_visits
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
+from periodic_visits_runtime import load_periodic_visits
+
+periodic_visits = load_periodic_visits()
 
 
 # =========================================================

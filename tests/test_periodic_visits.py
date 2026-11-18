@@ -2,11 +2,13 @@ from copy import deepcopy
 from datetime import date
 import json
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import patch
 import uuid
 
 import periodic_visits as visits
+from periodic_visits_runtime import load_periodic_visits
 import placement_details
 import placement_hours
 import placement_roles
@@ -15,6 +17,20 @@ from test_regression_smoke import get_source_functions
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class PeriodicVisitRuntimeTests(unittest.TestCase):
+    def test_live_update_loads_missing_features_from_disk_only_once(self):
+        stale = ModuleType('periodic_visits')
+        stale.render_management = lambda _: None
+        with patch.dict('sys.modules', {'periodic_visits': stale}):
+            loaded = load_periodic_visits()
+            self.assertIs(loaded, stale)
+            self.assertTrue(callable(loaded.spacing_review_control))
+            self.assertTrue(callable(loaded.confirm_spacing))
+            self.assertTrue(callable(loaded.target_for_period))
+            with patch('periodic_visits_runtime.reload', side_effect=AssertionError('unexpected reload')):
+                self.assertIs(load_periodic_visits(), loaded)
 
 
 class PeriodicVisitTests(unittest.TestCase):
@@ -166,7 +182,6 @@ class PeriodicVisitTests(unittest.TestCase):
         flow = RecurringFlowTests()
         module = flow.setup_flow()
         flow.state.recurring_patterns = [deepcopy(self.pattern)]
-        from unittest.mock import patch
         with patch.dict('sys.modules', {'utils': flow.utils}), patch.object(module, 'load_recurring_context') as load:
             module.auto_extend_recurring_patterns()
         load.assert_not_called()

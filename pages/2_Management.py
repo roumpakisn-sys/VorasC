@@ -17,7 +17,9 @@ if not st.session_state.get("authenticated"):
 import config
 import utils
 import placement_hours
-import periodic_visits
+from periodic_visits_runtime import load_periodic_visits
+
+periodic_visits = load_periodic_visits()
 
 utils.init_data_and_sync()
 
