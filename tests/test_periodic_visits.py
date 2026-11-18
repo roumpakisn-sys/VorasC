@@ -40,6 +40,7 @@ class PeriodicVisitTests(unittest.TestCase):
         self.assertEqual(len(chart(rows)[1]), 3)  # one hours split plus a separate visit
 
     def test_cancel_delete_move_month_and_unlink_recalculate_from_assignments(self):
+        self.assertEqual(self.task['period_months'], 1)  # persisted monthly-only format
         self.assertEqual(visits.remaining_visits([self.task], [self.row], self.day), 1)
         for rows in ([], [{**self.row, 'is_cancelled': True}],
                      [{**self.row, 'date': date(2026, 12, 1)}],
@@ -49,6 +50,26 @@ class PeriodicVisitTests(unittest.TestCase):
         moved = [{**self.row, 'date': date(2026, 12, 1)}]
         self.assertEqual(visits.remaining_visits([self.task], moved, date(2026, 12, 1)), 1)
         self.assertEqual(visits.remaining_visits([self.task], [], date(2026, 10, 1)), 0)
+
+    def test_bimonthly_visits_count_in_either_month_and_reset_at_the_boundary(self):
+        task = {**self.task, 'start': date(2026, 12, 1), 'period_months': 2, 'visit_target': 1}
+        december = date(2026, 12, 31)
+        january = date(2027, 1, 31)
+        february = date(2027, 2, 1)
+        row = {**self.row, 'date': january}
+        self.assertEqual(visits.period_bounds(task, january), (date(2026, 12, 1), february))
+        self.assertEqual(visits.remaining_visits([task], [row], december), 0)
+        self.assertEqual(visits.remaining_visits([task], [row], january), 0)
+        self.assertEqual(visits.remaining_visits([task], [row], february), 1)
+
+    def test_semiannual_counter_includes_the_last_day_and_excludes_neighboring_periods(self):
+        task = {**self.task, 'period_months': 6}
+        days = [date(2026, 10, 31), date(2026, 11, 1), date(2027, 4, 30), date(2027, 5, 1)]
+        rows = [{**self.row, 'date': day, 'id': str(i)} for i, day in enumerate(days)]
+        self.assertEqual(visits.count_visits(task, rows, days[0]), [])
+        cycle = visits.count_visits(task, rows, date(2027, 2, 15))
+        self.assertEqual([day for (day, _), _ in cycle], days[1:3])
+        self.assertEqual(visits.remaining_visits([task], rows, days[-1]), 1)
 
     def test_note_updates_preserve_metadata_and_multiday_copy_uses_new_visits(self):
         notes = placement_hours.combine_notes(placement_roles.combine_notes(
@@ -121,12 +142,15 @@ with patch.dict('sys.modules', {'utils': fake}):
         self.assertEqual(app.session_state['recurring_patterns'], [])
         app.checkbox(key='fail_db').set_value(False).run()
         next(t for t in app.text_input if t.label == 'Περιγραφή εργασίας').set_value('Υαλοπίνακες')
+        next(s for s in app.selectbox if s.label == 'Συχνότητα').set_value(6)
         next(b for b in app.button if b.label == 'Δημιουργία').click().run()
         self.assertFalse(app.exception)
         tasks = visits.get_targets(app.session_state['recurring_patterns'])
         self.assertEqual(len(tasks), 1)
-        self.assertEqual(tasks[0]['monthly_target'], 2)
-        self.assertTrue(any(metric.label == 'Απομένουν' and metric.value == '2' for metric in app.metric))
+        self.assertEqual(tasks[0]['visit_target'], 1)
+        self.assertEqual(tasks[0]['period_months'], 6)
+        self.assertTrue(any(metric.label == 'Απομένουν' and metric.value == '1' for metric in app.metric))
+        self.assertTrue(any('Ανά εξάμηνο' in caption.value for caption in app.caption))
 
     def test_link_existing_crew_reload_and_unlink_in_both_forms(self):
         for view in ('desktop', 'mobile'):

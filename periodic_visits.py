@@ -1,12 +1,13 @@
-"""Monthly visit targets and placement links using the existing database schema."""
+"""Periodic visit targets and placement links using the existing database schema."""
 import base64
 import json
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 TARGET_TYPE = 'Μηνιαίος στόχος επισκέψεων'
 MENU = 'Περιοδικές Εργασίες'
+FREQUENCIES = {1: 'Κάθε μήνα', 2: 'Ανά δίμηνο', 6: 'Ανά εξάμηνο'}
 _TAG = re.compile(r'\[Περιοδική επίσκεψη: ([A-Za-z0-9_=-]+)\]')
 
 
@@ -32,12 +33,14 @@ def get_targets(patterns):
             continue
         try:
             info = json.loads(pattern.get('notes') or '')
-            count = int(info['monthly_target'])
-            if not info['name'].strip() or count < 1:
+            count = int(info.get('visit_target', info.get('monthly_target')))
+            months = int(info.get('period_months', 1))
+            if not info['name'].strip() or count < 1 or months not in FREQUENCIES:
                 continue
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, AttributeError):
             continue
-        tasks.append({**info, 'monthly_target': count, 'id': pattern['id'], 'project_id': pattern['projectId'],
+        tasks.append({**info, 'visit_target': count, 'period_months': months,
+                      'id': pattern['id'], 'project_id': pattern['projectId'],
                       'start': as_day(pattern.get('startDate')), 'record': pattern})
     return tasks
 
@@ -92,14 +95,35 @@ def links_for_dates(task_id, project_id, patterns, days, previous=None):
             for index, day in enumerate(days)}
 
 
+def _month_start(index):
+    year, offset = divmod(index, 12)
+    return date(year, offset + 1, 1)
+
+
+def period_bounds(task, month):
+    """Return the start and exclusive end of the cycle containing the selected month."""
+    anchor = task['start'] or date(month.year, 1, 1)
+    anchor_index = anchor.year * 12 + anchor.month - 1
+    month_index = month.year * 12 + month.month - 1
+    if month_index < anchor_index:
+        return None
+    length = task['period_months']
+    start_index = anchor_index + ((month_index - anchor_index) // length) * length
+    return _month_start(start_index), _month_start(start_index + length)
+
+
 def count_visits(task, assignments, month):
     """All crew rows sharing an occurrence count once per date, across bar splits."""
+    bounds = period_bounds(task, month)
+    if bounds is None:
+        return []
+    start, end = bounds
     visits = {}
     for row in assignments:
-        day = as_day(row.get('date'))
-        if not day or (day.year, day.month) != (month.year, month.month) or row.get('is_cancelled'):
+        if row.get('projectId') != task['project_id'] or row.get('is_cancelled'):
             continue
-        if row.get('projectId') != task['project_id']:
+        day = as_day(row.get('date'))
+        if not day or not start <= day < end:
             continue
         link = split_notes(row.get('notes'))[1]
         if link and link['task_id'] == task['id']:
@@ -108,9 +132,8 @@ def count_visits(task, assignments, month):
 
 
 def remaining_visits(tasks, assignments, month):
-    return sum(max(0, task['monthly_target'] - len(count_visits(task, assignments, month)))
-               for task in tasks if task.get('active', True) and
-               (not task['start'] or task['start'] <= month.replace(day=1)))
+    return sum(max(0, task['visit_target'] - len(count_visits(task, assignments, month)))
+               for task in tasks if task.get('active', True) and period_bounds(task, month) is not None)
 
 
 def inputs(*, key, project_id, default=None):
@@ -172,7 +195,8 @@ def render_gantt_summary(today, *, key):
     if not tasks:
         return
     count = remaining_visits(tasks, st.session_state.assignments, today)
-    if st.button(f'📌 Απομένουν {count} περιοδικές επισκέψεις αυτόν τον μήνα',
+    label = 'Απομένει 1 περιοδική επίσκεψη' if count == 1 else f'Απομένουν {count} περιοδικές επισκέψεις'
+    if st.button(f'📌 {label}', help='Μετρά τις εκκρεμείς επισκέψεις στην τρέχουσα περίοδο κάθε εργασίας.',
                  key=key, use_container_width=True):
         st.session_state.management_menu = MENU
         st.session_state.periodic_month = today.replace(day=1)
@@ -187,9 +211,10 @@ def render_management(is_admin):
     st.title('📌 Περιοδικές Εργασίες')
     tasks = get_targets(st.session_state.recurring_patterns)
     project_names = {p['id']: p['name'] for p in st.session_state.projects}
-    month = st.date_input('Μήνας παρακολούθησης', value=get_local_today().replace(day=1),
+    month = st.date_input('Μήνας αναφοράς', value=get_local_today().replace(day=1),
                           key='periodic_month').replace(day=1)
-    st.caption('Ο μετρητής περιλαμβάνει τις καταχωρισμένες, μη ακυρωμένες επισκέψεις του μήνα.')
+    st.caption('Για κάθε εργασία εμφανίζεται η περίοδος που περιλαμβάνει τον μήνα αναφοράς. '
+               'Μετρούν οι καταχωρισμένες επισκέψεις που δεν έχουν ακυρωθεί.')
 
     def save_target(record, original=None):
         if not utils.supabase:
@@ -224,8 +249,10 @@ def render_management(is_admin):
             with st.form('periodic_new', clear_on_submit=True):
                 project_id = st.selectbox('Έργο', list(project_names), format_func=project_names.get)
                 name = st.text_input('Περιγραφή εργασίας', placeholder='π.χ. Καθαρισμός υαλοπινάκων')
-                target = st.number_input('Επισκέψεις ανά μήνα', min_value=1, value=2, step=1)
-                start = st.date_input('Έναρξη παρακολούθησης', value=month)
+                frequency = st.selectbox('Συχνότητα', list(FREQUENCIES), format_func=FREQUENCIES.get)
+                target = st.number_input('Επισκέψεις ανά περίοδο', min_value=1, value=1, step=1)
+                start = st.date_input('Μήνας έναρξης', value=month,
+                                      help='Η πρώτη περίοδος ξεκινά την πρώτη ημέρα αυτού του μήνα.')
                 if st.form_submit_button('Δημιουργία'):
                     if not name.strip():
                         st.error('Συμπληρώστε περιγραφή εργασίας.')
@@ -233,7 +260,8 @@ def render_management(is_admin):
                              for t in tasks):
                         st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                     else:
-                        info = {'name': name.strip(), 'monthly_target': int(target), 'active': True}
+                        info = {'name': name.strip(), 'visit_target': int(target),
+                                'period_months': frequency, 'active': True}
                         save_target({'id': str(uuid.uuid4()), 'projectId': project_id, 'type': TARGET_TYPE,
                                      'notes': json.dumps(info, ensure_ascii=False), 'employeeIds': [],
                                      'weekdays': [], 'startDate': start.replace(day=1),
@@ -244,14 +272,18 @@ def render_management(is_admin):
     for task in tasks:
         if not include_inactive and not task.get('active', True):
             continue
-        if task['start'] and task['start'] > month:
+        bounds = period_bounds(task, month)
+        if bounds is None:
             continue
+        start, end = bounds
+        last_day = end - timedelta(days=1)
         visits = count_visits(task, st.session_state.assignments, month)
         count = len(visits)
-        remaining = max(0, task['monthly_target'] - count)
+        remaining = max(0, task['visit_target'] - count)
         cols = st.columns([3, 1, 1.5, 1, 2])
         cols[0].write(f"{project_names.get(task['project_id'], 'Άγνωστο έργο')} — {task['name']}")
-        cols[1].metric('Στόχος', task['monthly_target'])
+        cols[0].caption(f"{FREQUENCIES[task['period_months']]} · {start:%d/%m/%Y}–{last_day:%d/%m/%Y}")
+        cols[1].metric('Στόχος', task['visit_target'])
         with cols[2]:
             with st.expander(f'Στο πρόγραμμα · {count}'):
                 for (day, _), rows in visits:
@@ -264,14 +296,19 @@ def render_management(is_admin):
         cols[3].metric('Απομένουν', remaining)
         if is_admin and task.get('active', True) and cols[4].button('Προγραμμάτισε', key=f"periodic_add_{task['id']}"):
             prepare_new_placement(task, month)
-        if count > task['monthly_target']:
-            st.caption(f"Επισκέψεις πάνω από τον στόχο: {count} από {task['monthly_target']}")
+        if count > task['visit_target']:
+            st.caption(f"Επισκέψεις πάνω από τον στόχο: {count} από {task['visit_target']}")
         if is_admin:
             with st.expander('⚙️ Ρύθμιση · ' + task['name']):
                 with st.form('periodic_edit_' + task['id']):
                     edited_name = st.text_input('Περιγραφή εργασίας', value=task['name'])
-                    edited_target = st.number_input('Επισκέψεις ανά μήνα', min_value=1,
-                                                    value=task['monthly_target'], step=1)
+                    edited_frequency = st.selectbox(
+                        'Συχνότητα', list(FREQUENCIES), index=list(FREQUENCIES).index(task['period_months']),
+                        format_func=FREQUENCIES.get,
+                        help='Αν αλλάξετε συχνότητα, οι περίοδοι υπολογίζονται ξανά από τον αρχικό μήνα έναρξης.',
+                    )
+                    edited_target = st.number_input('Επισκέψεις ανά περίοδο', min_value=1,
+                                                    value=task['visit_target'], step=1)
                     active = st.checkbox('Ενεργή', value=task.get('active', True))
                     if st.form_submit_button('Αποθήκευση ρύθμισης'):
                         if not edited_name.strip():
@@ -280,8 +317,9 @@ def render_management(is_admin):
                                  t['name'].strip().casefold() == edited_name.strip().casefold() for t in tasks):
                             st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                         else:
-                            info = {'name': edited_name.strip(), 'monthly_target': int(edited_target), 'active': active}
+                            info = {'name': edited_name.strip(), 'visit_target': int(edited_target),
+                                    'period_months': edited_frequency, 'active': active}
                             save_target({**task['record'], 'notes': json.dumps(info, ensure_ascii=False)}, task['record'])
         st.divider()
     if not tasks:
-        st.info('Προσθέστε περιοδική εργασία για να ορίσετε τον μηνιαίο στόχο επισκέψεων.')
+        st.info('Προσθέστε περιοδική εργασία για να ορίσετε τη συχνότητα και τον στόχο επισκέψεων.')
