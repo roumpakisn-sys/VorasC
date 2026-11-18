@@ -99,6 +99,51 @@ class PeriodicVisitTests(unittest.TestCase):
         inactive = {**task, 'active': False}
         self.assertEqual(visits.semiannual_deadlines([inactive, self.task], [], today), [])
 
+    def test_exception_changes_only_selected_cycle_and_its_deadline_notice(self):
+        task = {**self.task, 'period_months': 6, 'visit_target': 1}
+        bounds = visits.period_bounds(task, self.day)
+        with self.assertRaises(ValueError):
+            visits.updated_exception(task, bounds, 1, ' ')
+        task['period_exceptions'] = visits.updated_exception(task, bounds, 1, 'Κλειστό το έργο')
+        self.assertEqual(visits.remaining_visits([task], [], date(2027, 4, 1)), 0)
+        self.assertEqual(visits.remaining_visits([task], [], date(2027, 5, 1)), 1)
+        self.assertEqual(visits.semiannual_deadlines([task], [], date(2027, 5, 1)), [])
+        task['period_exceptions'] = visits.updated_exception(task, bounds, 0, '')
+        self.assertEqual(len(visits.semiannual_deadlines([task], [], date(2027, 5, 1))), 1)
+
+    def test_spacing_checks_neighbors_across_months_and_ignores_crew_duplicates(self):
+        info = json.loads(self.pattern['notes'])
+        info.update(min_gap_days=10, max_gap_days=20)
+        pattern = {**self.pattern, 'notes': json.dumps(info)}
+        next_link = visits.make_link(self.task_id, 'p', [pattern])
+        existing = [self.row, {**self.row, 'id': 'b', 'employeeId': 'e2'}]
+        candidate = {**self.row, 'id': 'next', 'notes': visits.combine_notes('', next_link)}
+        for target, expected in ((date(2026, 11, 25), 'ελάχιστο 10'),
+                                 (date(2026, 11, 28), None),
+                                 (date(2026, 12, 8), None),
+                                 (date(2026, 12, 9), 'μέγιστο 20')):
+            warnings = visits.spacing_warnings([pattern], existing, [], [{**candidate, 'date': target}])
+            if expected:
+                warning, = warnings
+                self.assertIn(expected, warning)
+            else:
+                self.assertEqual(warnings, [])
+        self.assertEqual(visits.spacing_warnings([pattern], existing, [], [{**candidate, 'is_cancelled': True}]), [])
+
+    def test_spacing_detects_new_gap_after_rescheduling_or_cancelling(self):
+        info = json.loads(self.pattern['notes'])
+        info.update(max_gap_days=20)
+        pattern = {**self.pattern, 'notes': json.dumps(info)}
+        middle = {**self.row, 'id': 'middle', 'date': date(2026, 12, 1),
+                  'notes': visits.combine_notes('', visits.make_link(self.task_id, 'p', [pattern]))}
+        last = {**self.row, 'id': 'last', 'date': date(2026, 12, 16),
+                'notes': visits.combine_notes('', visits.make_link(self.task_id, 'p', [pattern]))}
+        before = [self.row, middle, last]
+        cancelled = {**middle, 'is_cancelled': True}
+        warning, = visits.spacing_warnings([pattern], before, [middle], [cancelled])
+        self.assertIn('Απόσταση 28 ημερών (μέγιστο 20)', warning)
+        self.assertEqual(visits.spacing_warnings([pattern], before, [middle], [{**middle, 'employeeId': 'e2'}]), [])
+
     def test_note_updates_preserve_metadata_and_multiday_copy_uses_new_visits(self):
         notes = placement_hours.combine_notes(placement_roles.combine_notes(
             placement_details.combine_notes('Κλειδιά [Άδεια: Άννα]', {'address': 'Εγνατία 10'}),
@@ -136,6 +181,44 @@ except ImportError:
 
 @unittest.skipIf(AppTest is None, 'Install Streamlit UI dependencies')
 class PeriodicVisitFormTests(unittest.TestCase):
+    def test_changed_gap_requires_a_fresh_confirmation_before_saving(self):
+        source = '''
+from datetime import date
+import json
+import streamlit as st
+import periodic_visits as visits
+task_id = '00000000-0000-4000-8000-000000000001'
+st.session_state.recurring_patterns = [dict(
+    id=task_id, projectId='p', type=visits.TARGET_TYPE, startDate='2026-11-01',
+    notes=json.dumps(dict(name='Υαλοπίνακες', visit_target=2, min_gap_days=10)))]
+link = dict(task_id=task_id, visit_id='00000000-0000-4000-8000-000000000002', name='Υαλοπίνακες')
+st.session_state.assignments = [dict(id='a', projectId='p', date=date(2026, 11, 16),
+    notes=visits.combine_notes('', link))]
+st.session_state.setdefault('saved_days', [])
+with st.form('placement'):
+    day = st.date_input('Ημερομηνία', value=date(2026, 11, 18))
+    save = st.form_submit_button('Καταχώρηση')
+    override = visits.spacing_review_control('placement')
+    if save or override:
+        next_link = visits.make_link(task_id, 'p', st.session_state.recurring_patterns)
+        row = dict(id='b', projectId='p', date=day, notes=visits.combine_notes('', next_link))
+        visits.confirm_spacing([], [row], 'placement', override=override)
+        st.session_state.saved_days.append(day)
+'''
+        app = AppTest.from_string(source).run()
+        app.button[0].click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['saved_days'], [])
+        self.assertIn('Απόσταση 2 ημερών', app.warning[0].value)
+        app.date_input[0].set_value(date(2026, 11, 20))
+        next(b for b in app.button if b.label == 'Αποθήκευση με απόκλιση').click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['saved_days'], [])
+        self.assertIn('Απόσταση 4 ημερών', app.warning[0].value)
+        next(b for b in app.button if b.label == 'Αποθήκευση με απόκλιση').click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['saved_days'], [date(2026, 11, 20)])
+
     def test_management_confirms_storage_before_showing_new_target(self):
         source = '''
 import streamlit as st

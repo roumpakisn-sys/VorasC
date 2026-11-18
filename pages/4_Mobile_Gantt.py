@@ -659,7 +659,7 @@ st.divider()
 with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
     qa_rc = st.session_state.mobile_qa_rc
 
-    with st.form("mobile_quick_add", clear_on_submit=True):
+    with st.form("mobile_quick_add", clear_on_submit=False):
         add_date = st.date_input(
             "Ημερομηνία",
             value=st.session_state.mobile_view_date,
@@ -732,8 +732,10 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
         )
 
         submit_add = st.form_submit_button("Καταχώρηση", use_container_width=True)
+        add_spacing_key = f"mobile_add_{qa_rc}"
+        add_spacing_override = periodic_visits.spacing_review_control(add_spacing_key)
 
-        if submit_add:
+        if submit_add or add_spacing_override:
             str_arrival = _time_to_str(t_arrival) if use_arr else ""
             str_start = _time_to_str(t_start)
             str_end = _time_to_str(t_end)
@@ -797,6 +799,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "is_general": bool(is_general),
                         })
 
+                periodic_visits.confirm_spacing([], new_assigns, add_spacing_key, override=add_spacing_override)
                 saved = utils.save_assignment_batch([], new_assigns, project=pending_new_project)
                 if saved is not None:
                     st.session_state.mobile_qa_rc += 1
@@ -972,6 +975,8 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
 
                 save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
                 delete_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή", use_container_width=True)
+                edit_spacing_key = f"mobile_edit{edit_suffix}"
+                edit_spacing_override = periodic_visits.spacing_review_control(edit_spacing_key)
 
                 if delete_edit:
                     old_assigns = [
@@ -990,7 +995,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                     st.success("Η μπάρα διαγράφηκε.")
                     st.rerun()
 
-                if save_edit:
+                if save_edit or edit_spacing_override:
                     str_arrival = _time_to_str(new_t_arrival) if use_arr_edit else ""
                     str_start = _time_to_str(new_t_start)
                     str_end = _time_to_str(new_t_end)
@@ -1063,6 +1068,9 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "is_general": bool(e_is_general),
                                 })
 
+                            periodic_visits.confirm_spacing(
+                                old_assigns, new_assigns, edit_spacing_key, override=edit_spacing_override,
+                            )
                             if utils.save_assignment_batch(
                                 old_assigns, new_assigns, project=pending_new_project,
                                 keep_worker_ids=True,

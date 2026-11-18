@@ -529,6 +529,8 @@ if not presentation_mode:
                     submit_new = st.form_submit_button("✅ Καταχώρηση", use_container_width=True)
                 with c_add_copy:
                     copy_new = st.form_submit_button("📋 Αντιγραφή στοιχείων", use_container_width=True)
+                add_spacing_key = f"desktop_add_{qa_rc}"
+                add_spacing_override = periodic_visits.spacing_review_control(add_spacing_key)
 
                 if copy_new:
                     _save_placement_clipboard(_form_clipboard_payload(
@@ -545,7 +547,7 @@ if not presentation_mode:
                         start_time=t_start, end_time=t_end,
                     ))
 
-                if submit_new:
+                if submit_new or add_spacing_override:
                     str_arrival = t_arrival.strftime("%H:%M") if use_arr else ""
                     str_start = t_start.strftime("%H:%M")
                     str_end = t_end.strftime("%H:%M")
@@ -634,6 +636,7 @@ if not presentation_mode:
                                 }
                                 new_assigns.append(new_assign)
 
+                        periodic_visits.confirm_spacing([], new_assigns, add_spacing_key, override=add_spacing_override)
                         saved = utils.save_assignment_batch([], new_assigns, project=pending_new_project)
                         if saved is not None:
                             st.success(f"Η ανάθεση ολοκληρώθηκε επιτυχώς για {len(new_target_dates)} ημέρα/ες!")
@@ -721,6 +724,8 @@ if not presentation_mode:
                     edit_key = hashlib.sha1(selected_key.encode("utf-8")).hexdigest()[:12]
                     edit_key = f"{edit_key}_{edit_form_revision}"
                     st.markdown("⚡ **Γρήγορη Μετακίνηση**")
+                    move_spacing_key = f"desktop_move_{edit_key}"
+                    move_spacing_override = periodic_visits.spacing_review_control(move_spacing_key, in_form=False)
                     qm_c1, qm_c2, qm_c3, qm_c4 = st.columns(4)
                     move_m_day = qm_c1.button("⬅️ -1 Μέρα", use_container_width=True)
                     move_p_day = qm_c2.button("➡️ +1 Μέρα", use_container_width=True)
@@ -766,6 +771,9 @@ if not presentation_mode:
                             new_assigns.append(new_a)
 
                         if not has_error and old_assigns:
+                            periodic_visits.confirm_spacing(
+                                old_assigns, new_assigns, move_spacing_key, override=move_spacing_override,
+                            )
                             if utils.save_assignment_batch(old_assigns, new_assigns) is None:
                                 st.stop()
                             clear_bar_selection()
@@ -928,6 +936,8 @@ if not presentation_mode:
                             del_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή", use_container_width=True)
                         with col_btn3:
                             copy_edit = st.form_submit_button("📋 Αντιγραφή στοιχείων", use_container_width=True)
+                        edit_spacing_key = f"desktop_edit_{edit_key}"
+                        edit_spacing_override = periodic_visits.spacing_review_control(edit_spacing_key)
 
                         if copy_edit:
                             _save_placement_clipboard(_form_clipboard_payload(
@@ -952,7 +962,7 @@ if not presentation_mode:
                             clear_bar_selection()
                             st.rerun()
 
-                        if save_edit:
+                        if save_edit or edit_spacing_override:
                             str_arrival = new_t_arrival.strftime("%H:%M") if use_arr_edit else ""
                             str_start = new_t_start.strftime("%H:%M")
                             str_end = new_t_end.strftime("%H:%M")
@@ -1077,6 +1087,9 @@ if not presentation_mode:
                                 st.error("Απαιτείται σύνδεση στη Supabase για ασφαλή αποθήκευση.")
                                 st.stop()
 
+                            periodic_visits.confirm_spacing(
+                                old_assigns, new_assigns, edit_spacing_key, override=edit_spacing_override,
+                            )
                             saved = utils.save_assignment_batch(
                                 old_assigns, new_assigns, project=pending_new_project,
                                 keep_worker_ids=True,
