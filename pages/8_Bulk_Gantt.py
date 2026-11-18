@@ -19,7 +19,9 @@ import placement_roles
 import placement_details
 from availability_rules import fetch_rules
 from assignment_policy import validate_changes
-from periodic_visits import spacing_warnings
+from periodic_visits_runtime import load_periodic_visits
+
+periodic_visits = load_periodic_visits()
 
 if not st.session_state.get("authenticated"):
     st.switch_page("streamlit_app.py")
@@ -369,8 +371,10 @@ if preview:
                          "Παρατηρήσεις μετά": str(after.get("notes") or "")})
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         st.caption("Για λόγους ασφάλειας, δεν εφαρμόζονται αλλαγές σε πρότυπα επανάληψης. Μόνο οι επιλεγμένες εγγραφές θα ενημερωθούν.")
-        warnings = spacing_warnings(st.session_state.recurring_patterns, st.session_state.assignments,
-                                    plan['old'].values(), plan['new'].values())
+        warnings = periodic_visits.spacing_warnings(
+            st.session_state.recurring_patterns, st.session_state.assignments,
+            plan['old'].values(), plan['new'].values(),
+        )
         if warnings:
             st.warning('\n\n'.join(warnings))
         confirm_label = ('Επιβεβαιώνω τις αλλαγές και την απόκλιση από τα όρια επισκέψεων' if warnings
