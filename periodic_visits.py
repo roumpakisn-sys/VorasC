@@ -113,6 +113,126 @@ def period_bounds(task, month):
     return _month_start(start_index), _month_start(start_index + length)
 
 
+def _period_key(bounds):
+    start, end = bounds
+    return f'{start.isoformat()}/{end.isoformat()}'
+
+
+def period_exception(task, bounds):
+    return task.get('period_exceptions', {}).get(_period_key(bounds))
+
+
+def target_for_period(task, bounds):
+    exception = period_exception(task, bounds)
+    waived = exception['visits'] if exception else 0
+    return max(0, task['visit_target'] - waived)
+
+
+def updated_exception(task, bounds, visits, reason):
+    """Return updated exceptions without changing the recurring target or other periods."""
+    exceptions = dict(task.get('period_exceptions', {}))
+    key = _period_key(bounds)
+    if visits == 0:
+        exceptions.pop(key, None)
+    elif 1 <= visits <= task['visit_target'] and reason.strip():
+        exceptions[key] = {'visits': visits, 'reason': reason.strip()}
+    else:
+        raise ValueError('Ορίστε πόσες επισκέψεις εξαιρούνται και συμπληρώστε την αιτιολογία.')
+    return exceptions
+
+
+def _gap_limits(task):
+    return task.get('min_gap_days', 0), task.get('max_gap_days', 0)
+
+
+def spacing_warnings(patterns, assignments, before, after):
+    """Find newly introduced gaps between consecutive non-cancelled visits."""
+    tasks = {task['id']: task for task in get_targets(patterns)
+             if task.get('active', True) and any(_gap_limits(task))}
+    if not tasks:
+        return []
+
+    def occurrence(row):
+        if row.get('is_cancelled'):
+            return None
+        link = split_notes(row.get('notes'))[1]
+        task = tasks.get(link['task_id']) if link else None
+        if task and row.get('projectId') == task['project_id']:
+            day = as_day(row.get('date'))
+            if day:
+                return task['id'], day, link['visit_id']
+        return None
+
+    removed = {visit for row in before if (visit := occurrence(row)) is not None}
+    added = {visit for row in after if (visit := occurrence(row)) is not None}
+    changed = {task_id for task_id, _, _ in removed ^ added}
+    if not changed:
+        return []
+
+    replaced_rows = {str(row['id']) for row in before}
+    original = {task_id: set() for task_id in changed}
+    proposed = {task_id: set() for task_id in changed}
+    projects = {tasks[task_id]['project_id'] for task_id in changed}
+    for row in assignments:
+        if row.get('projectId') not in projects:
+            continue
+        visit = occurrence(row)
+        if visit and visit[0] in changed:
+            task_id, day, visit_id = visit
+            original[task_id].add((day, visit_id))
+            if str(row['id']) not in replaced_rows:
+                proposed[task_id].add((day, visit_id))
+    for task_id, day, visit_id in added:
+        if task_id in changed:
+            proposed[task_id].add((day, visit_id))
+
+    warnings = []
+    for task_id in sorted(changed):
+        task = tasks[task_id]
+        minimum, maximum = _gap_limits(task)
+        previous = sorted(original[task_id])
+        old_pairs = set(zip(previous, previous[1:]))
+        visits = sorted(proposed[task_id])
+        for first, second in zip(visits, visits[1:]):
+            if (first, second) in old_pairs:
+                continue
+            first_day, second_day = first[0], second[0]
+            days = (second_day - first_day).days
+            if minimum and days < minimum:
+                limit = f'ελάχιστο {minimum}'
+            elif maximum and days > maximum:
+                limit = f'μέγιστο {maximum}'
+            else:
+                continue
+            warnings.append(f"{task['name']} · {first_day:%d/%m/%Y} → {second_day:%d/%m/%Y} · "
+                            f"Απόσταση {days} ημερών ({limit}).")
+    return warnings
+
+
+def spacing_review_control(key, *, in_form=True):
+    import streamlit as st
+
+    review = st.session_state.get('periodic_spacing_review')
+    if not review or review[0] != key:
+        return False
+    st.warning('\n\n'.join(review[1]))
+    if in_form:
+        return st.form_submit_button('Αποθήκευση με απόκλιση')
+    return st.checkbox('Επιτρέπω την απόκλιση και επαναλαμβάνω τη μετακίνηση', key=key + '_confirm')
+
+
+def confirm_spacing(before, after, key, *, override=False):
+    import streamlit as st
+
+    state = st.session_state
+    warnings = spacing_warnings(state.get('recurring_patterns', []), state.get('assignments', []), before, after)
+    if warnings and not (override and state.get('periodic_spacing_review') == (key, warnings)):
+        state.periodic_spacing_review = (key, warnings)
+        st.rerun()
+    if state.get('periodic_spacing_review', (None,))[0] == key:
+        state.pop('periodic_spacing_review')
+
+
 def _linked_visits(task, assignments, start, end):
     """All crew rows sharing an occurrence count once per date, across bar splits."""
     visits = {}
@@ -137,8 +257,12 @@ def count_visits(task, assignments, month):
 
 
 def remaining_visits(tasks, assignments, month):
-    return sum(max(0, task['visit_target'] - len(count_visits(task, assignments, month)))
-               for task in tasks if task.get('active', True) and period_bounds(task, month) is not None)
+    remaining = 0
+    for task in tasks:
+        bounds = period_bounds(task, month)
+        if task.get('active', True) and bounds is not None:
+            remaining += max(0, target_for_period(task, bounds) - len(_linked_visits(task, assignments, *bounds)))
+    return remaining
 
 
 def semiannual_deadlines(tasks, assignments, today):
@@ -161,7 +285,7 @@ def semiannual_deadlines(tasks, assignments, today):
             _, end = period_bounds(task, start)
             deadline = end - timedelta(days=1)
             days_left = (deadline - today).days
-            remaining = task['visit_target'] - counts.get(start, 0)
+            remaining = target_for_period(task, (start, end)) - counts.get(start, 0)
             if days_left <= SEMIANNUAL_NOTICE_DAYS and remaining > 0:
                 notices.append({'task': task, 'start': start, 'deadline': deadline,
                                 'days_left': days_left, 'remaining': remaining})
@@ -261,6 +385,17 @@ def render_deadlines(tasks, assignments, today, project_names, *, is_admin):
                 prepare_new_placement(task, today.replace(day=1))
 
 
+def _spacing_inputs(task=None):
+    import streamlit as st
+
+    minimum, maximum = _gap_limits(task or {})
+    low, high = st.columns(2)
+    minimum = low.number_input('Ελάχιστη απόσταση (ημέρες)', min_value=0, value=minimum, step=1)
+    maximum = high.number_input('Μέγιστη απόσταση (ημέρες)', min_value=0, value=maximum, step=1)
+    st.caption('Βάλτε 0 για να αφήσετε ένα όριο κενό. Μετρούν οι ημέρες ανάμεσα σε διαδοχικές επισκέψεις.')
+    return minimum, maximum
+
+
 def render_management(is_admin):
     import streamlit as st
     import utils
@@ -304,6 +439,12 @@ def render_management(is_admin):
                            f"{project_names.get(record['projectId'], '')} · {json.loads(record['notes'])['name']}")
         st.rerun()
 
+    def update_target(task, **changes):
+        record = task['record']
+        info = json.loads(record['notes'])
+        info.update(changes)
+        save_target({**record, 'notes': json.dumps(info, ensure_ascii=False)}, record)
+
     if st.button('🔄 Ανανέωση μετρητή'):
         st.session_state.last_sync_time = None
         st.rerun()
@@ -315,17 +456,21 @@ def render_management(is_admin):
                 name = st.text_input('Περιγραφή εργασίας', placeholder='π.χ. Καθαρισμός υαλοπινάκων')
                 frequency = st.selectbox('Συχνότητα', list(FREQUENCIES), format_func=FREQUENCIES.get)
                 target = st.number_input('Επισκέψεις ανά περίοδο', min_value=1, value=1, step=1)
+                minimum, maximum = _spacing_inputs()
                 start = st.date_input('Μήνας έναρξης', value=month,
                                       help='Η πρώτη περίοδος ξεκινά την πρώτη ημέρα αυτού του μήνα.')
                 if st.form_submit_button('Δημιουργία'):
                     if not name.strip():
                         st.error('Συμπληρώστε περιγραφή εργασίας.')
+                    elif maximum and minimum > maximum:
+                        st.error('Η ελάχιστη απόσταση πρέπει να είναι έως τη μέγιστη.')
                     elif any(t['project_id'] == project_id and t['name'].strip().casefold() == name.strip().casefold()
                              for t in tasks):
                         st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                     else:
                         info = {'name': name.strip(), 'visit_target': int(target),
-                                'period_months': frequency, 'active': True}
+                                'period_months': frequency, 'active': True,
+                                'min_gap_days': minimum, 'max_gap_days': maximum}
                         save_target({'id': str(uuid.uuid4()), 'projectId': project_id, 'type': TARGET_TYPE,
                                      'notes': json.dumps(info, ensure_ascii=False), 'employeeIds': [],
                                      'weekdays': [], 'startDate': start.replace(day=1),
@@ -343,11 +488,16 @@ def render_management(is_admin):
         last_day = end - timedelta(days=1)
         visits = count_visits(task, assignments, month)
         count = len(visits)
-        remaining = max(0, task['visit_target'] - count)
+        adjusted_target = target_for_period(task, bounds)
+        exception = period_exception(task, bounds)
+        remaining = max(0, adjusted_target - count)
         cols = st.columns([3, 1, 1.5, 1, 2])
         cols[0].write(f"{project_names.get(task['project_id'], 'Άγνωστο έργο')} — {task['name']}")
         cols[0].caption(f"{FREQUENCIES[task['period_months']]} · {start:%d/%m/%Y}–{last_day:%d/%m/%Y}")
-        cols[1].metric('Στόχος', task['visit_target'])
+        cols[1].metric('Στόχος', adjusted_target)
+        if exception:
+            cols[0].caption(f"Εξαιρούνται {task['visit_target'] - adjusted_target} από {task['visit_target']} επισκέψεις · "
+                            f"{exception['reason']}")
         with cols[2]:
             with st.expander(f'Στο πρόγραμμα · {count}'):
                 for (day, _), rows in visits:
@@ -360,9 +510,27 @@ def render_management(is_admin):
         cols[3].metric('Απομένουν', remaining)
         if is_admin and task.get('active', True) and cols[4].button('Προγραμμάτισε', key=f"periodic_add_{task['id']}"):
             prepare_new_placement(task, month)
-        if count > task['visit_target']:
-            st.caption(f"Επισκέψεις πάνω από τον στόχο: {count} από {task['visit_target']}")
+        if count > adjusted_target:
+            st.caption(f"Επισκέψεις πάνω από τον στόχο: {count} από {adjusted_target}")
         if is_admin:
+            with st.expander('Εξαίρεση περιόδου · ' + task['name']):
+                with st.form(f"periodic_exception_{task['id']}_{start.isoformat()}_{end.isoformat()}"):
+                    st.caption(f'Περίοδος {start:%d/%m/%Y}–{last_day:%d/%m/%Y}')
+                    waived = st.number_input('Επισκέψεις που εξαιρούνται', min_value=1,
+                                             max_value=task['visit_target'], step=1,
+                                             value=max(1, task['visit_target'] - adjusted_target))
+                    reason = st.text_input('Αιτιολογία', value=exception['reason'] if exception else '')
+                    save_exception = st.form_submit_button('Αποθήκευση εξαίρεσης')
+                    remove_exception = exception and st.form_submit_button('Αφαίρεση εξαίρεσης')
+                    if remove_exception:
+                        update_target(task, period_exceptions=updated_exception(task, bounds, 0, ''))
+                    elif save_exception:
+                        try:
+                            exceptions = updated_exception(task, bounds, waived, reason)
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            update_target(task, period_exceptions=exceptions)
             with st.expander('⚙️ Ρύθμιση · ' + task['name']):
                 with st.form('periodic_edit_' + task['id']):
                     edited_name = st.text_input('Περιγραφή εργασίας', value=task['name'])
@@ -373,17 +541,20 @@ def render_management(is_admin):
                     )
                     edited_target = st.number_input('Επισκέψεις ανά περίοδο', min_value=1,
                                                     value=task['visit_target'], step=1)
+                    minimum, maximum = _spacing_inputs(task)
                     active = st.checkbox('Ενεργή', value=task.get('active', True))
                     if st.form_submit_button('Αποθήκευση ρύθμισης'):
                         if not edited_name.strip():
                             st.error('Συμπληρώστε περιγραφή εργασίας.')
+                        elif maximum and minimum > maximum:
+                            st.error('Η ελάχιστη απόσταση πρέπει να είναι έως τη μέγιστη.')
                         elif any(t['id'] != task['id'] and t['project_id'] == task['project_id'] and
                                  t['name'].strip().casefold() == edited_name.strip().casefold() for t in tasks):
                             st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                         else:
-                            info = {'name': edited_name.strip(), 'visit_target': int(edited_target),
-                                    'period_months': edited_frequency, 'active': active}
-                            save_target({**task['record'], 'notes': json.dumps(info, ensure_ascii=False)}, task['record'])
+                            update_target(task, name=edited_name.strip(), visit_target=int(edited_target),
+                                          period_months=edited_frequency, active=active,
+                                          min_gap_days=minimum, max_gap_days=maximum)
         st.divider()
     if not tasks:
         st.info('Προσθέστε περιοδική εργασία για να ορίσετε τη συχνότητα και τον στόχο επισκέψεων.')
