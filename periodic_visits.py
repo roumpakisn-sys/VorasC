@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 TARGET_TYPE = 'Μηνιαίος στόχος επισκέψεων'
 MENU = 'Περιοδικές Εργασίες'
 FREQUENCIES = {1: 'Κάθε μήνα', 2: 'Ανά δίμηνο', 6: 'Ανά εξάμηνο'}
+SEMIANNUAL_NOTICE_DAYS = 30
 _TAG = re.compile(r'\[Περιοδική επίσκεψη: ([A-Za-z0-9_=-]+)\]')
 
 
@@ -112,12 +113,8 @@ def period_bounds(task, month):
     return _month_start(start_index), _month_start(start_index + length)
 
 
-def count_visits(task, assignments, month):
+def _linked_visits(task, assignments, start, end):
     """All crew rows sharing an occurrence count once per date, across bar splits."""
-    bounds = period_bounds(task, month)
-    if bounds is None:
-        return []
-    start, end = bounds
     visits = {}
     for row in assignments:
         if row.get('projectId') != task['project_id'] or row.get('is_cancelled'):
@@ -128,12 +125,50 @@ def count_visits(task, assignments, month):
         link = split_notes(row.get('notes'))[1]
         if link and link['task_id'] == task['id']:
             visits.setdefault((day, link['visit_id']), []).append(row)
+    return visits
+
+
+def count_visits(task, assignments, month):
+    bounds = period_bounds(task, month)
+    if bounds is None:
+        return []
+    visits = _linked_visits(task, assignments, *bounds)
     return sorted(visits.items(), key=lambda item: (item[0][0], str(item[1][0].get('startTime') or '')))
 
 
 def remaining_visits(tasks, assignments, month):
     return sum(max(0, task['visit_target'] - len(count_visits(task, assignments, month)))
                for task in tasks if task.get('active', True) and period_bounds(task, month) is not None)
+
+
+def semiannual_deadlines(tasks, assignments, today):
+    """Return shortfalls for upcoming deadlines and for any past six-month cycle."""
+    notices = []
+    for task in tasks:
+        if task['period_months'] != 6 or not task.get('active', True):
+            continue
+        current = period_bounds(task, today)
+        if current is None:
+            continue
+        current_start, current_end = current
+        start = (task['start'] or current_start).replace(day=1)
+        counts = {}
+        for day, _ in _linked_visits(task, assignments, start, current_end):
+            cycle_start, _ = period_bounds(task, day)
+            counts[cycle_start] = counts.get(cycle_start, 0) + 1
+
+        while start <= current_start:
+            _, end = period_bounds(task, start)
+            deadline = end - timedelta(days=1)
+            days_left = (deadline - today).days
+            remaining = task['visit_target'] - counts.get(start, 0)
+            if days_left <= SEMIANNUAL_NOTICE_DAYS and remaining > 0:
+                notices.append({'task': task, 'start': start, 'deadline': deadline,
+                                'days_left': days_left, 'remaining': remaining})
+            start = end
+
+    return sorted(notices, key=lambda notice: (notice['days_left'] < 0, abs(notice['days_left']),
+                                               notice['task']['name'].casefold()))
 
 
 def inputs(*, key, project_id, default=None):
@@ -188,19 +223,42 @@ def open_placement(day, assignment_id):
     st.switch_page('pages/1_Gantt_Dashboard.py')
 
 
-def render_gantt_summary(today, *, key):
+def render_deadlines(tasks, assignments, today, project_names, *, is_admin):
     import streamlit as st
 
-    tasks = get_targets(st.session_state.get('recurring_patterns', []))
-    if not tasks:
+    if not any(task['period_months'] == 6 and task.get('active', True) for task in tasks):
         return
-    count = remaining_visits(tasks, st.session_state.assignments, today)
-    label = 'Απομένει 1 περιοδική επίσκεψη' if count == 1 else f'Απομένουν {count} περιοδικές επισκέψεις'
-    if st.button(f'📌 {label}', help='Μετρά τις εκκρεμείς επισκέψεις στην τρέχουσα περίοδο κάθε εργασίας.',
-                 key=key, use_container_width=True):
-        st.session_state.management_menu = MENU
-        st.session_state.periodic_month = today.replace(day=1)
-        st.switch_page('pages/2_Management.py')
+    st.subheader('Ειδοποιήσεις εξαμηνιαίων εργασιών')
+    notices = semiannual_deadlines(tasks, assignments, today)
+    if not notices:
+        st.caption('Δεν εκκρεμούν εξαμηνιαίες επισκέψεις με προθεσμία εντός 30 ημερών ή παλαιότερη.')
+        return
+
+    def show_period(start):
+        st.session_state.periodic_month = start
+
+    for notice in notices:
+        task = notice['task']
+        project = project_names.get(task['project_id'], 'Άγνωστο έργο')
+        deadline = notice['deadline']
+        days_left = notice['days_left']
+        remaining = notice['remaining']
+        label = f"{project} — {task['name']} · {remaining} {'επίσκεψη' if remaining == 1 else 'επισκέψεις'} προς προγραμματισμό"
+        key = f"periodic_deadline_{task['id']}_{deadline.isoformat()}"
+        message, action = st.columns([4, 1.6])
+        if days_left < 0:
+            message.error(f"**Εκπρόθεσμη** · {label} · Προθεσμία {deadline:%d/%m/%Y}")
+            action.button('Δες περίοδο', key=key, on_click=show_period, args=(notice['start'],))
+        else:
+            if days_left == 0:
+                timing = 'Λήγει σήμερα'
+            elif days_left == 1:
+                timing = 'Λήγει αύριο'
+            else:
+                timing = f'Λήγει σε {days_left} ημέρες'
+            message.warning(f"**{timing}** · {label} · Έως {deadline:%d/%m/%Y}")
+            if is_admin and action.button('Προγραμμάτισε', key=key):
+                prepare_new_placement(task, today.replace(day=1))
 
 
 def render_management(is_admin):
@@ -209,10 +267,16 @@ def render_management(is_admin):
     from gantt_helpers import get_local_today
 
     st.title('📌 Περιοδικές Εργασίες')
+    today = get_local_today()
     tasks = get_targets(st.session_state.recurring_patterns)
+    assignments = st.session_state.assignments
     project_names = {p['id']: p['name'] for p in st.session_state.projects}
-    month = st.date_input('Μήνας αναφοράς', value=get_local_today().replace(day=1),
+    month = st.date_input('Μήνας αναφοράς', value=today.replace(day=1),
                           key='periodic_month').replace(day=1)
+    if tasks:
+        st.metric('Σύνολο επισκέψεων που απομένουν', remaining_visits(tasks, assignments, month),
+                  help='Για τις περιόδους των ενεργών εργασιών που περιλαμβάνουν τον μήνα αναφοράς.')
+    render_deadlines(tasks, assignments, today, project_names, is_admin=is_admin)
     st.caption('Για κάθε εργασία εμφανίζεται η περίοδος που περιλαμβάνει τον μήνα αναφοράς. '
                'Μετρούν οι καταχωρισμένες επισκέψεις που δεν έχουν ακυρωθεί.')
 
@@ -277,7 +341,7 @@ def render_management(is_admin):
             continue
         start, end = bounds
         last_day = end - timedelta(days=1)
-        visits = count_visits(task, st.session_state.assignments, month)
+        visits = count_visits(task, assignments, month)
         count = len(visits)
         remaining = max(0, task['visit_target'] - count)
         cols = st.columns([3, 1, 1.5, 1, 2])

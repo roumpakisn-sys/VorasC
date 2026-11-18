@@ -371,8 +371,6 @@ def _get_mobile_visible_recurring_project_ids(projects, recurring_patterns):
 # --- HEADER / CONTROLS ---
 st.title("📱 Mobile Gantt")
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="mobile_search")
-if is_full_admin:
-    periodic_visits.render_gantt_summary(get_local_today(), key="mobile_periodic_summary")
 
 st.markdown(
     """

@@ -130,8 +130,6 @@ def preserve_context_notes(original_notes, edited_notes):
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
-if is_full_admin:
-    periodic_visits.render_gantt_summary(get_local_today(), key="desktop_periodic_summary")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
 # Κρύβει/εμφανίζει μόνο τις μπάρες που προέρχονται από επαναλαμβανόμενες εργασίες.
