@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 import placement_roles
 import placement_details
 import placement_hours
+import periodic_visits
 from gantt_helpers import normalize_id_list, clean_conflict_leave_notes
 
 st.set_page_config(layout="wide")

@@ -15,11 +15,12 @@ def _project_name(project_id, projects):
 
 def _get_recurring_project_ids(projects, recurring_patterns):
     """Επιστρέφει μοναδικά project ids που χρησιμοποιούνται σε επαναλαμβανόμενες εργασίες."""
+    import periodic_visits
     project_ids = []
     known_project_ids = {p.get("id") for p in projects or [] if isinstance(p, dict)}
 
     for pattern in recurring_patterns or []:
-        if not isinstance(pattern, dict):
+        if not isinstance(pattern, dict) or periodic_visits.is_target(pattern):
             continue
 
         project_id = pattern.get("projectId")
@@ -363,3 +364,4 @@ def get_recurring_filter_version(visible_project_ids):
     hidden = st.session_state.get(_hidden_projects_key(), [])
     joined = "|".join(sorted(visible_project_ids or [])) + "::hidden::" + "|".join(sorted(hidden or []))
     return hashlib.md5(joined.encode("utf-8")).hexdigest()
+

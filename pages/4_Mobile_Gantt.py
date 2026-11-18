@@ -16,6 +16,7 @@ import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
+import periodic_visits
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -286,11 +287,12 @@ def _normalize_mobile_project_list(values, allowed_ids):
 
 
 def _get_mobile_recurring_project_ids(projects, recurring_patterns):
+    import periodic_visits
     project_ids = []
     known_project_ids = {p.get("id") for p in projects or [] if isinstance(p, dict)}
 
     for pattern in recurring_patterns or []:
-        if not isinstance(pattern, dict):
+        if not isinstance(pattern, dict) or periodic_visits.is_target(pattern):
             continue
 
         project_id = pattern.get("projectId")
@@ -369,6 +371,8 @@ def _get_mobile_visible_recurring_project_ids(projects, recurring_patterns):
 # --- HEADER / CONTROLS ---
 st.title("📱 Mobile Gantt")
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="mobile_search")
+if is_full_admin:
+    periodic_visits.render_gantt_summary(get_local_today(), key="mobile_periodic_summary")
 
 st.markdown(
     """
@@ -687,6 +691,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
         )
 
         add_project_details = placement_details.inputs(key=f"mqa_details_{qa_rc}", stacked=True)
+        add_periodic_task = periodic_visits.inputs(key=f"mqa_periodic_{qa_rc}", project_id=proj_choice)
 
         emp_choices = st.multiselect(
             "Προσωπικό",
@@ -742,6 +747,14 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                 emps_to_process = emp_choices if emp_choices else [""]
                 new_assigns = []
 
+                try:
+                    visit_links = periodic_visits.links_for_dates(
+                        add_periodic_task, final_proj_id, st.session_state.get("recurring_patterns", []),
+                        [add_date + timedelta(days=i) for i in range(int(duration_days))],
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                    st.stop()
                 for day_offset in range(int(duration_days)):
                     current_assign_date = add_date + timedelta(days=day_offset)
                     valid_assignments = []
@@ -773,10 +786,12 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "endTime": va["end"],
                             "colorName": color_choice,
                             "colorHex": config.BASIC_COLORS[color_choice],
-                            "notes": placement_hours.combine_notes(
-                                placement_details.combine_notes(
-                                    placement_roles.combine_notes(final_notes, add_support_roles), add_project_details
-                                ), add_actual_hours
+                            "notes": periodic_visits.combine_notes(
+                                placement_hours.combine_notes(
+                                    placement_details.combine_notes(
+                                        placement_roles.combine_notes(final_notes, add_support_roles), add_project_details
+                                    ), add_actual_hours
+                                ), visit_links[current_assign_date]
                             ),
                             "is_cancelled": False,
                             "cancel_reason": "",
@@ -899,6 +914,12 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                 target_support_roles = target_group.get("SupportRoles", target_support_roles)
                 target_free_notes, _ = placement_details.split_notes(target_free_notes)
                 target_free_notes, _ = placement_hours.split_notes(target_free_notes)
+                target_free_notes, _ = periodic_visits.split_notes(target_free_notes)
+                target_visit_link = periodic_visits.split_notes(target_group.get("Notes_Raw", ""))[1]
+                edit_periodic_task = periodic_visits.inputs(
+                    key=f"mobile_edit_periodic{edit_suffix}", project_id=edit_proj,
+                    default=target_visit_link['task_id'] if target_visit_link else None,
+                )
                 edit_actual_hours = placement_hours.inputs(
                     key=f"mobile_edit_actual_hours{edit_suffix}",
                     default=placement_hours.split_notes(
@@ -985,6 +1006,14 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                         emps_to_process = selected_emp_ids if selected_emp_ids else [""]
 
                         normalized_cancel_reason = e_cancel_reason if e_is_cancelled else ""
+                        try:
+                            edit_visit_link = periodic_visits.make_link(
+                                edit_periodic_task, final_edit_proj_id,
+                                st.session_state.get("recurring_patterns", []), target_visit_link,
+                            )
+                        except ValueError as exc:
+                            st.error(str(exc))
+                            st.stop()
 
                         valid_assignments = []
                         has_blocking_error = False
@@ -1023,10 +1052,12 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "endTime": va["end"],
                                     "colorName": edit_color,
                                     "colorHex": config.BASIC_COLORS[edit_color],
-                                    "notes": placement_hours.combine_notes(
-                                        placement_details.combine_notes(
-                                            placement_roles.combine_notes(final_notes, edit_support_roles), edit_project_details
-                                        ), edit_actual_hours
+                                    "notes": periodic_visits.combine_notes(
+                                        placement_hours.combine_notes(
+                                            placement_details.combine_notes(
+                                                placement_roles.combine_notes(final_notes, edit_support_roles), edit_project_details
+                                            ), edit_actual_hours
+                                        ), edit_visit_link
                                     ),
                                     "is_cancelled": bool(e_is_cancelled),
                                     "cancel_reason": normalized_cancel_reason,
