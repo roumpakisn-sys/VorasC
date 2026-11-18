@@ -191,6 +191,7 @@ def _group_viber_assignments(assignments, day_assignments):
     This changes the export only, never the underlying assignment/leave records.
     """
     import placement_hours
+    import periodic_visits
     groups, prepared, known_details = {}, [], {}
     for assignment in assignments:
         if assignment.get("is_cancelled"):
@@ -204,6 +205,10 @@ def _group_viber_assignments(assignments, day_assignments):
         free_notes, contacts = placement_roles.split_notes(str(assignment.get("notes") or ""))
         free_notes, details = placement_details.split_notes(free_notes)
         free_notes, _ = placement_hours.split_notes(free_notes)
+        free_notes, visit = periodic_visits.split_notes(free_notes)
+        if visit:
+            key += (visit['task_id'], visit['visit_id'])
+            free_notes = ' · '.join(part for part in (visit['name'], free_notes) if part)
         prepared.append((key, assignment, free_notes, contacts, details))
         if any(details.values()):
             known_details.setdefault(key, set()).add(tuple(details.values()))

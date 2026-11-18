@@ -66,6 +66,7 @@ def generate_gantt_chart(
     Το πρώτο επιστρεφόμενο αντικείμενο κρατιέται για συμβατότητα με την παλιά Plotly έκδοση.
     """
     import placement_hours
+    import periodic_visits
     export_data = []
     wk_groups = {}
 
@@ -109,6 +110,7 @@ def generate_gantt_chart(
             _, support_roles = placement_roles.split_notes(notes)
             _, project_details = placement_details.split_notes(notes)
             _, actual_hours = placement_hours.split_notes(notes)
+            _, periodic_link = periodic_visits.split_notes(notes)
             is_canc = bool(a.get("is_cancelled", False))
             c_reason = a.get("cancel_reason", "") or ""
             is_general = bool(a.get("is_general", False))
@@ -123,7 +125,7 @@ def generate_gantt_chart(
             key = (
                 f"{curr_date}_{project_id}_{start_time}_{end_time}_{c_hex}_"
                 f"{is_canc}_{c_reason}_{arrival_time}_{is_general}"
-            ) + placement_roles.group_suffix(support_roles) + placement_details.group_suffix(project_details) + placement_hours.group_suffix(actual_hours)
+            ) + placement_roles.group_suffix(support_roles) + placement_details.group_suffix(project_details) + placement_hours.group_suffix(actual_hours) + periodic_visits.group_suffix(notes)
 
             if key not in groups:
                 legend_val = f"{project_name} ({c_name})"
@@ -132,7 +134,9 @@ def generate_gantt_chart(
                     "ProjectId": project_id,
                     "Date": curr_date,
                     "Project": project_name,
-                    "ProjectDisplay": placement_details.project_label(project_name, project_details),
+                    "ProjectDisplay": placement_details.project_label(project_name, project_details) + (
+                        ' | ' + periodic_link['name'] if periodic_link else ''
+                    ),
                     "ProjectDetails": project_details,
                     "ActualHours": actual_hours,
                     "ArrivalTime": arrival_time,
@@ -206,7 +210,7 @@ def generate_gantt_chart(
 
             g["Notes_Raw"] = " | ".join(g["Notes_List"])
             free_notes = list(dict.fromkeys(
-                placement_hours.split_notes(placement_details.split_notes(placement_roles.split_notes(note)[0])[0])[0]
+                periodic_visits.split_notes(placement_hours.split_notes(placement_details.split_notes(placement_roles.split_notes(note)[0])[0])[0])[0]
                 for note in g["Notes_List"]
             ))
             g["Notes"] = _clean_leave_note_from_bar(placement_roles.combine_notes(

@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import streamlit as st
 
 import config
+import periodic_visits
 
 
 def auto_extend_recurring_patterns():
@@ -37,7 +38,7 @@ def auto_extend_recurring_patterns():
     today = date.today()
 
     for pat in st.session_state.get('recurring_patterns', []):
-        if not isinstance(pat, dict):
+        if not isinstance(pat, dict) or periodic_visits.is_target(pat):
             continue
 
         rid = pat.get('id')

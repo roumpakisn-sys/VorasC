@@ -76,6 +76,7 @@ def shift_times(record, delta):
 
 
 def bar_groups(assignments, projects, start_day, end_day, selected_projects, hide_cancelled):
+    import periodic_visits
     import placement_hours
     project_lookup = {str(p.get("id")): p for p in projects}
     groups = {}
@@ -99,6 +100,7 @@ def bar_groups(assignments, projects, start_day, end_day, selected_projects, hid
             placement_roles.group_suffix(placement_roles.split_notes(a.get("notes"))[1]),
             placement_details.group_suffix(placement_details.split_notes(a.get("notes"))[1]),
             placement_hours.group_suffix(placement_hours.split_notes(a.get("notes"))[1]),
+            periodic_visits.group_suffix(a.get("notes")),
         )
         groups.setdefault(key, []).append(a)
     return sorted(groups.values(), key=lambda g: (
@@ -108,6 +110,7 @@ def bar_groups(assignments, projects, start_day, end_day, selected_projects, hid
 
 
 def build_delta(record, operation, options):
+    import periodic_visits
     import placement_hours
     if operation == "Αντικατάσταση εργαζομένου":
         if str(record.get("employeeId") or "") != options["old_employee"]:
@@ -139,9 +142,11 @@ def build_delta(record, operation, options):
         roles = placement_roles.split_notes(record.get("notes"))[1]
         details = placement_details.split_notes(record.get("notes"))[1]
         hours = placement_hours.split_notes(record.get("notes"))[1]
-        return {"notes": placement_hours.combine_notes(
+        link = periodic_visits.split_notes(record.get("notes"))[1]
+        notes = placement_hours.combine_notes(
             placement_details.combine_notes(placement_roles.combine_notes(text, roles), details), hours
-        )}
+        )
+        return {"notes": periodic_visits.combine_notes(notes, link)}
     raise ValueError("Άγνωστη ενέργεια")
 
 

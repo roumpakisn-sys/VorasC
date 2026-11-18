@@ -249,7 +249,9 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     
     selected_menu = None
     if show_menu and menu_options:
-        selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options)
+        if st.session_state.get('management_menu') not in menu_options:
+            st.session_state.management_menu = menu_options[0]
+        selected_menu = st.sidebar.radio("Μενού Επιλογών", menu_options, key="management_menu")
         st.sidebar.write("---")
     
     col_u, col_r = st.sidebar.columns(2)
@@ -339,3 +341,4 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         st.write("---")
 
     return selected_menu
+

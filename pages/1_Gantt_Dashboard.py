@@ -41,6 +41,7 @@ import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
+import periodic_visits
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 
 
@@ -129,6 +130,8 @@ def preserve_context_notes(original_notes, edited_notes):
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
+if is_full_admin:
+    periodic_visits.render_gantt_summary(get_local_today(), key="desktop_periodic_summary")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
 # Κρύβει/εμφανίζει μόνο τις μπάρες που προέρχονται από επαναλαμβανόμενες εργασίες.
@@ -348,7 +351,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
                             project_id, custom_project, employee_ids, color_name,
                             notes, is_general, use_arrival, arrival_time,
                             start_time, end_time, is_cancelled=False, cancel_reason="",
-                            support_roles=None, project_details=None, actual_hours=None):
+                            support_roles=None, project_details=None, actual_hours=None, periodic_task_id=None):
     return {
         "first_date": first_date,
         "mode": mode,
@@ -362,6 +365,7 @@ def _form_clipboard_payload(*, first_date, mode, duration, extra_dates,
         "support_roles": placement_roles.normalize(support_roles),
         "project_details": placement_details.normalize(project_details),
         "actual_hours": placement_hours.normalize(actual_hours),
+        "periodic_task_id": periodic_task_id,
         "is_general": bool(is_general),
         "use_arrival": bool(use_arrival),
         "arrival_time": arrival_time.strftime("%H:%M"),
@@ -462,6 +466,10 @@ if not presentation_mode:
                 add_project_details = placement_details.inputs(
                     key=f"qa_details_{qa_rc}", defaults=qa_prefill.get("project_details")
                 )
+                add_periodic_task = periodic_visits.inputs(
+                    key=f"qa_periodic_{qa_rc}", project_id=proj_choice,
+                    default=qa_prefill.get("periodic_task_id"),
+                )
                 emp_choices = st.multiselect(
                     "Προσωπικό (Προαιρετικό - Μόνο Ενεργοί)",
                     options=active_employee_ids,
@@ -534,6 +542,7 @@ if not presentation_mode:
                         support_roles=add_support_roles,
                         project_details=add_project_details,
                         actual_hours=add_actual_hours,
+                        periodic_task_id=add_periodic_task,
                         use_arrival=use_arr, arrival_time=t_arrival,
                         start_time=t_start, end_time=t_end,
                     ))
@@ -575,6 +584,14 @@ if not presentation_mode:
                         else:
                             final_proj_id = proj_choice
 
+                        try:
+                            visit_links = periodic_visits.links_for_dates(
+                                add_periodic_task, final_proj_id,
+                                st.session_state.get("recurring_patterns", []), new_target_dates,
+                            )
+                        except ValueError as exc:
+                            st.error(str(exc))
+                            st.stop()
                         for current_assign_date in new_target_dates:
                             valid_assignments = []
 
@@ -605,10 +622,12 @@ if not presentation_mode:
                                     "endTime": va["end"],
                                     "colorName": color_choice,
                                     "colorHex": config.BASIC_COLORS[color_choice],
-                                    "notes": placement_hours.combine_notes(
-                                        placement_details.combine_notes(
-                                            placement_roles.combine_notes(c_notes, add_support_roles), add_project_details
-                                        ), add_actual_hours
+                                    "notes": periodic_visits.combine_notes(
+                                        placement_hours.combine_notes(
+                                            placement_details.combine_notes(
+                                                placement_roles.combine_notes(c_notes, add_support_roles), add_project_details
+                                            ), add_actual_hours
+                                        ), visit_links[current_assign_date]
                                     ),
                                     "is_cancelled": False,
                                     "cancel_reason": "",
@@ -782,6 +801,12 @@ if not presentation_mode:
                             target_group.get("Notes_Raw") or target_group.get("Notes", "")
                         )
                         target_project_details = target_group.get("ProjectDetails", target_project_details)
+                        target_visit_link = periodic_visits.split_notes(target_group.get("Notes_Raw", ""))[1]
+                        target_periodic_task = target_visit_link['task_id'] if target_visit_link else None
+                        edit_periodic_task = periodic_visits.inputs(
+                            key=f"edit_periodic_{edit_key}", project_id=edit_proj,
+                            default=edit_prefill.get("periodic_task_id", target_periodic_task),
+                        )
                         edit_project_details = placement_details.inputs(
                             key=f"edit_details_{edit_key}",
                             defaults=(edit_prefill.get("project_details") if edit_prefill else target_project_details),
@@ -821,6 +846,7 @@ if not presentation_mode:
                         target_support_roles = target_group.get("SupportRoles", target_support_roles)
                         target_free_notes, _ = placement_details.split_notes(target_free_notes)
                         target_free_notes, _ = placement_hours.split_notes(target_free_notes)
+                        target_free_notes, _ = periodic_visits.split_notes(target_free_notes)
                         target_actual_hours = placement_hours.split_notes(
                             target_group.get("Notes_Raw") or target_group.get("Notes", "")
                         )[1]
@@ -915,6 +941,7 @@ if not presentation_mode:
                                 support_roles=edit_support_roles,
                                 project_details=edit_project_details,
                                 actual_hours=edit_actual_hours,
+                                periodic_task_id=edit_periodic_task,
                                 use_arrival=use_arr_edit, arrival_time=new_t_arrival,
                                 start_time=new_t_start, end_time=new_t_end,
                                 is_cancelled=e_is_cancelled, cancel_reason=e_cancel_reason,
@@ -977,6 +1004,7 @@ if not presentation_mode:
                                 and placement_roles.normalize(edit_support_roles) == placement_roles.normalize(target_support_roles)
                                 and placement_details.normalize(edit_project_details) == placement_details.normalize(target_project_details)
                                 and edit_actual_hours == target_actual_hours
+                                and edit_periodic_task == target_periodic_task
                                 and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                 and normalized_cancel_reason == target_cancel_reason
                                 and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
@@ -996,6 +1024,14 @@ if not presentation_mode:
                                 st.stop()
 
                             target_recurring_id = target_group.get("RecurringId")
+                            try:
+                                visit_links = periodic_visits.links_for_dates(
+                                    edit_periodic_task, final_edit_proj_id,
+                                    st.session_state.get("recurring_patterns", []), edit_target_dates, target_visit_link,
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                                st.stop()
                             new_assigns = []
                             has_blocking_error = False
                             emps_to_process = selected_emp_ids if selected_emp_ids else [""]
@@ -1018,10 +1054,12 @@ if not presentation_mode:
                                         "endTime": adj_end,
                                         "colorName": edit_color,
                                         "colorHex": config.BASIC_COLORS[edit_color],
-                                        "notes": placement_hours.combine_notes(
-                                            placement_details.combine_notes(
-                                                placement_roles.combine_notes(c_notes, edit_support_roles), edit_project_details
-                                            ), edit_actual_hours
+                                        "notes": periodic_visits.combine_notes(
+                                            placement_hours.combine_notes(
+                                                placement_details.combine_notes(
+                                                    placement_roles.combine_notes(c_notes, edit_support_roles), edit_project_details
+                                                ), edit_actual_hours
+                                            ), visit_links[current_edit_date]
                                         ),
                                         "is_cancelled": e_is_cancelled,
                                         "cancel_reason": normalized_cancel_reason,

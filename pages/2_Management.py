@@ -17,6 +17,7 @@ if not st.session_state.get("authenticated"):
 import config
 import utils
 import placement_hours
+import periodic_visits
 
 utils.init_data_and_sync()
 
@@ -73,7 +74,7 @@ if current_user == "TAN":
     menu_options = ["Προσωπικό", "Άδειες", "Σύνολο Αδειών"]
 else:
     # Οι υπόλοιποι βλέπουν τα πάντα ΕΚΤΟΣ από την Καταγραφή Κινήσεων
-    menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
+    menu_options = ["Διαχείριση Έργων", "Προσωπικό", "Άδειες", "Σύνολο Αδειών", "Επαναλαμβανόμενες Εργασίες", periodic_visits.MENU, "Ώρες Εργασιών", "Αξιολόγηση Προσωπικού"]
     # ΜΟΝΟ ο Admin βλέπει την Καταγραφή Κινήσεων (Audit Log)
     if current_user == "Admin":
         menu_options.append("Καταγραφή Κινήσεων")
@@ -788,6 +789,9 @@ elif menu == "Ώρες Εργασιών":
     st.dataframe(pd.DataFrame(table_data).style.format({"Συνολικές Ώρες": "{:.2f}"}), use_container_width=True, hide_index=True)
 
 # --- VIEW: RECURRING ---
+elif menu == periodic_visits.MENU:
+    periodic_visits.render_management(is_full_admin)
+
 elif menu == "Επαναλαμβανόμενες Εργασίες":
     st.title("🔄 Επαναλαμβανόμενες Εργασίες")
     if not is_full_admin:
@@ -989,7 +993,8 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
                                 st.write(f"⚠️ {c}")
 
         with tab_edit:
-            if not st.session_state.recurring_patterns:
+            scheduled_patterns = [p for p in st.session_state.recurring_patterns if not periodic_visits.is_target(p)]
+            if not scheduled_patterns:
                 st.info("Δεν υπάρχουν ενεργές επαναλαμβανόμενες εργασίες.")
             else:
                 c_ref1, c_ref2 = st.columns([4, 1])
@@ -1002,7 +1007,7 @@ elif menu == "Επαναλαμβανόμενες Εργασίες":
 
                 pattern_options = {
                     p['id']: f"{utils.get_project_info(p['projectId'])['name'] if utils.get_project_info(p['projectId']) else 'Άγνωστο Έργο'} | {p['type']} | Από: {p['startDate'].strftime('%d/%m/%Y')} ({p['startTime']}-{p['endTime']})"
-                    for p in st.session_state.recurring_patterns
+                    for p in scheduled_patterns
                 }
                 selected_pattern_id = st.selectbox("Επιλέξτε Σειρά Εργασιών", options=list(pattern_options.keys()), format_func=lambda x: pattern_options[x], key=f"edit_pat_sel_{rc}")
 

@@ -1,0 +1,166 @@
+from copy import deepcopy
+from datetime import date
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+import uuid
+
+import periodic_visits as visits
+import placement_details
+import placement_hours
+import placement_roles
+from test_placement_details import chart
+from test_regression_smoke import get_source_functions
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class PeriodicVisitTests(unittest.TestCase):
+    def setUp(self):
+        self.task_id = str(uuid.uuid4())
+        self.pattern = {'id': self.task_id, 'projectId': 'p', 'type': visits.TARGET_TYPE,
+                        'startDate': '2026-11-01',
+                        'notes': json.dumps({'name': 'Υαλοπίνακες', 'monthly_target': 2, 'active': True})}
+        self.task = visits.get_targets([self.pattern])[0]
+        self.day = date(2026, 11, 18)
+        self.link = visits.make_link(self.task_id, 'p', [self.pattern])
+        self.row = dict(id='a', employeeId='e', projectId='p', date=self.day,
+                        startTime='09:00', endTime='12:00', notes=visits.combine_notes('', self.link))
+
+    def test_crew_bar_splits_and_vacancies_count_once_and_separate_visits_count_twice(self):
+        rows = [self.row, {**self.row, 'id': 'b', 'employeeId': 'e2', 'endTime': '13:00'},
+                {**self.row, 'id': 'vacancy', 'employeeId': ''}]
+        self.assertEqual(len(visits.count_visits(self.task, rows, self.day)), 1)
+        other = visits.make_link(self.task_id, 'p', [self.pattern])
+        rows.append({**self.row, 'id': 'c', 'notes': visits.combine_notes('', other)})
+        self.assertEqual(len(visits.count_visits(self.task, rows, self.day)), 2)
+        self.assertEqual(visits.remaining_visits([self.task], rows, self.day), 0)
+        self.assertEqual(len(chart(rows)[1]), 3)  # one hours split plus a separate visit
+
+    def test_cancel_delete_move_month_and_unlink_recalculate_from_assignments(self):
+        self.assertEqual(visits.remaining_visits([self.task], [self.row], self.day), 1)
+        for rows in ([], [{**self.row, 'is_cancelled': True}],
+                     [{**self.row, 'date': date(2026, 12, 1)}],
+                     [{**self.row, 'notes': visits.combine_notes(self.row['notes'], None)}],
+                     [{**self.row, 'projectId': 'other'}]):
+            self.assertEqual(visits.remaining_visits([self.task], rows, self.day), 2)
+        moved = [{**self.row, 'date': date(2026, 12, 1)}]
+        self.assertEqual(visits.remaining_visits([self.task], moved, date(2026, 12, 1)), 1)
+        self.assertEqual(visits.remaining_visits([self.task], [], date(2026, 10, 1)), 0)
+
+    def test_note_updates_preserve_metadata_and_multiday_copy_uses_new_visits(self):
+        notes = placement_hours.combine_notes(placement_roles.combine_notes(
+            placement_details.combine_notes('Κλειδιά [Άδεια: Άννα]', {'address': 'Εγνατία 10'}),
+            {'supervisor': 'Νίκος'}), 6.5)
+        linked = visits.combine_notes(notes, self.link)
+        self.assertEqual(visits.split_notes(linked), (notes, self.link))
+        self.assertEqual(visits.combine_notes(linked, None), notes)
+        bulk = get_source_functions(ROOT / 'pages/8_Bulk_Gantt.py', ('build_delta',), {
+            'placement_roles': placement_roles, 'placement_details': placement_details, 're': __import__('re')})
+        updated = bulk['build_delta']({'notes': linked}, 'Αντικατάσταση παρατήρησης', {'notes': 'Νέα'})['notes']
+        self.assertEqual(visits.split_notes(updated)[1], self.link)
+        links = visits.links_for_dates(self.task_id, 'p', [self.pattern], [self.day, date(2026, 11, 19)], self.link)
+        self.assertEqual(links[self.day], self.link)
+        self.assertNotEqual(links[self.day]['visit_id'], links[date(2026, 11, 19)]['visit_id'])
+        with self.assertRaises(ValueError):
+            visits.make_link(self.task_id, 'other', [self.pattern])
+
+    def test_target_is_not_a_fixed_recurring_schedule(self):
+        from test_ui_storage import RecurringFlowTests
+        flow = RecurringFlowTests()
+        module = flow.setup_flow()
+        flow.state.recurring_patterns = [deepcopy(self.pattern)]
+        from unittest.mock import patch
+        with patch.dict('sys.modules', {'utils': flow.utils}), patch.object(module, 'load_recurring_context') as load:
+            module.auto_extend_recurring_patterns()
+        load.assert_not_called()
+        self.assertEqual(flow.state.assignments, [])
+
+
+try:
+    from streamlit.testing.v1 import AppTest
+except ImportError:
+    AppTest = None
+
+
+@unittest.skipIf(AppTest is None, 'Install Streamlit UI dependencies')
+class PeriodicVisitFormTests(unittest.TestCase):
+    def test_management_confirms_storage_before_showing_new_target(self):
+        source = '''
+import streamlit as st
+from types import SimpleNamespace
+from unittest.mock import patch
+import periodic_visits
+st.session_state.setdefault('recurring_patterns', [])
+st.session_state.setdefault('projects', [{'id': 'p', 'name': 'ISOMAT'}])
+st.session_state.setdefault('employees', [])
+st.session_state.setdefault('assignments', [])
+st.checkbox('Αποτυχία βάσης', key='fail_db')
+class Query:
+    def insert(self, data):
+        self.data = data
+        return self
+    def execute(self):
+        if st.session_state.fail_db:
+            raise RuntimeError('offline')
+        return SimpleNamespace(data=[self.data])
+fake = SimpleNamespace(supabase=SimpleNamespace(table=lambda _: Query()),
+    serialize_dates=lambda data: data, mark_data_changed=lambda: None,
+    touch_app_sync_state=lambda: None, log_activity=lambda *args: None)
+with patch.dict('sys.modules', {'utils': fake}):
+    periodic_visits.render_management(True)
+'''
+        app = AppTest.from_string(source).run()
+        app.checkbox(key='fail_db').set_value(True).run()
+        next(t for t in app.text_input if t.label == 'Περιγραφή εργασίας').set_value('Υαλοπίνακες')
+        next(b for b in app.button if b.label == 'Δημιουργία').click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.error)
+        self.assertEqual(app.session_state['recurring_patterns'], [])
+        app.checkbox(key='fail_db').set_value(False).run()
+        next(t for t in app.text_input if t.label == 'Περιγραφή εργασίας').set_value('Υαλοπίνακες')
+        next(b for b in app.button if b.label == 'Δημιουργία').click().run()
+        self.assertFalse(app.exception)
+        tasks = visits.get_targets(app.session_state['recurring_patterns'])
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]['monthly_target'], 2)
+        self.assertTrue(any(metric.label == 'Απομένουν' and metric.value == '2' for metric in app.metric))
+
+    def test_link_existing_crew_reload_and_unlink_in_both_forms(self):
+        for view in ('desktop', 'mobile'):
+            with self.subTest(view=view):
+                setup = PeriodicVisitTests()
+                setup.setUp()
+                pattern = {**setup.pattern, 'projectId': 'p1'}
+                def app_for(records=None):
+                    app = AppTest.from_file(str(ROOT / 'tests/fixtures/gantt_forms_app.py'))
+                    app.session_state['fixture_headless'] = True
+                    app.session_state['fixture_persist'] = True
+                    app.session_state['recurring_patterns'] = [pattern]
+                    if records is not None:
+                        app.session_state['assignments'] = records
+                    app.run()
+                    if view == 'mobile':
+                        next(s for s in app.selectbox if s.label == 'Έκδοση').set_value(view).run()
+                    key = 'edit_bar_select_widget' if view == 'desktop' else 'mobile_edit_select_widget'
+                    app.selectbox(key=key).set_value(app.session_state['fixture_group_keys'][0]).run()
+                    self.assertFalse(app.exception)
+                    return app
+                app = app_for()
+                selector = lambda: next(s for s in app.selectbox if s.label.startswith('Περιοδική εργασία'))
+                selector().set_value(setup.task_id)
+                next(b for b in app.button if b.label == '💾 Αποθήκευση').click().run()
+                self.assertFalse(app.exception)
+                rows = app.session_state['save_calls'][-1]['new']
+                links = [visits.split_notes(row['notes'])[1] for row in rows]
+                self.assertEqual(links[0], links[1])
+                self.assertEqual(links[0]['task_id'], setup.task_id)
+                app = app_for(app.session_state['assignments'])
+                self.assertEqual(selector().value, setup.task_id)
+                selector().set_value(None)
+                next(b for b in app.button if b.label == '💾 Αποθήκευση').click().run()
+                self.assertFalse(app.exception)
+                self.assertTrue(all(visits.split_notes(r['notes'])[1] is None
+                                    for r in app.session_state['save_calls'][-1]['new']))
