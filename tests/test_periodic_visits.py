@@ -71,6 +71,34 @@ class PeriodicVisitTests(unittest.TestCase):
         self.assertEqual([day for (day, _), _ in cycle], days[1:3])
         self.assertEqual(visits.remaining_visits([task], rows, days[-1]), 1)
 
+    def test_semiannual_deadline_is_shown_from_30_days_and_only_for_missing_visits(self):
+        task = {**self.task, 'period_months': 6}
+        first_notice_day = date(2027, 3, 31)
+        self.assertEqual(visits.semiannual_deadlines([task], [], date(2027, 3, 30)), [])
+        row = {**self.row, 'date': date(2027, 4, 30)}
+        crew = [row, {**row, 'id': 'b', 'employeeId': 'e2'}]
+        notice, = visits.semiannual_deadlines([task], crew, first_notice_day)
+        self.assertEqual(notice['deadline'], row['date'])
+        self.assertEqual(notice['days_left'], 30)
+        self.assertEqual(notice['remaining'], 1)
+        fulfilled = {**task, 'visit_target': 1}
+        self.assertEqual(visits.semiannual_deadlines([fulfilled], crew, first_notice_day), [])
+        cancelled = [{**row, 'is_cancelled': True}]
+        notice, = visits.semiannual_deadlines([fulfilled], cancelled, row['date'])
+        self.assertEqual(notice['days_left'], 0)
+
+    def test_overdue_cycle_survives_reset_even_if_next_cycle_is_scheduled(self):
+        task = {**self.task, 'period_months': 6, 'visit_target': 1}
+        today = date(2027, 5, 1)
+        row = {**self.row, 'date': date(2027, 5, 2)}
+        notice, = visits.semiannual_deadlines([task], [row], today)
+        self.assertEqual(notice['start'], date(2026, 11, 1))
+        self.assertEqual(notice['deadline'], date(2027, 4, 30))
+        self.assertEqual(notice['days_left'], -1)
+        self.assertEqual(notice['remaining'], 1)
+        inactive = {**task, 'active': False}
+        self.assertEqual(visits.semiannual_deadlines([inactive, self.task], [], today), [])
+
     def test_note_updates_preserve_metadata_and_multiday_copy_uses_new_visits(self):
         notes = placement_hours.combine_notes(placement_roles.combine_notes(
             placement_details.combine_notes('Κλειδιά [Άδεια: Άννα]', {'address': 'Εγνατία 10'}),
