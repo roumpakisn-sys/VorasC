@@ -125,10 +125,11 @@ def inputs(*, key, project_id, default=None):
         names[default] = 'Προηγούμενη σύνδεση — επιλέξτε εργασία ή Χωρίς σύνδεση'
     if not names:
         return None
-    options = [None, *names]
-    return st.selectbox('Περιοδική εργασία (προαιρετικό)', options,
-                        index=options.index(default) if default in options else 0,
-                        format_func=lambda value: names.get(value, 'Χωρίς σύνδεση'), key=key)
+    options = ['', *names]
+    selected = st.selectbox('Περιοδική εργασία (προαιρετικό)', options,
+                            index=options.index(default) if default in options else 0,
+                            format_func=lambda value: names.get(value, 'Χωρίς σύνδεση'), key=key)
+    return selected or None
 
 
 def prepare_new_placement(task, month):

@@ -159,7 +159,7 @@ with patch.dict('sys.modules', {'utils': fake}):
                 self.assertEqual(links[0]['task_id'], setup.task_id)
                 app = app_for(app.session_state['assignments'])
                 self.assertEqual(selector().value, setup.task_id)
-                selector().set_value(None)
+                selector().set_value('')
                 next(b for b in app.button if b.label == '💾 Αποθήκευση').click().run()
                 self.assertFalse(app.exception)
                 self.assertTrue(all(visits.split_notes(r['notes'])[1] is None
