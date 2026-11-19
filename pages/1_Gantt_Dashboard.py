@@ -300,16 +300,17 @@ if st.session_state.get("suppress_next_detector_click", False):
 elif clicked_safe_id:
     if transfer_mode and clicked_safe_id.startswith(gantt_staff_transfer.DROP_PREFIX):
         try:
-            moved = gantt_staff_transfer.apply_drop(
+            result = gantt_staff_transfer.apply_drop(
                 clicked_safe_id, st.session_state, safe_mapping, wk_groups,
                 st.session_state.assignments, utils.save_assignment_batch,
             )
         except ValueError as exc:
             st.error(str(exc))
         else:
-            if moved:
+            if result:
                 clear_bar_selection()
-                st.toast("Ο εργαζόμενος μεταφέρθηκε.")
+                st.toast("Ο εργαζόμενος προστέθηκε στη μπάρα." if result == "assigned"
+                         else "Ο εργαζόμενος μεταφέρθηκε.")
                 st.rerun()
     elif clicked_safe_id != st.session_state.last_clicked_safe_id:
         real_clicked_key = safe_mapping.get(clicked_safe_id, None)

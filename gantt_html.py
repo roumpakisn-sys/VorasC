@@ -56,6 +56,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 return True
         return False
 
+    def drag_worker(eid, label_html, *, from_list=False):
+        if not staff_drag_token:
+            return label_html
+        origin = " data-staff-origin='availability'" if from_list else ""
+        title = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
+        return (
+            f"<span class='gantt-transfer-worker' draggable='true'{origin} "
+            f"data-employee='{html_utils.escape(str(eid), quote=True)}' title='{title}'>"
+            f"{label_html}</span>"
+        )
+
     html = ""
 
     html += (
@@ -93,6 +104,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 vertical-align: text-bottom;
                 background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
             }
+            #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
             #gantt-master-container .gantt-transfer-worker:hover,
             #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
@@ -177,6 +189,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 continue
 
             emp_label = emp_short_names.get(eid, emp["name"])
+            escaped_name = html_utils.escape(str(emp_label))
+            drag_name = drag_worker(eid, escaped_name, from_list=True)
 
             employee_day_assigns = [
                 a for a in day_assigns
@@ -217,13 +231,13 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     )
             if entire_day_blocked and not employee_day_assigns:
                 unavailable_staff.append(
-                    f"{html_utils.escape(str(emp_label))} "
+                    f"{drag_name} "
                     "<small style='font-size: 9px; font-weight: normal;'>"
                     "(δηλωμένη μη διαθεσιμότητα)</small>"
                 )
             if partial_rules and not entire_day_blocked:
                 restricted_staff.append(
-                    f"{html_utils.escape(str(emp_label))} "
+                    f"{escaped_name} "
                     "<small style='font-size: 9px; font-weight: normal;'>"
                     f"({html_utils.escape(', '.join(partial_rules))})</small>"
                 )
@@ -237,9 +251,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             # Διατηρούμε ΑΚΡΙΒΩΣ την υπάρχουσα λογική διαθεσιμότητας.
             if rules_ready and not entire_day_blocked and not partial_rules:
                 if latest_end_minutes is None or latest_end_minutes <= limit_6:
-                    available_after_6.append(emp_label)
+                    available_after_6.append(drag_name)
                 elif latest_end_minutes <= limit_10:
-                    available_after_10.append(emp_label)
+                    available_after_10.append(drag_name)
 
             # Η τρίτη λίστα περιλαμβάνει ΟΛΟΥΣ όσους έχουν ανατεθεί
             # σε τουλάχιστον μία ενεργή βάρδια, ανεξάρτητα από ώρα λήξης.
@@ -260,7 +274,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     hours_label = f"{hours} ώρ." + (f" {minutes} λ." if minutes else "")
                     declared_label = " · δηλωμένη μη διαθεσιμότητα" if entire_day_blocked else ""
                     unavailable_staff.append(
-                        f"{html_utils.escape(str(emp_label))} "
+                        f"{drag_name} "
                         f"<small style='font-size: 9px; font-weight: normal;'>"
                         f"({hours_label}{declared_label})</small>"
                     )
@@ -424,12 +438,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     if eid in seen:
                         continue
                     seen.add(eid)
-                    handles.append(
-                        "<span class='gantt-transfer-worker' draggable='true' "
-                        f"data-employee='{html_utils.escape(str(eid), quote=True)}' "
-                        "title='Σύρε το όνομα στη μπάρα προορισμού'>"
-                        + _employee_text_html(employee_label) + "</span>"
-                    )
+                    handles.append(drag_worker(eid, _employee_text_html(employee_label)))
                 if handles:
                     emps_html = ", ".join(handles)
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
@@ -671,11 +680,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           e.preventDefault();
           return;
         }
-        staffDrag = { source: handle.closest('a.mygantt-bar').id, employee: handle.dataset.employee };
+        var sourceBar = handle.closest('a.mygantt-bar');
+        if (!sourceBar && handle.dataset.staffOrigin !== 'availability') {
+          e.preventDefault();
+          return;
+        }
+        staffDrag = { source: sourceBar ? sourceBar.id : null, employee: handle.dataset.employee };
         isDown = false;
         moved = false;
         window.gIsDragging = false;
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = sourceBar ? 'move' : 'copy';
         e.dataTransfer.setData('text/plain', JSON.stringify(staffDrag));
         dragHandle = handle;
         dragHandle.classList.add('gantt-drag-origin');
@@ -698,7 +712,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         var bar = dropTarget(e);
         if (bar) {
           e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
+          e.dataTransfer.dropEffect = staffDrag.source ? 'move' : 'copy';
         }
         if (bar !== hoverBar) {
           clearStaffHover();

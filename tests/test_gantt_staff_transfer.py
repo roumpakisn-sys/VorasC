@@ -41,6 +41,30 @@ TARGET = {"AssignmentIds": ["target"], "EmployeeIds": [""]}
 
 
 class TransferTests(unittest.TestCase):
+    def test_list_drop_only_updates_destination_and_validates_availability(self):
+        original = records()
+        state = {"gantt_staff_drag_token": "token"}
+        groups, mapping = {"t": TARGET}, {"bar-target": "t"}
+        payload = dict(token="token", source=None, target="bar-target", employee="e", nonce="one")
+        event = transfer.DROP_PREFIX + quote(json.dumps(payload))
+        client = Client(original)
+        client.ctx["assignments"] = original
+        result = transfer.apply_drop(event, state, mapping, groups, original,
+                                     lambda before, after: save_changes(client, before, after)["rows"])
+        self.assertEqual(result, "assigned")
+        request, = [params for name, params in client.calls if name == "save_assignment_changes"]
+        self.assertEqual(request["p_expected"], [original[-1]])
+        self.assertEqual(request["p_records"], [{**original[-1], "employeeId": "e"}])
+
+        blocked = Client(original)
+        blocked.ctx["rules"] = [
+            dict(employee_id="e", scope="date", rule_date=original[-1]["date"], kind="unavailable"),
+        ]
+        with self.assertRaises(AssignmentSaveError):
+            transfer.apply_drop(event, {"gantt_staff_drag_token": "token"}, mapping, groups, original,
+                                lambda before, after: save_changes(blocked, before, after))
+        self.assertFalse(any(name == "save_assignment_changes" for name, _ in blocked.calls))
+
     def test_drop_is_saved_once_and_invalid_destinations_are_rejected(self):
         state = {"gantt_staff_drag_token": "token"}
         groups, mapping = {"s": SOURCE, "t": TARGET}, {"bar-source": "s", "bar-target": "t"}
@@ -117,18 +141,29 @@ class TransferTests(unittest.TestCase):
 class DragMarkupTests(unittest.TestCase):
     def test_drag_handles_and_client_event_keep_worker_and_bar_identity(self):
         from datetime import datetime, timedelta
+        day = date(2026, 11, 16)
         _, groups, _ = chart([row(), {**row(), "id": "other", "employeeId": "", "startTime": "14:00"}])
+        staff = [
+            {"id": eid, "name": name, "is_external_crew": True}
+            for eid, name in (("free", "Άννα"), ("early", "Ελένη"), ("busy", "Μαρία"))
+        ]
+        assignments_by_date = {day: [
+            {**row(), "employeeId": "early", "startTime": "07:00", "endTime": "08:00"},
+            {**row(), "employeeId": "busy"},
+        ]}
         env = get_source_functions(ROOT / "gantt_html.py", ("build_html_gantt", "get_local_today"), {
             "datetime": datetime, "timedelta": timedelta, "html_utils": html, "base64": base64,
-            "st": SimpleNamespace(session_state=SimpleNamespace(employees=[], leaves=[], assignments_by_date={})),
+            "st": SimpleNamespace(session_state=SimpleNamespace(
+                employees=staff, leaves=[], assignments_by_date=assignments_by_date,
+            )),
             "utils": SimpleNamespace(supabase=None, get_employee_name=lambda eid: "Άννα"),
             "config": SimpleNamespace(BLUE_STACK_HEX="#0000ff"), "fetch_rules": lambda _: ([], None),
         })
         mapping = {key: f"bar-{index}" for index, key in enumerate(groups)}
         build = env["build_html_gantt"]
-        ordinary = build(groups, date(2026, 11, 16), 1, mapping, 500)
+        ordinary = build(groups, day, 1, mapping, 500)
         self.assertNotIn("draggable='true'", ordinary)
-        output = build(groups, date(2026, 11, 16), 1, mapping, 500, staff_drag_token="token")
+        output = build(groups, day, 1, mapping, 500, staff_drag_token="token")
 
         class Collector(HTMLParser):
             def __init__(self):
@@ -138,10 +173,15 @@ class DragMarkupTests(unittest.TestCase):
                 self.tags.append((tag, dict(attrs)))
         parsed = Collector()
         parsed.feed(output)
-        handle, = [attrs for _, attrs in parsed.tags if attrs.get("class") == "gantt-transfer-worker"]
+        handle, = [attrs for _, attrs in parsed.tags
+                   if attrs.get("class") == "gantt-transfer-worker" and "data-staff-origin" not in attrs]
         self.assertEqual(handle["data-employee"], "e")
         self.assertEqual(handle["draggable"], "true")
         self.assertEqual(sum("data-staff-drop-target" in attrs for _, attrs in parsed.tags), 2)
+        for heading, employee_id in (("ΔΙΑΘΕΣΙΜΟΙ", "free"), ("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ", "early"),
+                                     ("ΜΗ ΔΙΑΘΕΣΙΜΟΙ", "early")):
+            self.assertRegex(output, rf"<b>{heading}:</b><br><span[^>]+data-staff-origin='availability' "
+                                     rf"data-employee='{employee_id}'")
 
         node = shutil.which("node")
         if not node:
@@ -193,6 +233,15 @@ assert.ok(reported.startsWith('gantt_staff_drop:'));
 const payload = JSON.parse(decodeURIComponent(reported.split(':').slice(1).join(':')));
 assert.deepStrictEqual([payload.source,payload.target,payload.employee,payload.token],['bar-0','bar-1','e','token']);
 assert.ok(payload.nonce);
+
+const listName = {dataset:{staffOrigin:'availability',employee:'free'},classList:displayClasses(),closest(){return null;}};
+handlers.dragstart({...e,target:{closest(){return listName;}}});
+assert.strictEqual(e.dataTransfer.effectAllowed,'copy');
+handlers.dragover(dest);
+assert.strictEqual(e.dataTransfer.dropEffect,'copy');
+handlers.drop(dest);
+const assignment = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
+assert.deepStrictEqual([assignment.source,assignment.target,assignment.employee],[null,'bar-1','free']);
 '''
         run = subprocess.run([node, "-"], input=harness + script + checks, text=True, capture_output=True)
         self.assertEqual(run.returncode, 0, run.stderr)
