@@ -67,12 +67,49 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     )
 
     if staff_drag_token:
-        html += (
-            "<style>.gantt-transfer-worker { pointer-events:auto; cursor:grab; display:inline-block; "
-            "border-bottom:1px dashed white; padding:1px 2px; } "
-            ".gantt-transfer-worker:hover { background:rgba(15,23,42,.5); } "
-            ".mygantt-bar.gantt-drop-hover { outline:4px solid #2563eb !important; } </style>"
-        )
+        html += """
+        <style>
+            #gantt-master-container .gantt-transfer-worker {
+                --gantt-context-color: #fda4af;
+                pointer-events: auto;
+                cursor: grab;
+                display: inline-block;
+                vertical-align: middle;
+                box-sizing: border-box;
+                max-width: 100%;
+                overflow-wrap: anywhere;
+                padding: 1px 5px;
+                border-radius: 8px;
+                background: #1e293b;
+                box-shadow: inset 0 0 0 1px #64748b, 0 1px 2px rgb(15 23 42 / 22%);
+                transition: background-color 120ms ease, box-shadow 120ms ease;
+            }
+            #gantt-master-container .gantt-transfer-worker::before {
+                content: "";
+                display: inline-block;
+                width: 8px;
+                height: 12px;
+                margin-right: 4px;
+                vertical-align: text-bottom;
+                background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
+            }
+            #gantt-master-container .gantt-transfer-worker:hover,
+            #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
+                background: #164e63;
+                box-shadow: inset 0 0 0 1px #7dd3fc, 0 1px 2px rgb(15 23 42 / 22%);
+            }
+            #gantt-master-container.gantt-staff-dragging .mygantt-bar:hover { transform: none; }
+            #gantt-master-container .mygantt-bar.gantt-drop-hover {
+                outline: 2px solid #2563eb !important;
+                outline-offset: 2px !important;
+                box-shadow: inset 0 0 0 2px #fff, 0 0 0 5px rgb(96 165 250 / 34%) !important;
+                z-index: 40 !important;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #gantt-master-container .gantt-transfer-worker { transition: none; }
+            }
+        </style>
+        """
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; } .gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn { position:absolute; top:2px; width:18px; height:18px; border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.78); color:#ffffff; font-size:11px; line-height:16px; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.35); } .gantt-copy-project-btn { right:2px; } .gantt-copy-full-btn { right:24px; } .gantt-copy-crew-btn { right:46px; } .gantt-copy-project-btn:hover, .gantt-copy-full-btn:hover, .gantt-copy-crew-btn:hover { background:rgba(220,38,38,0.92); transform:scale(1.08); }</style>"
 
@@ -323,13 +360,13 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     red_closing = html_utils.escape(closing)
 
                     return (
-                        "<span style='color:#dc2626; font-weight:900;'>"
+                        "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
                         + red_part
                         + " </span>"
                         + "<span style='color:#ffffff; font-weight:900; text-shadow:0 1px 2px rgba(0,0,0,0.55);'>"
                         + white_name
                         + "</span>"
-                        + "<span style='color:#dc2626; font-weight:900;'>"
+                        + "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
                         + red_closing
                         + "</span>"
                     )
@@ -536,6 +573,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var DRAG_THRESHOLD = 5;
       window.gIsDragging = false;
       var staffDrag = null;
+      var dragHandle = null;
       var hoverBar = null;
       var blockBarClickUntil = 0;
 
@@ -639,6 +677,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         window.gIsDragging = false;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', JSON.stringify(staffDrag));
+        dragHandle = handle;
+        dragHandle.classList.add('gantt-drag-origin');
+        s.classList.add('gantt-staff-dragging');
         e.stopPropagation();
       }
 
@@ -655,12 +696,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       function onStaffDragOver(e) {
         if (!staffDrag) return;
         var bar = dropTarget(e);
-        clearStaffHover();
         if (bar) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
-          bar.classList.add('gantt-drop-hover');
-          hoverBar = bar;
+        }
+        if (bar !== hoverBar) {
+          clearStaffHover();
+          if (bar) {
+            hoverBar = bar;
+            hoverBar.classList.add('gantt-drop-hover');
+          }
         }
         var rect = s.getBoundingClientRect();
         if (e.clientX < rect.left + 35) s.scrollLeft -= 18;
@@ -688,6 +733,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
       function onStaffDragEnd() {
         staffDrag = null;
+        if (dragHandle) dragHandle.classList.remove('gantt-drag-origin');
+        dragHandle = null;
+        s.classList.remove('gantt-staff-dragging');
         clearStaffHover();
         blockBarClickUntil = Date.now() + 250;
       }

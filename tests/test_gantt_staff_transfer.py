@@ -150,13 +150,17 @@ class DragMarkupTests(unittest.TestCase):
         harness = r'''
 const assert = require('assert');
 const handlers = {};
+const displayClasses = () => {
+  const classes = new Set();
+  return {add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name)};
+};
 const source = {id:'bar-0'};
-const target = {id:'bar-1', classList:{add(){},remove(){}}};
-const chip = {dataset:{employee:'e'},closest(){return source;}};
+const target = {id:'bar-1', classList:displayClasses()};
+const chip = {dataset:{employee:'e'},classList:displayClasses(),closest(){return source;}};
 let reported;
 const link = {click(){reported = this.id;}};
 const surface = {
-  dataset:{staffDragToken:'token'},style:{},offsetLeft:0,scrollWidth:600,scrollLeft:0,scrollTop:0,
+  dataset:{staffDragToken:'token'},classList:displayClasses(),style:{},offsetLeft:0,scrollWidth:600,scrollLeft:0,scrollTop:0,
   querySelector(){return null;},getBoundingClientRect(){return {left:0,right:600,top:0,bottom:500};},
   addEventListener(type,fn){handlers[type] = fn;},removeEventListener(){}
 };
@@ -178,9 +182,13 @@ handlers.mousedown({...e,button:0,pageX:0});
 handlers.dragstart(e);
 assert.strictEqual(prevented,false);
 assert.strictEqual(e.dataTransfer.effectAllowed,'move');
+assert.ok(chip.classList.contains('gantt-drag-origin'));
 const dest = {...e,target:{closest(){return target;}},clientX:300,clientY:250};
 handlers.dragover(dest);
+assert.ok(target.classList.contains('gantt-drop-hover'));
 handlers.drop(dest);
+assert.ok(!target.classList.contains('gantt-drop-hover'));
+assert.ok(!chip.classList.contains('gantt-drag-origin'));
 assert.ok(reported.startsWith('gantt_staff_drop:'));
 const payload = JSON.parse(decodeURIComponent(reported.split(':').slice(1).join(':')));
 assert.deepStrictEqual([payload.source,payload.target,payload.employee,payload.token],['bar-0','bar-1','e','token']);
