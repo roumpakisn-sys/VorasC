@@ -309,8 +309,11 @@ elif clicked_safe_id:
         else:
             if result:
                 clear_bar_selection()
-                st.toast("Ο εργαζόμενος προστέθηκε στη μπάρα." if result == "assigned"
-                         else "Ο εργαζόμενος μεταφέρθηκε.")
+                st.toast({
+                    "assigned": "Ο εργαζόμενος προστέθηκε στη μπάρα.",
+                    "unassigned": "Ο εργαζόμενος αφαιρέθηκε από τη βάρδια.",
+                    "moved": "Ο εργαζόμενος μεταφέρθηκε.",
+                }[result])
                 st.rerun()
     elif clicked_safe_id != st.session_state.last_clicked_safe_id:
         real_clicked_key = safe_mapping.get(clicked_safe_id, None)
