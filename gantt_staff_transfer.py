@@ -1,10 +1,40 @@
 """Move staff between Gantt bars through one atomic assignment save."""
+import json
+from urllib.parse import unquote
 import uuid
 
 
 SOURCE = "gantt_transfer_source"
 TARGET = "gantt_transfer_target"
 STAFF = "gantt_transfer_staff"
+DROP_PREFIX = "gantt_staff_drop:"
+
+
+def apply_drop(value, state, safe_mapping, groups, assignments, save):
+    """Consume a drag event once and reuse the validated atomic transfer."""
+    if value == state.get("gantt_staff_drop_handled"):
+        return False
+    state["gantt_staff_drop_handled"] = value
+    try:
+        if not value.startswith(DROP_PREFIX) or len(value) > 4096:
+            raise ValueError
+        payload = json.loads(unquote(value[len(DROP_PREFIX):]))
+        if not isinstance(payload, dict) or not all(
+            isinstance(payload.get(key), str) and payload[key]
+            for key in ("token", "source", "target", "employee", "nonce")
+        ):
+            raise ValueError
+        if payload["token"] != state.get("gantt_staff_drag_token"):
+            raise ValueError
+        source = groups[safe_mapping[payload["source"]]]
+        target = groups[safe_mapping[payload["target"]]]
+    except (KeyError, ValueError, TypeError) as exc:
+        raise ValueError("Η επιλογή μεταφοράς έχει αλλάξει. Δοκίμασε ξανά από το Gantt.") from exc
+    before, after = plan_transfer(assignments, source, target, [payload["employee"]])
+    if save(before, after) is None:
+        return False
+    state["gantt_transfer_reset"] = True
+    return True
 
 
 def _rows(group, assignments):
@@ -76,7 +106,8 @@ def render_mode(clear_selection):
         "Μεταφορά προσωπικού μεταξύ μπαρών", key="gantt_staff_transfer_mode", on_change=reset,
     )
     if enabled:
-        st.caption("Πάτησε την αρχική μπάρα και μετά τη μπάρα προορισμού. Επίλεξε προσωπικό παρακάτω.")
+        st.caption("Σύρε το όνομα εργαζομένου στη μπάρα προορισμού για άμεση μεταφορά. "
+                   "Για πολλά άτομα, πάτησε τις δύο μπάρες και επίλεξε προσωπικό παρακάτω.")
     return enabled
 
 
