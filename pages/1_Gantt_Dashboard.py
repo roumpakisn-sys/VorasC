@@ -38,6 +38,7 @@ import gantt_export
 import gantt_excel_export
 import gantt_filters
 import gantt_search
+import gantt_staff_transfer
 import placement_roles
 import placement_details
 import placement_hours
@@ -225,9 +226,17 @@ for real_key in wk_groups.keys():
 
 
 # --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
+transfer_mode = False
+if is_full_admin and not presentation_mode:
+    transfer_mode = gantt_staff_transfer.render_mode(clear_bar_selection)
+
+focused_bar_key = search_bar_key if not is_full_admin or st.session_state.clicked_key == search_bar_key else None
+if transfer_mode:
+    focused_bar_key = st.session_state.get(gantt_staff_transfer.TARGET) or st.session_state.get(gantt_staff_transfer.SOURCE)
+
 html_chart = gantt_html.build_html_gantt(
     wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
-    focused_key=search_bar_key if not is_full_admin or st.session_state.clicked_key == search_bar_key else None,
+    focused_key=focused_bar_key,
     scroll_to_focus=opening_search_result,
 )
 clicked_safe_id = click_detector(
@@ -293,12 +302,21 @@ elif clicked_safe_id:
         st.session_state.last_clicked_safe_id = clicked_safe_id
 
         if real_clicked_key:
-            st.session_state.pop("edit_form_prefill", None)
-            st.session_state.clicked_key = real_clicked_key
-            st.session_state.edit_bar_select_widget = real_clicked_key
-            st.session_state.trigger_scroll = True
+            if transfer_mode:
+                gantt_staff_transfer.pick_bar(st.session_state, real_clicked_key, wk_groups)
+            else:
+                st.session_state.pop("edit_form_prefill", None)
+                st.session_state.clicked_key = real_clicked_key
+                st.session_state.edit_bar_select_widget = real_clicked_key
+                st.session_state.trigger_scroll = True
             st.session_state.skip_remote_sync_once = True
             st.rerun()
+
+if transfer_mode:
+    gantt_staff_transfer.render_transfer(
+        wk_groups, st.session_state.assignments, st.session_state.employees,
+        utils.save_assignment_batch, clear_bar_selection,
+    )
 
 if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
