@@ -41,6 +41,7 @@ import gantt_search
 import placement_roles
 import placement_details
 import placement_hours
+import placement_text
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 from periodic_visits_runtime import load_periodic_visits
 
@@ -387,6 +388,37 @@ if not presentation_mode:
             if "qa_rc" not in st.session_state:
                 st.session_state.qa_rc = 0
             qa_rc = st.session_state.qa_rc
+            qa_prefill = st.session_state.get("qa_form_prefill") or {}
+            text_draft = qa_prefill.get("from_text", False)
+            with st.expander("Συμπλήρωση από κείμενο"):
+                with st.form("qa_from_text"):
+                    placement_message = st.text_area(
+                        "Γράψε ή επικόλλησε την ανάθεση",
+                        value=qa_prefill.get("source_message", ""),
+                        key=f"qa_text_{qa_rc}", max_chars=3000,
+                        placeholder="Μαρία Παππά και Γιάννης Νικολάου στο ISOMAT αύριο, "
+                                    "7 με 11 το πρωί. Διεύθυνση: ΒΙΠΕ Σίνδου.",
+                    )
+                    fill_from_text = st.form_submit_button("Συμπλήρωση πεδίων")
+                if fill_from_text:
+                    if placement_message.strip():
+                        values, warnings = placement_text.parse(
+                            placement_message, st.session_state.projects,
+                            st.session_state.employees, get_local_today(),
+                        )
+                        st.session_state.qa_form_prefill = dict(
+                            values, from_text=True, source_message=placement_message, warnings=warnings,
+                        )
+                        st.session_state.qa_date_mode = GANTT_DATES_CONTINUOUS
+                        st.session_state.qa_rc += 1
+                        st.rerun()
+                    st.warning("Γράψε ή επικόλλησε πρώτα την ανάθεση.")
+
+            if text_draft:
+                st.caption("Πρόχειρο από κείμενο. Έλεγξε τα πεδία και τα ονόματα πριν την καταχώρηση.")
+                if qa_prefill["warnings"]:
+                    st.warning(" ".join(qa_prefill["warnings"]))
+
             clipboard = st.session_state.get("gantt_placement_clipboard")
             if st.button(
                 "📥 Επικόλληση όλων των στοιχείων",
@@ -401,7 +433,6 @@ if not presentation_mode:
                 st.session_state.qa_rc += 1
                 st.rerun()
 
-            qa_prefill = st.session_state.get("qa_form_prefill") or {}
             qa_date_mode = st.radio(
                 "Τρόπος επιλογής ημερών νέας τοποθέτησης",
                 [GANTT_DATES_CONTINUOUS, GANTT_DATES_SPECIFIC],
@@ -419,7 +450,7 @@ if not presentation_mode:
 
             with st.form("quick_add", clear_on_submit=False):
                 qa_first_default = _form_prefill_date(
-                    qa_prefill.get("first_date"), st.session_state.view_week_date
+                    qa_prefill.get("first_date"), None if text_draft else st.session_state.view_week_date
                 )
                 add_date = st.date_input(
                     "Πρώτη ημερομηνία", value=qa_first_default, key=f"qa_date_{qa_rc}"
@@ -435,10 +466,11 @@ if not presentation_mode:
                     )
                 else:
                     saved_extra = qa_prefill.get("extra_dates", [])
+                    extra_base = add_date or st.session_state.view_week_date
                     for i in range(int(qa_specific_count) - 1):
                         initial_day = (
-                            _form_prefill_date(saved_extra[i], add_date + timedelta(days=i + 1))
-                            if i < len(saved_extra) else add_date + timedelta(days=i + 1)
+                            _form_prefill_date(saved_extra[i], extra_base + timedelta(days=i + 1))
+                            if i < len(saved_extra) else extra_base + timedelta(days=i + 1)
                         )
                         extra_add_dates.append(
                             st.date_input(
@@ -447,15 +479,14 @@ if not presentation_mode:
                             )
                         )
 
+                project_ids = [p["id"] for p in st.session_state.projects]
+                preferred_project_id = qa_prefill.get("project_id")
                 proj_choice = st.selectbox(
                     "Επιλογή Έργου (Από Λίστα)",
-                    options=[p["id"] for p in st.session_state.projects],
+                    options=project_ids,
                     format_func=utils.get_project_name,
-                    index=(
-                        [p["id"] for p in st.session_state.projects].index(qa_prefill.get("project_id"))
-                        if qa_prefill.get("project_id") in [p["id"] for p in st.session_state.projects]
-                        else 0
-                    ),
+                    index=(project_ids.index(preferred_project_id) if preferred_project_id in project_ids
+                           else None if text_draft else 0),
                     key=f"qa_proj_{qa_rc}",
                 )
                 custom_proj_name = st.text_input(
@@ -517,12 +548,14 @@ if not presentation_mode:
                     )
                 with c_start:
                     t_start = st.time_input(
-                        "Έναρξη", value=_form_time(qa_prefill.get("start_time"), "09:00"),
+                        "Έναρξη", value=(None if text_draft and not qa_prefill.get("start_time")
+                                         else _form_time(qa_prefill.get("start_time"), "09:00")),
                         key=f"qa_start_{qa_rc}",
                     )
                 with c_end:
                     t_end = st.time_input(
-                        "Λήξη", value=_form_time(qa_prefill.get("end_time"), "17:00"),
+                        "Λήξη", value=(None if text_draft and not qa_prefill.get("end_time")
+                                       else _form_time(qa_prefill.get("end_time"), "17:00")),
                         key=f"qa_end_{qa_rc}",
                     )
 
@@ -534,7 +567,10 @@ if not presentation_mode:
                 add_spacing_key = f"desktop_add_{qa_rc}"
                 add_spacing_override = periodic_visits.spacing_review_control(add_spacing_key)
 
-                if copy_new:
+                complete_placement = all(value is not None for value in (add_date, t_start, t_end))
+                if not complete_placement and (copy_new or submit_new or add_spacing_override):
+                    st.error("Συμπλήρωσε ημερομηνία και ώρες έναρξης και λήξης.")
+                elif copy_new:
                     _save_placement_clipboard(_form_clipboard_payload(
                         first_date=add_date, mode=qa_date_mode,
                         duration=duration_days, extra_dates=extra_add_dates,
@@ -549,7 +585,7 @@ if not presentation_mode:
                         start_time=t_start, end_time=t_end,
                     ))
 
-                if submit_new or add_spacing_override:
+                if complete_placement and (submit_new or add_spacing_override):
                     str_arrival = t_arrival.strftime("%H:%M") if use_arr else ""
                     str_start = t_start.strftime("%H:%M")
                     str_end = t_end.strftime("%H:%M")
@@ -562,7 +598,9 @@ if not presentation_mode:
                         st.error(str(exc))
                         new_target_dates = []
 
-                    if str_start >= str_end:
+                    if not proj_choice and not custom_proj_name.strip():
+                        st.error("Επίλεξε έργο από τη λίστα ή πληκτρολόγησε νέο έργο.")
+                    elif str_start >= str_end:
                         st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                     elif not new_target_dates:
                         pass  # Η επιλογή ημερομηνιών απέτυχε: δεν γίνεται αποθήκευση.

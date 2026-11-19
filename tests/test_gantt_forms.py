@@ -1,5 +1,5 @@
 """Inline Gantt editing stays functional after removing the optional drawer."""
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 import unittest
 
@@ -28,6 +28,40 @@ class InlineFormTests(unittest.TestCase):
 
     def button(self, app, label):
         return next(b for b in app.button if b.label == label)
+
+    def test_text_prefill_requires_normal_save_and_preserves_validated_values(self):
+        app = AppTest.from_file(str(ROOT / "tests/fixtures/gantt_forms_app.py"))
+        app.session_state["fixture_headless"] = True
+        app.session_state["fixture_show_add"] = True
+        app.run()
+        app.text_area(key="qa_text_0").set_value("Εργαζόμενος Α στο άγνωστο έργο την Παρασκευή πρωί")
+        self.button(app, "Συμπλήρωση πεδίων").click().run()
+        self.assertFalse(app.exception)
+        self.assertIsNone(app.selectbox(key="qa_proj_1").value)
+        self.assertIsNone(app.time_input(key="qa_start_1").value)
+        self.button(app, "✅ Καταχώρηση").click().run()
+        self.assertTrue(app.error)
+        self.assertEqual(app.session_state.save_calls, [])
+
+        app.text_area(key="qa_text_1").set_value(
+            "Εργαζόμενος Α στο Δοκιμαστικό έργο 20/11/2026, 07:10-11:00. "
+            "Διεύθυνση: Τσιμισκή 12. Επόπτρια Ελένη."
+        )
+        self.button(app, "Συμπλήρωση πεδίων").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state.save_calls, [])
+        self.assertEqual(app.date_input(key="qa_date_2").value, date(2026, 11, 20))
+        self.assertEqual(app.multiselect(key="qa_emps_2").value, ["e1"])
+        self.assertEqual(app.time_input(key="qa_start_2").value, time(7, 10))
+        self.assertEqual(app.text_input(key="qa_details_2_address").value, "Τσιμισκή 12")
+        self.assertEqual(app.text_input(key="qa_roles_2_supervisor").value, "Ελένη")
+        app.time_input(key="qa_end_2").set_value(time(12))
+        self.button(app, "✅ Καταχώρηση").click().run()
+        self.assertFalse(app.exception)
+        call, = app.session_state.save_calls
+        saved, = call["new"]
+        self.assertEqual(saved["employeeId"], "e1")
+        self.assertEqual(saved["endTime"], "12:00")
 
     def test_inline_save_keeps_both_workers_and_optional_contacts(self):
         for view in ("desktop", "mobile"):
