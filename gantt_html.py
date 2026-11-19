@@ -117,6 +117,24 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 box-shadow: inset 0 0 0 2px #fff, 0 0 0 5px rgb(96 165 250 / 34%) !important;
                 z-index: 40 !important;
             }
+            #gantt-master-container [data-staff-unassign-target].gantt-drop-hover {
+                outline: 2px solid #b45309;
+                outline-offset: -2px;
+                background-color: #fffbeb !important;
+            }
+            #gantt-master-container [data-staff-unassign-target].gantt-drop-hover::after {
+                content: "Αφαίρεση από τη βάρδια";
+                position: absolute;
+                bottom: 6px;
+                right: 8px;
+                padding: 3px 7px;
+                border-radius: 5px;
+                background: #92400e;
+                color: #fff;
+                font-size: 11px;
+                font-weight: 700;
+                pointer-events: none;
+            }
             @media (prefers-reduced-motion: reduce) {
                 #gantt-master-container .gantt-transfer-worker { transition: none; }
             }
@@ -135,6 +153,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         html += f"<div style='position: absolute; left: {pct}%; height: 100%; border-left: 2px solid #94a3b8; padding-left: 4px; padding-top: 14px; font-weight: bold; font-size: 13px; color: #334155;'>{lbl}</div>"
     html += "</div></div>"
 
+    unassign_attr = " data-staff-unassign-target" if staff_drag_token else ""
     for i in range(7):
         curr_date = start_of_week + timedelta(days=i)
         day_str = f"{day_names_gr[i]} {curr_date.strftime('%d/%m')}"
@@ -336,7 +355,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         bg_color_row = "#eef2ff" if curr_date == get_local_today() else ("#f8fafc" if i % 2 == 1 else "#ffffff")
 
         html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;'>"
-        html += f"<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;'>{label_html}</div>"
+        html += f"<div{unassign_attr} style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;'>{label_html}</div>"
         html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
 
         for g, lane_idx in group_lanes:
@@ -583,7 +602,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       window.gIsDragging = false;
       var staffDrag = null;
       var dragHandle = null;
-      var hoverBar = null;
+      var hoverTarget = null;
       var blockBarClickUntil = 0;
 
       function onScroll() {
@@ -698,27 +717,29 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function clearStaffHover() {
-        if (hoverBar) hoverBar.classList.remove('gantt-drop-hover');
-        hoverBar = null;
+        if (hoverTarget) hoverTarget.classList.remove('gantt-drop-hover');
+        hoverTarget = null;
       }
 
       function dropTarget(e) {
+        if (!staffDrag) return null;
         var bar = e.target.closest('a[data-staff-drop-target]');
-        return bar && staffDrag && bar.id !== staffDrag.source ? bar : null;
+        if (bar) return bar.id !== staffDrag.source ? bar : null;
+        return staffDrag.source ? e.target.closest('[data-staff-unassign-target]') : null;
       }
 
       function onStaffDragOver(e) {
         if (!staffDrag) return;
-        var bar = dropTarget(e);
-        if (bar) {
+        var destination = dropTarget(e);
+        if (destination) {
           e.preventDefault();
           e.dataTransfer.dropEffect = staffDrag.source ? 'move' : 'copy';
         }
-        if (bar !== hoverBar) {
+        if (destination !== hoverTarget) {
           clearStaffHover();
-          if (bar) {
-            hoverBar = bar;
-            hoverBar.classList.add('gantt-drop-hover');
+          if (destination) {
+            hoverTarget = destination;
+            hoverTarget.classList.add('gantt-drop-hover');
           }
         }
         var rect = s.getBoundingClientRect();
@@ -729,15 +750,15 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onStaffDrop(e) {
-        var bar = dropTarget(e);
-        if (!bar) return;
+        var destination = dropTarget(e);
+        if (!destination) return;
         e.preventDefault();
         e.stopPropagation();
         var eventLink = document.querySelector('[data-staff-drop-event]');
         if (eventLink) {
           eventLink.id = 'gantt_staff_drop:' + encodeURIComponent(JSON.stringify({
             token: s.dataset.staffDragToken, source: staffDrag.source,
-            target: bar.id, employee: staffDrag.employee,
+            target: destination.id || null, employee: staffDrag.employee,
             nonce: Date.now().toString(36) + Math.random().toString(36).slice(2)
           }));
           eventLink.click();

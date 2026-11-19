@@ -1,4 +1,4 @@
-"""Assign or move staff on Gantt bars through one atomic save."""
+"""Assign, move or remove staff on Gantt bars through one atomic save."""
 import json
 from urllib.parse import unquote
 import uuid
@@ -11,7 +11,7 @@ DROP_PREFIX = "gantt_staff_drop:"
 
 
 def apply_drop(value, state, safe_mapping, groups, assignments, save):
-    """Consume a drag event once. A null source means assignment from the list."""
+    """Consume a drag event once. A null endpoint represents the left lists."""
     if value == state.get("gantt_staff_drop_handled"):
         return False
     state["gantt_staff_drop_handled"] = value
@@ -21,26 +21,34 @@ def apply_drop(value, state, safe_mapping, groups, assignments, save):
         payload = json.loads(unquote(value[len(DROP_PREFIX):]))
         if not isinstance(payload, dict) or not all(
             isinstance(payload.get(key), str) and payload[key]
-            for key in ("token", "target", "employee", "nonce")
+            for key in ("token", "employee", "nonce")
         ):
             raise ValueError
         if payload["token"] != state.get("gantt_staff_drag_token"):
             raise ValueError
-        source_key = payload["source"]
+        source_key, target_key = payload["source"], payload["target"]
+        if source_key is None and target_key is None:
+            raise ValueError
         source = None if source_key is None else groups[safe_mapping[source_key]]
-        target = groups[safe_mapping[payload["target"]]]
+        target = None if target_key is None else groups[safe_mapping[target_key]]
     except (KeyError, ValueError, TypeError) as exc:
         raise ValueError("Η επιλογή μεταφοράς έχει αλλάξει. Δοκίμασε ξανά από το Gantt.") from exc
     employee_ids = [payload["employee"]]
     if source is None:
         before = _rows(target, assignments)
         after = _add_to_bar(before, employee_ids)
+        result = "assigned"
+    elif target is None:
+        before = _rows(source, assignments)
+        after = _remove_from_bar(before, employee_ids)
+        result = "unassigned"
     else:
         before, after = plan_transfer(assignments, source, target, employee_ids)
+        result = "moved"
     if save(before, after) is None:
         return False
     state["gantt_transfer_reset"] = True
-    return "assigned" if source is None else "moved"
+    return result
 
 
 def _rows(group, assignments):
@@ -69,19 +77,20 @@ def _add_to_bar(rows, employee_ids):
     return assigned + [dict(row) for row in vacancies[len(employee_ids):]]
 
 
+def _remove_from_bar(rows, employee_ids):
+    if not employee_ids or not set(employee_ids) <= {row.get("employeeId") for row in rows}:
+        raise ValueError("Επίλεξε εργαζομένους από την αρχική μπάρα.")
+    remaining = [dict(row) for row in rows if row.get("employeeId") not in employee_ids]
+    return remaining or [{**rows[0], "employeeId": ""}]
+
+
 def plan_transfer(assignments, source, target, employee_ids):
     """Retain uncovered source work and adopt the destination's placement data."""
     source_rows, target_rows = _rows(source, assignments), _rows(target, assignments)
     if set(source["AssignmentIds"]) & set(target["AssignmentIds"]):
         raise ValueError("Επίλεξε διαφορετική μπάρα προορισμού.")
     selected = list(dict.fromkeys(eid for eid in employee_ids if eid))
-    if not selected or not set(selected) <= {row.get("employeeId") for row in source_rows}:
-        raise ValueError("Επίλεξε εργαζομένους από την αρχική μπάρα.")
-
-    remaining = [dict(row) for row in source_rows if row.get("employeeId") not in selected]
-    if not remaining:
-        remaining = [{**source_rows[0], "employeeId": ""}]
-
+    remaining = _remove_from_bar(source_rows, selected)
     destination = [row for row in _add_to_bar(target_rows, selected) if row.get("employeeId")]
     return source_rows + target_rows, remaining + destination
 
@@ -115,8 +124,9 @@ def render_mode(clear_selection):
         "Μεταφορά προσωπικού μεταξύ μπαρών", key="gantt_staff_transfer_mode", on_change=reset,
     )
     if enabled:
-        st.caption("**Σύρε ένα όνομα** από αριστερά για ανάθεση ή από άλλη μπάρα για μεταφορά. "
-                   "Για πολλά άτομα, πάτησε τις δύο μπάρες και επίλεξε προσωπικό παρακάτω.")
+        st.caption("**Σύρε ένα όνομα πάνω σε μπάρα** για ανάθεση ή μεταφορά. "
+                   "**Σύρε το από μπάρα προς τα αριστερά** για αφαίρεση από τη βάρδια. "
+                   "Για μεταφορά πολλών ατόμων, επίλεξε τις δύο μπάρες.")
     return enabled
 
 
@@ -133,7 +143,7 @@ def render_transfer(groups, assignments, employees, save, clear_selection):
     active = {key: group for key, group in groups.items() if not group.get("is_cancelled")}
     sources = {key: group for key, group in active.items() if any(group.get("EmployeeIds", []))}
     if not sources or len(active) < 2:
-        st.info("Χρειάζονται δύο ενεργές μπάρες και προσωπικό στην αρχική μπάρα.")
+        st.info("Για μεταφορά μεταξύ μπαρών χρειάζονται δύο ενεργές μπάρες και προσωπικό στην αρχική μπάρα.")
         return
     if state.get(SOURCE) not in sources:
         state[SOURCE] = ""

@@ -41,6 +41,27 @@ TARGET = {"AssignmentIds": ["target"], "EmployeeIds": [""]}
 
 
 class TransferTests(unittest.TestCase):
+    def test_drop_back_to_list_only_unassigns_from_source_and_keeps_empty_bar(self):
+        original = records()
+        mapping = {"bar-source": "s"}
+        payload = dict(token="token", source="bar-source", target=None, employee="e", nonce="one")
+        event = transfer.DROP_PREFIX + quote(json.dumps(payload))
+        for source_rows, source, expected in (
+            (original[:2], SOURCE, [original[1]]),
+            (original[:1], {"AssignmentIds": ["source-1"]}, [{**original[0], "employeeId": ""}]),
+        ):
+            with self.subTest(workers=len(source_rows)):
+                all_rows = [*source_rows, original[-1]]
+                client = Client(all_rows)
+                state = {"gantt_staff_drag_token": "token"}
+                result = transfer.apply_drop(event, state, mapping, {"s": source}, all_rows,
+                                             lambda before, after: save_changes(client, before, after)["rows"])
+                self.assertEqual(result, "unassigned")
+                self.assertFalse(transfer.apply_drop(event, state, mapping, {"s": source}, all_rows, self.fail))
+                request, = [params for name, params in client.calls if name == "save_assignment_changes"]
+                self.assertEqual(request["p_expected"], source_rows)
+                self.assertEqual(request["p_records"], expected)
+
     def test_list_drop_only_updates_destination_and_validates_availability(self):
         original = records()
         state = {"gantt_staff_drag_token": "token"}
@@ -178,6 +199,7 @@ class DragMarkupTests(unittest.TestCase):
         self.assertEqual(handle["data-employee"], "e")
         self.assertEqual(handle["draggable"], "true")
         self.assertEqual(sum("data-staff-drop-target" in attrs for _, attrs in parsed.tags), 2)
+        self.assertEqual(sum("data-staff-unassign-target" in attrs for _, attrs in parsed.tags), 7)
         for heading, employee_id in (("ΔΙΑΘΕΣΙΜΟΙ", "free"), ("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ", "early"),
                                      ("ΜΗ ΔΙΑΘΕΣΙΜΟΙ", "early")):
             self.assertRegex(output, rf"<b>{heading}:</b><br><span[^>]+data-staff-origin='availability' "
@@ -242,6 +264,22 @@ assert.strictEqual(e.dataTransfer.dropEffect,'copy');
 handlers.drop(dest);
 const assignment = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
 assert.deepStrictEqual([assignment.source,assignment.target,assignment.employee],[null,'bar-1','free']);
+
+const leftList = {id:'',classList:displayClasses()};
+const listDest = {...dest,target:{closest(selector){
+  return selector === '[data-staff-unassign-target]' ? leftList : null;
+}}};
+handlers.dragstart({...e,target:{closest(){return listName;}}});
+handlers.dragover(listDest);
+assert.ok(!leftList.classList.contains('gantt-drop-hover'));
+handlers.dragend();
+handlers.dragstart(e);
+handlers.dragover(listDest);
+assert.ok(leftList.classList.contains('gantt-drop-hover'));
+handlers.drop(listDest);
+assert.ok(!leftList.classList.contains('gantt-drop-hover'));
+const unassignment = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
+assert.deepStrictEqual([unassignment.source,unassignment.target,unassignment.employee],['bar-0',null,'e']);
 '''
         run = subprocess.run([node, "-"], input=harness + script + checks, text=True, capture_output=True)
         self.assertEqual(run.returncode, 0, run.stderr)
