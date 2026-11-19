@@ -54,6 +54,17 @@ class PlacementTextTests(unittest.TestCase):
         self.assertTrue(any("Μαρία" in warning for warning in warnings))
         self.assertTrue(any("διαφέρουν" in warning for warning in warnings))
 
+    def test_arrival_label_keeps_shift_hours_and_rejects_invalid_values(self):
+        values, warnings = self.parse("ISOMAT αύριο, ώρα προσέλευσης στις 6.45 π.μ., 7 με 11")
+        self.assertFalse(warnings)
+        self.assertTrue(values["use_arrival"])
+        self.assertEqual(values["arrival_time"], "06:45")
+        self.assertEqual((values["start_time"], values["end_time"]), ("07:00", "11:00"))
+
+        values, warnings = self.parse("ISOMAT αύριο, 07:00-11:00. Προσέλευση 06:75.")
+        self.assertNotIn("use_arrival", values)
+        self.assertTrue(any("ώρα προσέλευσης" in warning for warning in warnings))
+
     def test_multiple_dates_are_not_silently_reduced_to_one(self):
         for dates in ("20/11 και 21/11", "20–21/11", "20 και 21/11"):
             with self.subTest(dates=dates):

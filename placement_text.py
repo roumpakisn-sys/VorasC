@@ -21,16 +21,20 @@ _RANGE = re.compile(
     rf"(?:[-–—]|με\b|εωσ\b|ωσ\b|μεχρι\b)\s*"
     rf"(?P<end>{_HOUR})\s*(?P<end_period>{_PERIOD})?(?![\w/:])"
 )
+_ARRIVAL = re.compile(
+    rf"(?:στισ?\s+)?(?P<hour>{_HOUR})(?:\s*(?P<period>{_PERIOD}))?(?![\w:/]|\.\d)"
+)
 _FIELDS = re.compile(
     r"(?<!\w)(?:"
     r"(?P<address>διευθυνση)\b|"
     r"(?P<contact_phone>τηλεφωνο\b|τηλ\b\.?)\s*(?:υπευθυνου\b)?|"
-    r"(?P<transfer_driver>οδηγοσ\s+μεταφορασ\b|(?:τουσ\s+)?παει\s+[οη]\b)|"
+    r"(?P<transfer_driver>οδηγοσ\s+μεταφορασ\b|μεταφορα\b(?:\s+με\b)?|(?:τουσ\s+)?παει\s+[οη]\b)|"
     r"(?P<return_driver>οδηγοσ\s+επιστροφησ\b|επιστροφη\s+με\b)|"
     r"(?P<supervisor>εποπτησ\b|εποπτρια\b)|"
+    r"(?P<arrival_time>(?:ωρα\s+)?προσελευσησ?\b)|"
     r"(?P<custom_project>νεο\s+εργο\s*[:=])|"
     r"(?P<notes>παρατηρησεισ\s*[:=]|σημειωση\s*[:=])"
-    r")\s*[:=]?\s*"
+    r")\s*[:=–—-]?\s*"
 )
 _FIELD_END = re.compile(r"[;\n]|(?<!\b[^\W\d_])(?<!\bλεωφ)(?<!\bαγ)(?<!\bαρ)\.(?=\s+[^\W\d_])")
 _IMPLICIT_ADDRESS = re.compile(r"\b(?:β\.?ι\.?π\.?ε\.?|οδοσ|λεωφοροσ)\s+[^;\n,!]+")
@@ -51,7 +55,7 @@ def _mask(text, spans):
 
 def _extract_fields(text):
     roles, details, extra = {}, {}, {}
-    spans = []
+    spans, warnings = [], []
     fields = list(_FIELDS.finditer(_fold(text)))
     for index, marker in enumerate(fields):
         key = marker.lastgroup
@@ -66,6 +70,18 @@ def _extract_fields(text):
         if key == "contact_phone":
             phone = _PHONE.match(chunk)
             chunk = phone[0] if phone else ""
+        if key == "arrival_time":
+            arrival = _ARRIVAL.match(_fold(chunk))
+            spans.append((marker.start(), value_start + (arrival.end() if arrival else 0)))
+            if arrival:
+                try:
+                    clock = _clock(arrival["hour"], arrival["period"])
+                    extra.update(arrival_time=clock.isoformat(timespec="minutes"), use_arrival=True)
+                    continue
+                except ValueError:
+                    pass
+            warnings.append("Έλεγξε την ώρα προσέλευσης στη φόρμα.")
+            continue
         value = chunk.strip(" \t,.:;*")
         spans.append((marker.start(), value_start + len(chunk)))
         if not value:
@@ -76,7 +92,7 @@ def _extract_fields(text):
             roles[key] = re.sub(r"^(?:ο|η|τον|την)\s+", "", value, flags=re.IGNORECASE)
         else:
             extra[key] = value
-    return extra, roles, details, _mask(text, spans)
+    return extra, roles, details, _mask(text, spans), warnings
 
 
 def _date_value(text, today):
@@ -180,8 +196,7 @@ def _name_matches(text, names):
 def parse(text, projects, employees, today):
     """Return prefill values and any ambiguities for the user to review."""
     text = unicodedata.normalize("NFC", text.strip())
-    draft, roles, details, main = _extract_fields(text)
-    warnings = []
+    draft, roles, details, main, warnings = _extract_fields(text)
     if not draft.get("custom_project"):
         project_ids, ambiguous, spans = _name_matches(main, _names(projects))
         main = _mask(main, spans)
