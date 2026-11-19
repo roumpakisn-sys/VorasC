@@ -233,11 +233,13 @@ if is_full_admin and not presentation_mode:
 focused_bar_key = search_bar_key if not is_full_admin or st.session_state.clicked_key == search_bar_key else None
 if transfer_mode:
     focused_bar_key = st.session_state.get(gantt_staff_transfer.TARGET) or st.session_state.get(gantt_staff_transfer.SOURCE)
+    st.session_state.setdefault("gantt_staff_drag_token", uuid.uuid4().hex)
 
 html_chart = gantt_html.build_html_gantt(
     wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
     focused_key=focused_bar_key,
     scroll_to_focus=opening_search_result,
+    staff_drag_token=st.session_state.get("gantt_staff_drag_token") if transfer_mode else None,
 )
 clicked_safe_id = click_detector(
     html_chart,
@@ -296,9 +298,21 @@ st.download_button(
 if st.session_state.get("suppress_next_detector_click", False):
     st.session_state.suppress_next_detector_click = False
 elif clicked_safe_id:
-    real_clicked_key = safe_mapping.get(clicked_safe_id, None)
-
-    if clicked_safe_id != st.session_state.last_clicked_safe_id:
+    if transfer_mode and clicked_safe_id.startswith(gantt_staff_transfer.DROP_PREFIX):
+        try:
+            moved = gantt_staff_transfer.apply_drop(
+                clicked_safe_id, st.session_state, safe_mapping, wk_groups,
+                st.session_state.assignments, utils.save_assignment_batch,
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            if moved:
+                clear_bar_selection()
+                st.toast("Ο εργαζόμενος μεταφέρθηκε.")
+                st.rerun()
+    elif clicked_safe_id != st.session_state.last_clicked_safe_id:
+        real_clicked_key = safe_mapping.get(clicked_safe_id, None)
         st.session_state.last_clicked_safe_id = clicked_safe_id
 
         if real_clicked_key:

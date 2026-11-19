@@ -1,12 +1,23 @@
 from copy import deepcopy
 from datetime import date
+import base64
+import html
+from html.parser import HTMLParser
+import json
 from pathlib import Path
+import re
+import shutil
+import subprocess
+from types import SimpleNamespace
 import unittest
+from urllib.parse import quote
 
 import gantt_staff_transfer as transfer
 from assignment_store import AssignmentSaveError, save_changes
 from test_assignment_store import Client
 from test_assignment_policy import row
+from test_placement_details import chart
+from test_regression_smoke import get_source_functions
 
 try:
     from streamlit.testing.v1 import AppTest
@@ -30,6 +41,25 @@ TARGET = {"AssignmentIds": ["target"], "EmployeeIds": [""]}
 
 
 class TransferTests(unittest.TestCase):
+    def test_drop_is_saved_once_and_invalid_destinations_are_rejected(self):
+        state = {"gantt_staff_drag_token": "token"}
+        groups, mapping = {"s": SOURCE, "t": TARGET}, {"bar-source": "s", "bar-target": "t"}
+        payload = dict(token="token", source="bar-source", target="bar-target", employee="e", nonce="one")
+        event = transfer.DROP_PREFIX + quote(json.dumps(payload))
+        calls = []
+        def save(before, after):
+            calls.append((before, after))
+            return after
+        self.assertTrue(transfer.apply_drop(event, state, mapping, groups, records(), save))
+        self.assertFalse(transfer.apply_drop(event, state, mapping, groups, records(), save))
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(state["gantt_transfer_reset"])
+        for changed in (dict(token="old"), dict(target="unknown"), dict(employee="missing")):
+            event = transfer.DROP_PREFIX + quote(json.dumps({**payload, **changed}))
+            with self.assertRaises(ValueError):
+                transfer.apply_drop(event, state, mapping, groups, records(), save)
+        self.assertEqual(len(calls), 1)
+
     def test_partial_transfer_adopts_destination_without_mutating_inputs(self):
         original = records()
         before, after = transfer.plan_transfer(original, SOURCE, TARGET, ["e"])
@@ -82,6 +112,82 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(state[transfer.SOURCE], "source")
         self.assertEqual(state[transfer.TARGET], "target")
         self.assertIsNone(state["clicked_key"])
+
+
+class DragMarkupTests(unittest.TestCase):
+    def test_drag_handles_and_client_event_keep_worker_and_bar_identity(self):
+        from datetime import datetime, timedelta
+        _, groups, _ = chart([row(), {**row(), "id": "other", "employeeId": "", "startTime": "14:00"}])
+        env = get_source_functions(ROOT / "gantt_html.py", ("build_html_gantt", "get_local_today"), {
+            "datetime": datetime, "timedelta": timedelta, "html_utils": html, "base64": base64,
+            "st": SimpleNamespace(session_state=SimpleNamespace(employees=[], leaves=[], assignments_by_date={})),
+            "utils": SimpleNamespace(supabase=None, get_employee_name=lambda eid: "Άννα"),
+            "config": SimpleNamespace(BLUE_STACK_HEX="#0000ff"), "fetch_rules": lambda _: ([], None),
+        })
+        mapping = {key: f"bar-{index}" for index, key in enumerate(groups)}
+        build = env["build_html_gantt"]
+        ordinary = build(groups, date(2026, 11, 16), 1, mapping, 500)
+        self.assertNotIn("draggable='true'", ordinary)
+        output = build(groups, date(2026, 11, 16), 1, mapping, 500, staff_drag_token="token")
+
+        class Collector(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.tags = []
+            def handle_starttag(self, tag, attrs):
+                self.tags.append((tag, dict(attrs)))
+        parsed = Collector()
+        parsed.feed(output)
+        handle, = [attrs for _, attrs in parsed.tags if attrs.get("class") == "gantt-transfer-worker"]
+        self.assertEqual(handle["data-employee"], "e")
+        self.assertEqual(handle["draggable"], "true")
+        self.assertEqual(sum("data-staff-drop-target" in attrs for _, attrs in parsed.tags), 2)
+
+        node = shutil.which("node")
+        if not node:
+            return
+        script = base64.b64decode(re.search(r'atob\("([^"]+)"\)', output)[1]).decode()
+        harness = r'''
+const assert = require('assert');
+const handlers = {};
+const source = {id:'bar-0'};
+const target = {id:'bar-1', classList:{add(){},remove(){}}};
+const chip = {dataset:{employee:'e'},closest(){return source;}};
+let reported;
+const link = {click(){reported = this.id;}};
+const surface = {
+  dataset:{staffDragToken:'token'},style:{},offsetLeft:0,scrollWidth:600,scrollLeft:0,scrollTop:0,
+  querySelector(){return null;},getBoundingClientRect(){return {left:0,right:600,top:0,bottom:500};},
+  addEventListener(type,fn){handlers[type] = fn;},removeEventListener(){}
+};
+global.sessionStorage = {getItem(){return null;},setItem(){}};
+global.window = {addEventListener(){},removeEventListener(){}};
+global.document = {
+  body:{style:{}},getElementById(){return surface;},querySelector(){return link;},
+  addEventListener(){},removeEventListener(){}
+};
+global.setTimeout = fn => {fn();};
+'''
+        checks = r'''
+let prevented = false;
+const e = {
+  target:{closest(selector){return selector === '.gantt-transfer-worker' ? chip : null;}},
+  dataTransfer:{setData(){}},preventDefault(){prevented=true;},stopPropagation(){}
+};
+handlers.mousedown({...e,button:0,pageX:0});
+handlers.dragstart(e);
+assert.strictEqual(prevented,false);
+assert.strictEqual(e.dataTransfer.effectAllowed,'move');
+const dest = {...e,target:{closest(){return target;}},clientX:300,clientY:250};
+handlers.dragover(dest);
+handlers.drop(dest);
+assert.ok(reported.startsWith('gantt_staff_drop:'));
+const payload = JSON.parse(decodeURIComponent(reported.split(':').slice(1).join(':')));
+assert.deepStrictEqual([payload.source,payload.target,payload.employee,payload.token],['bar-0','bar-1','e','token']);
+assert.ok(payload.nonce);
+'''
+        run = subprocess.run([node, "-"], input=harness + script + checks, text=True, capture_output=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
 
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")

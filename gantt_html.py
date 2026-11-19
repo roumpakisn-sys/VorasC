@@ -18,7 +18,7 @@ def get_local_today():
 
 
 def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
-                     *, focused_key=None, scroll_to_focus=False):
+                     *, focused_key=None, scroll_to_focus=False, staff_drag_token=None):
     timeline_width_px = int(2400 * zoom_factor)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
@@ -60,10 +60,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
     html += (
         "<div id='gantt-master-container' "
+        f"data-staff-drag-token='{html_utils.escape(staff_drag_token or '', quote=True)}' "
         f"style='overflow: auto; height: {gantt_height_px}px; min-height: 360px; width: 100%; max-width: 100%; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
         "background: #ffffff; user-select: none; cursor: grab; "
         "box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
+
+    if staff_drag_token:
+        html += (
+            "<style>.gantt-transfer-worker { pointer-events:auto; cursor:grab; display:inline-block; "
+            "border-bottom:1px dashed white; padding:1px 2px; } "
+            ".gantt-transfer-worker:hover { background:rgba(15,23,42,.5); } "
+            ".mygantt-bar.gantt-drop-hover { outline:4px solid #2563eb !important; } </style>"
+        )
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; } .gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn { position:absolute; top:2px; width:18px; height:18px; border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.78); color:#ffffff; font-size:11px; line-height:16px; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.35); } .gantt-copy-project-btn { right:2px; } .gantt-copy-full-btn { right:24px; } .gantt-copy-crew-btn { right:46px; } .gantt-copy-project-btn:hover, .gantt-copy-full-btn:hover, .gantt-copy-crew-btn:hover { background:rgba(220,38,38,0.92); transform:scale(1.08); }</style>"
 
@@ -370,6 +379,22 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             grouped_employee_labels = _group_employee_labels(g["Employees"])
             emps_plain = ", ".join(grouped_employee_labels).upper()
             emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
+            if staff_drag_token and not g.get("is_cancelled"):
+                handles = []
+                seen = set()
+                employee_ids = [eid for eid in g.get("EmployeeIds", []) if eid]
+                for eid, employee_label in zip(employee_ids, g["Employees"]):
+                    if eid in seen:
+                        continue
+                    seen.add(eid)
+                    handles.append(
+                        "<span class='gantt-transfer-worker' draggable='true' "
+                        f"data-employee='{html_utils.escape(str(eid), quote=True)}' "
+                        "title='Σύρε το όνομα στη μπάρα προορισμού'>"
+                        + _employee_text_html(employee_label) + "</span>"
+                    )
+                if handles:
+                    emps_html = ", ".join(handles)
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
@@ -449,9 +474,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             is_focused = g["Key"] == focused_key
             focus_attr = " data-gantt-search-target='true'" if is_focused and scroll_to_focus else ""
             focus_style = "outline: 3px solid #2563eb; outline-offset: 2px; z-index: 25;" if is_focused else ""
+            drop_attr = " data-staff-drop-target='true'" if staff_drag_token and not g.get("is_cancelled") else ""
 
             html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr} "
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
                 f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
@@ -467,6 +493,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         html += "</div></div>"
 
     html += "</div>"
+
+    if staff_drag_token:
+        html += "<a href='javascript:void(0);' id='gantt-staff-drop-event' data-staff-drop-event style='display:none'></a>"
 
     # --- JS Injector (Base64) ---
     # FIX: σε κάθε rerun κάνουμε cleanup παλιών listeners και ξαναδένουμε στο νέο gantt element.
@@ -506,6 +535,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var moved = false;
       var DRAG_THRESHOLD = 5;
       window.gIsDragging = false;
+      var staffDrag = null;
+      var hoverBar = null;
+      var blockBarClickUntil = 0;
 
       function onScroll() {
         clearTimeout(onScroll._t);
@@ -546,6 +578,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
       function onMouseDown(e) {
         if (isCopyProjectButtonTarget(e)) return;
+        if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
       }
@@ -595,7 +628,68 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onDragStart(e) {
+        var handle = e.target.closest('.gantt-transfer-worker');
+        if (!handle || !s.dataset.staffDragToken) {
+          e.preventDefault();
+          return;
+        }
+        staffDrag = { source: handle.closest('a.mygantt-bar').id, employee: handle.dataset.employee };
+        isDown = false;
+        moved = false;
+        window.gIsDragging = false;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify(staffDrag));
+        e.stopPropagation();
+      }
+
+      function clearStaffHover() {
+        if (hoverBar) hoverBar.classList.remove('gantt-drop-hover');
+        hoverBar = null;
+      }
+
+      function dropTarget(e) {
+        var bar = e.target.closest('a[data-staff-drop-target]');
+        return bar && staffDrag && bar.id !== staffDrag.source ? bar : null;
+      }
+
+      function onStaffDragOver(e) {
+        if (!staffDrag) return;
+        var bar = dropTarget(e);
+        clearStaffHover();
+        if (bar) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          bar.classList.add('gantt-drop-hover');
+          hoverBar = bar;
+        }
+        var rect = s.getBoundingClientRect();
+        if (e.clientX < rect.left + 35) s.scrollLeft -= 18;
+        if (e.clientX > rect.right - 35) s.scrollLeft += 18;
+        if (e.clientY < rect.top + 35) s.scrollTop -= 18;
+        if (e.clientY > rect.bottom - 35) s.scrollTop += 18;
+      }
+
+      function onStaffDrop(e) {
+        var bar = dropTarget(e);
+        if (!bar) return;
         e.preventDefault();
+        e.stopPropagation();
+        var eventLink = document.querySelector('[data-staff-drop-event]');
+        if (eventLink) {
+          eventLink.id = 'gantt_staff_drop:' + encodeURIComponent(JSON.stringify({
+            token: s.dataset.staffDragToken, source: staffDrag.source,
+            target: bar.id, employee: staffDrag.employee,
+            nonce: Date.now().toString(36) + Math.random().toString(36).slice(2)
+          }));
+          eventLink.click();
+        }
+        onStaffDragEnd();
+      }
+
+      function onStaffDragEnd() {
+        staffDrag = null;
+        clearStaffHover();
+        blockBarClickUntil = Date.now() + 250;
       }
 
       function copyTextToClipboard(text) {
@@ -698,7 +792,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         }
 
         var link = e.target.closest('a.mygantt-bar');
-        if (link && (window.gIsDragging || moved)) {
+        if (link && (window.gIsDragging || moved || Date.now() < blockBarClickUntil)) {
           e.preventDefault();
           e.stopPropagation();
         }
@@ -719,6 +813,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       s.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
 
       s.addEventListener('dragstart', onDragStart);
+      s.addEventListener('dragover', onStaffDragOver);
+      s.addEventListener('drop', onStaffDrop);
+      s.addEventListener('dragend', onStaffDragEnd);
       document.addEventListener('click', onClickCapture, true);
 
       window.ganttDragCleanup = function () {
@@ -737,6 +834,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         s.removeEventListener('touchend', onTouchEnd, { capture: true });
 
         s.removeEventListener('dragstart', onDragStart);
+        s.removeEventListener('dragover', onStaffDragOver);
+        s.removeEventListener('drop', onStaffDrop);
+        s.removeEventListener('dragend', onStaffDragEnd);
         document.removeEventListener('click', onClickCapture, true);
       };
     })();
