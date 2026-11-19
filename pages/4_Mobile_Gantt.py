@@ -11,6 +11,7 @@ import config
 import utils
 import gantt_engine
 import gantt_html
+import gantt_live_sync
 import gantt_filters
 import gantt_search
 import placement_roles
@@ -95,6 +96,7 @@ components.html(
 )
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
+gantt_live_sync.render_update_check(utils.supabase, live_view=not is_full_admin)
 active_employee_ids = [
     e["id"]
     for e in st.session_state.get("employees", [])
@@ -554,42 +556,13 @@ filtered_assignments_by_date = gantt_search.reveal_search_project(
     filtered_assignments_by_date, st.session_state.assignments_by_date, search_target
 )
 
-recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_recurring_project_ids)
-
-
 # --- GANTT DATA ---
-@st.cache_data(show_spinner=False, max_entries=5)
-def get_mobile_cached_data(
+# The assignments are session data; different users can have the same local revision number.
+_, wk_groups, export_data = gantt_engine.generate_gantt_chart(
     start_of_week,
     zoom_factor,
-    data_version,
-    _assignments_by_date,
-    _leaves,
-    _employees,
-    _projects,
-    _emp_map,
-    _proj_map,
-):
-    _, wk_groups, export_data = gantt_engine.generate_gantt_chart(
-        start_of_week,
-        zoom_factor,
-        False,
-        data_version,
-        _assignments_by_date,
-        _leaves,
-        _employees,
-        _projects,
-        _emp_map,
-        _proj_map,
-    )
-    return wk_groups, export_data
-
-
-wk_groups, export_data = get_mobile_cached_data(
-    start_of_week,
-    zoom_factor,
-    (st.session_state.get('local_gantt_version', 0), start_of_week, zoom_factor, app_scale,
-     recurring_filter_version, search_target),
+    False,
+    st.session_state.get("local_gantt_version", 0),
     filtered_assignments_by_date,
     st.session_state.leaves,
     st.session_state.employees,

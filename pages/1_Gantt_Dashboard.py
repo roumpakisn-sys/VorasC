@@ -33,6 +33,7 @@ import config
 import utils
 import gantt_engine
 import gantt_html
+import gantt_live_sync
 import gantt_controls
 import gantt_export
 import gantt_excel_export
@@ -133,6 +134,7 @@ def preserve_context_notes(original_notes, edited_notes):
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
+gantt_live_sync.render_update_check(utils.supabase, live_view=presentation_mode or not is_full_admin)
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
