@@ -45,7 +45,7 @@ class InlineFormTests(unittest.TestCase):
 
         app.text_area(key="qa_text_1").set_value(
             "Εργαζόμενος Α στο Δοκιμαστικό έργο 20/11/2026, 07:10-11:00. "
-            "Διεύθυνση: Τσιμισκή 12. Επόπτρια Ελένη."
+            "Διεύθυνση: Τσιμισκή 12. Επόπτρια Ελένη. Μεταφορά Κώστας. Ώρα προσέλευσης: 06:50."
         )
         self.button(app, "Συμπλήρωση πεδίων").click().run()
         self.assertFalse(app.exception)
@@ -55,12 +55,16 @@ class InlineFormTests(unittest.TestCase):
         self.assertEqual(app.time_input(key="qa_start_2").value, time(7, 10))
         self.assertEqual(app.text_input(key="qa_details_2_address").value, "Τσιμισκή 12")
         self.assertEqual(app.text_input(key="qa_roles_2_supervisor").value, "Ελένη")
+        self.assertEqual(app.text_input(key="qa_roles_2_transfer_driver").value, "Κώστας")
+        self.assertTrue(app.checkbox(key="chk_arr_2").value)
+        self.assertEqual(app.time_input(key="qa_arrival_2").value, time(6, 50))
         app.time_input(key="qa_end_2").set_value(time(12))
         self.button(app, "✅ Καταχώρηση").click().run()
         self.assertFalse(app.exception)
         call, = app.session_state.save_calls
         saved, = call["new"]
         self.assertEqual(saved["employeeId"], "e1")
+        self.assertEqual(saved["arrivalTime"], "06:50")
         self.assertEqual(saved["endTime"], "12:00")
 
     def test_inline_save_keeps_both_workers_and_optional_contacts(self):
