@@ -106,7 +106,7 @@ def render_mode(clear_selection):
         "Μεταφορά προσωπικού μεταξύ μπαρών", key="gantt_staff_transfer_mode", on_change=reset,
     )
     if enabled:
-        st.caption("Σύρε το όνομα εργαζομένου στη μπάρα προορισμού για άμεση μεταφορά. "
+        st.caption("**Σύρε ένα όνομα** στη μπάρα προορισμού. "
                    "Για πολλά άτομα, πάτησε τις δύο μπάρες και επίλεξε προσωπικό παρακάτω.")
     return enabled
 
