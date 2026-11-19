@@ -24,6 +24,7 @@ import placement_details
 import placement_hours
 import placement_text
 import periodic_visits
+import gantt_staff_transfer
 from gantt_helpers import normalize_id_list, clean_conflict_leave_notes, get_local_today
 
 st.set_page_config(layout="wide")
@@ -116,6 +117,17 @@ if clicked and clicked != st.session_state.get("fixture_last"):
     st.session_state[select_key] = mapping[clicked]
     st.rerun()
 st.caption("Οι πραγματικές φόρμες ακολουθούν. Καμία σύνδεση σε βάση δεδομένων.")
+
+if st.session_state.get("fixture_transfer"):
+    transfer_mode = gantt_staff_transfer.render_mode(clear_bar_selection)
+    if transfer_mode:
+        transfer_panel = next(n for n in tree.body if isinstance(n, ast.If)
+                              and isinstance(n.test, ast.Name) and n.test.id == "transfer_mode"
+                              and any(isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+                                      and ast.unparse(stmt.value.func) == "gantt_staff_transfer.render_transfer"
+                                      for stmt in n.body))
+        exec(compile(ast.Module(body=[transfer_panel], type_ignores=[]), str(path), "exec"), globals())
+    st.stop()
 
 if view == "desktop":
     col_add, col_edit = st.columns(2)
