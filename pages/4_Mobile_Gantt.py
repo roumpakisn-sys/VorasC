@@ -5,15 +5,9 @@ import uuid
 import hashlib
 import re
 
-from st_click_detector import click_detector
-
 import config
 import utils
-import gantt_engine
-import gantt_html
-import gantt_live_sync
 import gantt_live_view
-import gantt_filters
 import gantt_search
 import placement_roles
 import placement_details
@@ -97,8 +91,6 @@ components.html(
 )
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
-if is_full_admin:
-    gantt_live_sync.render_update_check(utils.supabase)
 active_employee_ids = [
     e["id"]
     for e in st.session_state.get("employees", [])
@@ -549,85 +541,48 @@ visible_recurring_project_ids = _get_mobile_visible_recurring_project_ids(
     recurring_patterns=st.session_state.recurring_patterns,
 )
 
+detector_key = (
+    f"mobile_gantt_detector_{st.session_state.mobile_detector_version}"
+    f"_{gantt_height_px}_{zoom_factor}_{app_scale}"
+)
 if not is_full_admin:
     gantt_live_view.render(
         start_of_week, zoom_factor, gantt_height_px,
         visible_recurring_project_ids, search_prefix="mobile",
-        detector_key=(
-            f"mobile_gantt_detector_{st.session_state.mobile_detector_version}"
-            f"_{gantt_height_px}_{zoom_factor}_{app_scale}"
-        ),
+        detector_key=detector_key,
     )
     st.info("Ο συγκεκριμένος χρήστης έχει μόνο προβολή.")
     st.stop()
 
-filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
-    assignments_by_date=st.session_state.assignments_by_date,
-    visible_project_ids=visible_recurring_project_ids,
-)
 search_target = st.session_state.get("mobile_search_target")
-filtered_assignments_by_date = gantt_search.reveal_search_project(
-    filtered_assignments_by_date, st.session_state.assignments_by_date, search_target
-)
-
-# --- GANTT DATA ---
-# The assignments are session data; different users can have the same local revision number.
-_, wk_groups, export_data = gantt_engine.generate_gantt_chart(
-    start_of_week,
-    zoom_factor,
-    False,
-    st.session_state.get("local_gantt_version", 0),
-    filtered_assignments_by_date,
-    st.session_state.leaves,
-    st.session_state.employees,
-    st.session_state.projects,
-    st.session_state.emp_map,
-    st.session_state.proj_map,
-)
+week = gantt_live_view.week_data(start_of_week, zoom_factor, visible_recurring_project_ids, search_target)
+_, wk_groups, _ = week
 
 search_bar_key = gantt_search.find_search_bar(wk_groups, search_target)
 opening_search_result = st.session_state.pop("mobile_search_pending", False)
-if opening_search_result:
-    if not search_bar_key:
-        st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
-    elif is_full_admin:
-        st.session_state.mobile_reset_edit_select_next_run = False
-        st.session_state.mobile_clicked_key = search_bar_key
-        st.session_state.mobile_edit_select_widget = search_bar_key
-
-safe_mapping = {}
-key_to_safe_id = {}
-
-for real_key in wk_groups.keys():
-    safe_id = "mobile_bar_" + hashlib.md5(real_key.encode("utf-8")).hexdigest()
-    safe_mapping[safe_id] = real_key
-    key_to_safe_id[real_key] = safe_id
+if opening_search_result and search_bar_key:
+    st.session_state.mobile_reset_edit_select_next_run = False
+    st.session_state.mobile_clicked_key = search_bar_key
+    st.session_state.mobile_edit_select_widget = search_bar_key
 
 
-# --- RENDER GANTT ---
-html_chart = gantt_html.build_html_gantt(
-    wk_groups,
-    start_of_week,
-    zoom_factor,
-    key_to_safe_id,
-    gantt_height_px,
-    focused_key=search_bar_key if not is_full_admin or st.session_state.mobile_clicked_key == search_bar_key else None,
-    scroll_to_focus=opening_search_result,
+def handle_chart_click(clicked_safe_id, safe_mapping):
+    if clicked_safe_id:
+        real_clicked_key = safe_mapping.get(clicked_safe_id)
+        if real_clicked_key and clicked_safe_id != st.session_state.mobile_last_clicked_safe_id:
+            st.session_state.mobile_last_clicked_safe_id = clicked_safe_id
+            st.session_state.mobile_clicked_key = real_clicked_key
+            st.session_state.mobile_edit_select_widget = real_clicked_key
+            st.session_state.skip_remote_sync_once = True
+            st.rerun()
+
+
+gantt_live_view.render(
+    start_of_week, zoom_factor, gantt_height_px,
+    visible_recurring_project_ids, search_prefix="mobile", detector_key=detector_key,
+    initial_week=week, opening_search=opening_search_result, on_click=handle_chart_click,
+    can_refresh=lambda: not st.session_state.get("mobile_clicked_key"),
 )
-
-clicked_safe_id = click_detector(
-    html_chart,
-    key=f"mobile_gantt_detector_{st.session_state.mobile_detector_version}_{gantt_height_px}_{zoom_factor}_{app_scale}",
-)
-
-if clicked_safe_id:
-    real_clicked_key = safe_mapping.get(clicked_safe_id)
-    if real_clicked_key and clicked_safe_id != st.session_state.mobile_last_clicked_safe_id:
-        st.session_state.mobile_last_clicked_safe_id = clicked_safe_id
-        st.session_state.mobile_clicked_key = real_clicked_key
-        st.session_state.mobile_edit_select_widget = real_clicked_key
-        st.session_state.skip_remote_sync_once = True
-        st.rerun()
 
 if st.session_state.get("mobile_clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
