@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.52
 pandas
 plotly
 supabase>=2.15,<3

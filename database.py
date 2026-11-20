@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import streamlit as st
 from datetime import datetime, date
 import uuid
@@ -7,6 +9,7 @@ import utils
 
 # Αναφορά στον έτοιμο Supabase Client από το utils
 supabase = utils.supabase
+_sync_reads = ThreadPoolExecutor(max_workers=6, thread_name_prefix="schedule-sync")
 
 def inject_silent_refresh_css():
     """
@@ -164,45 +167,38 @@ def sync_data_incremental(*, silent=False):
                 deleted_by_table[t] = []
             deleted_by_table[t].append(str(d['record_id']))
 
-        # 2. Συγχρονίζουμε Incremental μόνο τους πίνακες που παρουσίασαν αλλαγές
-        tables_to_sync = ["employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations"]
-        changes_detected = False
+        # Read independent tables concurrently. Only the script thread updates the session.
+        tables_to_sync = ("employees", "projects", "assignments", "leaves", "recurring_patterns", "evaluations")
 
-        for table in tables_to_sync:
-            delta_res = supabase.table(table).select("*").gte("updated_at", last_sync).execute()
-            delta_records = delta_res.data or []
-            
+        def fetch_delta(table):
+            return supabase.table(table).select("*").gte("updated_at", last_sync).execute().data or []
+
+        pending = {}
+        for table, delta_records in zip(tables_to_sync, _sync_reads.map(fetch_delta, tables_to_sync)):
             table_deleted_ids = deleted_by_table.get(table, [])
-            
-            if delta_records or table_deleted_ids:
-                changes_detected = True
-                
-                # ΔΙΟΡΘΩΣΗ: Ασφαλής μετάφραση και στο Incremental Update
-                if table == "assignments":
-                    for r in delta_records:
-                        d = utils.safe_date_parse(r.get('date'))
-                        if d: r['date'] = d
-                elif table == "leaves":
-                    for r in delta_records:
-                        sd = utils.safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
-                        ed = utils.safe_date_parse(r.get('endDate'))
-                        if ed: r['endDate'] = ed
-                elif table == "recurring_patterns":
-                    for r in delta_records:
-                        sd = utils.safe_date_parse(r.get('startDate'))
-                        if sd: r['startDate'] = sd
+            if not delta_records and not table_deleted_ids:
+                continue
 
-                st.session_state[table] = apply_delta_updates(
-                    table, 
-                    st.session_state.get(table, []), 
-                    delta_records, 
-                    table_deleted_ids
-                )
+            date_fields = {
+                "assignments": ("date",),
+                "leaves": ("startDate", "endDate"),
+                "recurring_patterns": ("startDate",),
+            }.get(table, ())
+            for row in delta_records:
+                for field in date_fields:
+                    parsed = utils.safe_date_parse(row.get(field))
+                    if parsed:
+                        row[field] = parsed
 
-        if changes_detected:
+            pending[table] = apply_delta_updates(
+                table, st.session_state.get(table, []), delta_records, table_deleted_ids,
+            )
+
+        for table, rows in pending.items():
+            st.session_state[table] = rows
+        if pending:
             utils.mark_data_changed()
-            
+
         st.session_state.last_sync_time = current_db_time
 
     except Exception as e:

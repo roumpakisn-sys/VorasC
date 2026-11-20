@@ -1,6 +1,5 @@
 """Live desktop and mobile Gantt charts and their exports."""
 
-from functools import lru_cache
 import hashlib
 
 import streamlit as st
@@ -71,15 +70,10 @@ def render(start_of_week, zoom_factor, height, visible_project_ids, *,
         )
         click_map = {value: key for key, value in ids.items()}
 
-        @lru_cache(maxsize=1)
-        def visual_excel():
-            return gantt_excel_export.create_visual_gantt_excel(
-                groups, start_of_week, assignments_by_date=state.assignments_by_date,
-            )
-
-        @lru_cache(maxsize=1)
-        def weekly_excel():
-            return gantt_export.create_gantt_excel(export_data)
+        visual_download = (
+            gantt_excel_export.prepare_visual_gantt_download(groups, start_of_week)
+            if desktop and groups else None
+        )
 
         def draw_snapshot():
             if missing_result:
@@ -92,9 +86,9 @@ def render(start_of_week, zoom_factor, height, visible_project_ids, *,
                 gantt_excel_export.render_employee_day_excel_export(get_local_today())
                 gantt_excel_export.render_visual_gantt_month_export(assignments, start_of_week)
                 gantt_excel_export.render_visual_gantt_excel_export(
-                    groups, start_of_week, get_data=visual_excel,
+                    groups, start_of_week, get_download=visual_download,
                 )
-                gantt_export.render_gantt_export(export_data, start_of_week, get_data=weekly_excel)
+                gantt_export.render_gantt_export(export_data, start_of_week)
 
         return draw_snapshot
 
