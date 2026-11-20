@@ -87,8 +87,8 @@ class ContactFormTests(unittest.TestCase):
     def button(self, app, label):
         return next(b for b in app.button if b.label == label)
 
-    def text(self, app, field):
-        return next(t for t in app.text_input if t.label == roles.LABELS[field])
+    def dropdown(self, app, field):
+        return next(item for item in app.selectbox if item.label == roles.LABELS[field])
 
     def select(self, app, view="desktop", index=1):
         key = "edit_bar_select_widget" if view == "desktop" else "mobile_edit_select_widget"
@@ -98,7 +98,7 @@ class ContactFormTests(unittest.TestCase):
 
     def fill(self, app, contacts=CONTACTS):
         for key, value in contacts.items():
-            self.text(app, key).set_value(value)
+            self.dropdown(app, key).set_value(value)
 
     def test_save_reload_and_clear_contacts_for_two_workers(self):
         for view in ("desktop", "mobile"):
@@ -116,14 +116,14 @@ class ContactFormTests(unittest.TestCase):
                 app = self.app(view, records=app.session_state.assignments)
                 self.select(app, view)
                 for key, value in CONTACTS.items():
-                    self.assertEqual(self.text(app, key).value, value)
+                    self.assertEqual(self.dropdown(app, key).value, value)
                 self.fill(app, roles.normalize())
                 self.button(app, "💾 Αποθήκευση").click().run()
                 self.assertFalse(app.exception)
                 app = self.app(view, records=app.session_state.assignments)
                 self.select(app, view)
                 for key in CONTACTS:
-                    self.assertEqual(self.text(app, key).value, "")
+                    self.assertEqual(self.dropdown(app, key).value, "")
                 self.assertEqual(len(app.session_state.assignments), 4)
 
     def test_failed_save_retains_contact_draft(self):
@@ -136,7 +136,7 @@ class ContactFormTests(unittest.TestCase):
                 self.button(app, "💾 Αποθήκευση").click().run()
                 self.assertFalse(app.exception)
                 for key, value in CONTACTS.items():
-                    self.assertEqual(self.text(app, key).value, value)
+                    self.assertEqual(self.dropdown(app, key).value, value)
                 self.assertTrue(all(not any(roles.split_notes(r.get("notes"))[1].values())
                                     for r in app.session_state.assignments))
 
@@ -150,7 +150,7 @@ class ContactFormTests(unittest.TestCase):
                 app = self.app(view, records=app.session_state.assignments)
                 self.select(app, view, index=2)
                 for key in CONTACTS:
-                    self.assertEqual(self.text(app, key).value, "")
+                    self.assertEqual(self.dropdown(app, key).value, "")
 
     def test_new_multiday_assignments_with_optional_contacts(self):
         for view in ("desktop", "mobile"):
@@ -169,7 +169,27 @@ class ContactFormTests(unittest.TestCase):
                     for record in records:
                         self.assertEqual(roles.split_notes(record["notes"])[1], roles.normalize(contacts))
                     for key in CONTACTS:
-                        self.assertEqual(self.text(app, key).value, "")
+                        self.assertEqual(self.dropdown(app, key).value, "")
+
+    def test_dropdowns_filter_by_position_and_keep_a_saved_legacy_contact(self):
+        for view in ("desktop", "mobile"):
+            with self.subTest(view=view):
+                app = self.app(view, add=True)
+                driver_options = ["— Χωρίς επιλογή —", "Γιάννης", "Νίκος"]
+                self.assertEqual(self.dropdown(app, "transfer_driver").options, driver_options)
+                self.assertEqual(self.dropdown(app, "return_driver").options, driver_options)
+                self.assertEqual(self.dropdown(app, "supervisor").options,
+                                 ["— Χωρίς επιλογή —", "Άλλος επόπτης", "Ελένη"])
+
+                records = deepcopy(app.session_state.assignments)
+                for record in records[:2]:
+                    record["notes"] = roles.combine_notes(record["notes"], {"transfer_driver": "Πρώην οδηγός"})
+                app = self.app(view, records=records)
+                self.select(app, view)
+                dropdown = self.dropdown(app, "transfer_driver")
+                self.assertEqual(dropdown.value, "Πρώην οδηγός")
+                self.assertEqual(dropdown.options, [*driver_options, "Πρώην οδηγός"])
+                self.assertEqual(self.dropdown(app, "return_driver").options, driver_options)
 
     def test_contacts_copy_between_edit_and_new_forms(self):
         app = self.app()
@@ -182,14 +202,14 @@ class ContactFormTests(unittest.TestCase):
         self.button(app, "📥 Επικόλληση όλων των στοιχείων").click().run()
         self.assertFalse(app.exception)
         for key, value in CONTACTS.items():
-            self.assertEqual(self.text(app, key).value, value)
-        self.text(app, "supervisor").set_value("Άλλος επόπτης")
+            self.assertEqual(self.dropdown(app, key).value, value)
+        self.dropdown(app, "supervisor").set_value("Άλλος επόπτης")
         self.button(app, "📋 Αντιγραφή στοιχείων").click().run()
         app = self.app(clipboard=app.session_state.gantt_placement_clipboard)
         self.select(app)
         self.button(app, "📥 Επικόλληση όλων των στοιχείων").click().run()
         self.assertFalse(app.exception)
-        self.assertEqual(self.text(app, "supervisor").value, "Άλλος επόπτης")
+        self.assertEqual(self.dropdown(app, "supervisor").value, "Άλλος επόπτης")
         self.button(app, "💾 Αποθήκευση").click().run()
         self.assertFalse(app.exception)
         self.assertEqual(roles.split_notes(app.session_state.save_calls[-1]["new"][0]["notes"])[1]["supervisor"], "Άλλος επόπτης")
