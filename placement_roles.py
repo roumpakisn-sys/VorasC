@@ -6,12 +6,18 @@ They are edited separately, never as employee assignments. No migration needed.
 import hashlib
 import json
 import re
+import unicodedata
 
 
 LABELS = {
     "transfer_driver": "Οδηγός μεταφοράς",
     "return_driver": "Οδηγός επιστροφής",
     "supervisor": "Επόπτης",
+}
+_POSITIONS = {
+    "transfer_driver": "ΟΔΗΓΟΣ",
+    "return_driver": "ΟΔΗΓΟΣ",
+    "supervisor": "ΕΠΟΠΤΗΣ",
 }
 _KEYS = {label: key for key, label in LABELS.items()}
 _TAG = re.compile(
@@ -58,13 +64,37 @@ def group_suffix(roles):
     return "_roles_" + hashlib.sha256(payload).hexdigest()[:20]
 
 
+def _position(value):
+    text = unicodedata.normalize("NFD", str(value or "").strip().upper())
+    return "".join(char for char in text if not unicodedata.combining(char))
+
+
 def inputs(*, key, defaults=None, stacked=False):
     import streamlit as st
 
     values = normalize(defaults)
+    names_by_position = {position: set() for position in _POSITIONS.values()}
+    for employee in st.session_state.get("employees", []):
+        if not isinstance(employee, dict) or employee.get("status", "Ενεργός") != "Ενεργός":
+            continue
+        position = _position(employee.get("position"))
+        name = str(employee.get("name") or "").strip()
+        if position in names_by_position and name:
+            names_by_position[position].add(name)
+
     st.caption("Μεταφορά και εποπτεία — όλα τα πεδία είναι προαιρετικά.")
     containers = [st] * len(LABELS) if stacked else st.columns(len(LABELS))
-    return {
-        field: container.text_input(label, value=values[field], key=f"{key}_{field}")
-        for container, (field, label) in zip(containers, LABELS.items())
-    }
+    selected = {}
+    for container, (field, label) in zip(containers, LABELS.items()):
+        names = names_by_position[_POSITIONS[field]]
+        current = values[field]
+        options = ["", *sorted(names, key=lambda name: (_position(name), name))]
+        if current and current not in names:
+            # Keep older contact names and values pasted from text or the clipboard.
+            options.append(current)
+        selected[field] = container.selectbox(
+            label, options=options, index=options.index(current),
+            format_func=lambda name: name or "— Χωρίς επιλογή —",
+            key=f"{key}_{field}",
+        )
+    return selected
