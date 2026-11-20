@@ -141,8 +141,8 @@ def render_update_check(client):
     check_for_updates()
 
 
-def render_live_view(client, *, build, refresh):
-    """Refresh the read-only chart fragment without starting an app rerun."""
+def render_live_view(client, *, build, refresh, can_refresh=None):
+    """Refresh the chart fragment without starting an app rerun."""
     import streamlit as st
 
     snapshot = build(first_render=True)
@@ -154,7 +154,11 @@ def render_live_view(client, *, build, refresh):
         nonlocal snapshot, attempted_revision, retry_after
         state = st.session_state
         revision = pending_revision(client, state.get("last_sync_time"))
-        if revision and (revision != attempted_revision or monotonic() >= retry_after):
+        if (
+            revision
+            and (can_refresh is None or can_refresh())
+            and (revision != attempted_revision or monotonic() >= retry_after)
+        ):
             attempted_revision = revision
             retry_after = monotonic() + FALLBACK_SECONDS
             refresh()

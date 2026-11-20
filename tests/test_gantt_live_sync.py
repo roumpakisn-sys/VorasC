@@ -129,7 +129,35 @@ class GanttLiveSyncTests(unittest.TestCase):
         viewer.rerun.assert_not_called()
         self.assertEqual(viewer.button.call_count, 2)
 
-    def test_editor_sees_new_revision_and_refreshes_only_on_request(self):
+    def test_editor_keeps_selected_bar_then_applies_pending_revision_when_idle(self):
+        client = self.client(OLD)
+        editor = self.view(OLD)
+        editor.session_state["selected_bar"] = "bar-a"
+        before, after = Mock(), Mock()
+        build = Mock(side_effect=[before, after])
+        refresh = Mock(side_effect=lambda: editor.session_state.update(last_sync_time=CURRENT))
+
+        with patch.dict(sys.modules, streamlit=editor):
+            gantt_live_sync.render_live_view(
+                client, build=build, refresh=refresh,
+                can_refresh=lambda: not editor.session_state.get("selected_bar"),
+            )
+            self.change()
+            editor.fragments[0]()
+            refresh.assert_not_called()
+            self.assertEqual(editor.button.call_count, 1)
+            self.assertEqual(before.call_count, 2)
+
+            editor.session_state.pop("selected_bar")
+            editor.fragments[0]()
+            editor.fragments[0]()
+
+        refresh.assert_called_once()
+        self.assertEqual(after.call_count, 2)
+        editor.rerun.assert_not_called()
+        self.assertEqual(editor.button.call_count, 1)
+
+    def test_manual_mode_refreshes_only_on_request(self):
         client = self.client(CHANGED)
         editor = self.view(OLD)
         with patch.dict(sys.modules, streamlit=editor):

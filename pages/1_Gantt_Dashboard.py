@@ -31,7 +31,6 @@ if not st.session_state.get("authenticated"):
 
 import config
 import utils
-import gantt_engine
 import gantt_html
 import gantt_live_sync
 import gantt_live_view
@@ -135,8 +134,6 @@ def preserve_context_notes(original_notes, edited_notes):
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
-if is_full_admin and not presentation_mode:
-    gantt_live_sync.render_update_check(utils.supabase)
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
@@ -152,169 +149,102 @@ if presentation_mode or not is_full_admin:
         start_of_week, zoom_factor, gantt_height_px,
         visible_recurring_project_ids, search_prefix="gantt",
         detector_key=f"gantt_detector_{st.session_state.detector_version}_{gantt_height_px}",
-        desktop=True,
+        desktop=True, presentation_mode=presentation_mode,
     )
     if not presentation_mode:
         st.divider()
     st.stop()
 
-filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
-    assignments_by_date=st.session_state.assignments_by_date,
-    visible_project_ids=visible_recurring_project_ids,
-)
 search_target = st.session_state.get("gantt_search_target")
-filtered_assignments_by_date = gantt_search.reveal_search_project(
-    filtered_assignments_by_date, st.session_state.assignments_by_date, search_target
-)
-recurring_filter_version = gantt_filters.get_recurring_filter_version(visible_recurring_project_ids)
-
-
-# --- ΕΞΑΓΩΓΗ ΔΕΔΟΜΕΝΩΝ ΑΠΟ ΤΟ ENGINE ---
-# ΠΡΟΣΟΧΗ:
-# Δεν κάνουμε cache τα δεδομένα του Gantt εδώ.
-# Τα assignments/projects/employees περνάνε ως ορίσματα με "_" για λόγους hashability,
-# άρα το Streamlit δεν τα συμπεριλαμβάνει στο cache key.
-# Αυτό μπορούσε να κάνει διαφορετικούς χρήστες να βλέπουν διαφορετική/παλιά εικόνα.
-def get_cached_data(
-    start_of_week,
-    zoom_factor,
-    presentation_mode,
-    data_version,
-    _assignments_by_date,
-    _leaves,
-    _employees,
-    _projects,
-    _emp_map,
-    _proj_map,
-):
-    _, wk_groups, export_data = gantt_engine.generate_gantt_chart(
-        start_of_week,
-        zoom_factor,
-        presentation_mode,
-        data_version,
-        _assignments_by_date,
-        _leaves,
-        _employees,
-        _projects,
-        _emp_map,
-        _proj_map,
-    )
-    return wk_groups, export_data
-
-
-wk_groups, export_data = get_cached_data(
-    start_of_week,
-    zoom_factor,
-    presentation_mode,
-    f"{st.session_state.get('local_gantt_version', 0)}_{recurring_filter_version}",
-    filtered_assignments_by_date,
-    st.session_state.leaves,
-    st.session_state.employees,
-    st.session_state.projects,
-    st.session_state.emp_map,
-    st.session_state.proj_map,
+filtered_assignments_by_date, wk_groups, export_data = gantt_live_view.week_data(
+    start_of_week, zoom_factor, visible_recurring_project_ids, search_target,
 )
 
 search_bar_key = gantt_search.find_search_bar(wk_groups, search_target)
 opening_search_result = st.session_state.pop("gantt_search_pending", False)
-if opening_search_result:
-    if not search_bar_key:
-        st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
-    elif is_full_admin:
-        st.session_state.reset_edit_bar_select_next_run = False
-        st.session_state.clicked_key = search_bar_key
-        st.session_state.edit_bar_select_widget = search_bar_key
-        st.session_state.trigger_scroll = True
+if opening_search_result and search_bar_key:
+    st.session_state.reset_edit_bar_select_next_run = False
+    st.session_state.clicked_key = search_bar_key
+    st.session_state.edit_bar_select_widget = search_bar_key
+    st.session_state.trigger_scroll = True
 
-# Φτιάχνουμε απόλυτα ΜΟΝΑΔΙΚΑ IDs χρησιμοποιώντας HASH, αποκλείοντας συγκρούσεις!
-safe_mapping = {}
-key_to_safe_id = {}
-for real_key in wk_groups.keys():
-    safe_id = "bar_" + hashlib.md5(real_key.encode("utf-8")).hexdigest()
-    safe_mapping[safe_id] = real_key
-    key_to_safe_id[real_key] = safe_id
+transfer_mode = gantt_staff_transfer.render_mode(clear_bar_selection)
+detector_key = f"gantt_detector_{st.session_state.detector_version}_{gantt_height_px}"
 
 
-# --- NATIVE HTML GANTT CHART BUILDER ---
-# Η υλοποίηση μεταφέρθηκε στο gantt_html.py.
-# Κρατάμε εδώ μόνο την κλήση, ώστε να μη αλλάξει η λειτουργία της σελίδας.
+def handle_chart_click(clicked_safe_id, safe_mapping):
+    if st.session_state.get("suppress_next_detector_click", False):
+        st.session_state.suppress_next_detector_click = False
+    elif clicked_safe_id:
+        if transfer_mode and clicked_safe_id.startswith(gantt_staff_transfer.DROP_PREFIX):
+            try:
+                result = gantt_staff_transfer.apply_drop(
+                    clicked_safe_id, st.session_state, safe_mapping, wk_groups,
+                    st.session_state.assignments, utils.save_assignment_batch,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                if result:
+                    clear_bar_selection()
+                    st.toast({
+                        "assigned": "Ο εργαζόμενος προστέθηκε στη μπάρα.",
+                        "unassigned": "Ο εργαζόμενος αφαιρέθηκε από τη βάρδια.",
+                        "moved": "Ο εργαζόμενος μεταφέρθηκε.",
+                    }[result])
+                    st.rerun()
+        elif clicked_safe_id != st.session_state.last_clicked_safe_id:
+            real_clicked_key = safe_mapping.get(clicked_safe_id, None)
+            st.session_state.last_clicked_safe_id = clicked_safe_id
+
+            if real_clicked_key:
+                if transfer_mode:
+                    gantt_staff_transfer.pick_bar(st.session_state, real_clicked_key, wk_groups)
+                else:
+                    st.session_state.pop("edit_form_prefill", None)
+                    st.session_state.clicked_key = real_clicked_key
+                    st.session_state.edit_bar_select_widget = real_clicked_key
+                    st.session_state.trigger_scroll = True
+                st.session_state.skip_remote_sync_once = True
+                st.rerun()
 
 
-# --- ΕΜΦΑΝΙΣΗ ΚΑΙ ΕΝΤΟΠΙΣΜΟΣ ΚΛΙΚ ---
-transfer_mode = False
-if is_full_admin and not presentation_mode:
-    transfer_mode = gantt_staff_transfer.render_mode(clear_bar_selection)
-
-focused_bar_key = search_bar_key if not is_full_admin or st.session_state.clicked_key == search_bar_key else None
 if transfer_mode:
+    gantt_live_sync.render_update_check(utils.supabase)
+    if opening_search_result and not search_bar_key:
+        st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
+    key_to_safe_id = {key: "bar_" + hashlib.md5(key.encode("utf-8")).hexdigest() for key in wk_groups}
+    safe_mapping = {safe_id: key for key, safe_id in key_to_safe_id.items()}
     focused_bar_key = st.session_state.get(gantt_staff_transfer.TARGET) or st.session_state.get(gantt_staff_transfer.SOURCE)
     st.session_state.setdefault("gantt_staff_drag_token", uuid.uuid4().hex)
-
-html_chart = gantt_html.build_html_gantt(
-    wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
-    focused_key=focused_bar_key,
-    scroll_to_focus=opening_search_result,
-    staff_drag_token=st.session_state.get("gantt_staff_drag_token") if transfer_mode else None,
-)
-clicked_safe_id = click_detector(
-    html_chart,
-    key=f"gantt_detector_{st.session_state.detector_version}_{st.session_state.gantt_height_px}",
-)
-
-gantt_export.render_gantt_html_export(html_chart, start_of_week)
-
-if st.session_state.get("suppress_next_detector_click", False):
-    st.session_state.suppress_next_detector_click = False
-elif clicked_safe_id:
-    if transfer_mode and clicked_safe_id.startswith(gantt_staff_transfer.DROP_PREFIX):
-        try:
-            result = gantt_staff_transfer.apply_drop(
-                clicked_safe_id, st.session_state, safe_mapping, wk_groups,
-                st.session_state.assignments, utils.save_assignment_batch,
-            )
-        except ValueError as exc:
-            st.error(str(exc))
-        else:
-            if result:
-                clear_bar_selection()
-                st.toast({
-                    "assigned": "Ο εργαζόμενος προστέθηκε στη μπάρα.",
-                    "unassigned": "Ο εργαζόμενος αφαιρέθηκε από τη βάρδια.",
-                    "moved": "Ο εργαζόμενος μεταφέρθηκε.",
-                }[result])
-                st.rerun()
-    elif clicked_safe_id != st.session_state.last_clicked_safe_id:
-        real_clicked_key = safe_mapping.get(clicked_safe_id, None)
-        st.session_state.last_clicked_safe_id = clicked_safe_id
-
-        if real_clicked_key:
-            if transfer_mode:
-                gantt_staff_transfer.pick_bar(st.session_state, real_clicked_key, wk_groups)
-            else:
-                st.session_state.pop("edit_form_prefill", None)
-                st.session_state.clicked_key = real_clicked_key
-                st.session_state.edit_bar_select_widget = real_clicked_key
-                st.session_state.trigger_scroll = True
-            st.session_state.skip_remote_sync_once = True
-            st.rerun()
-
-if transfer_mode:
+    html_chart = gantt_html.build_html_gantt(
+        wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
+        focused_key=focused_bar_key,
+        scroll_to_focus=opening_search_result,
+        staff_drag_token=st.session_state.gantt_staff_drag_token,
+    )
+    clicked_safe_id = click_detector(html_chart, key=detector_key)
+    gantt_export.render_gantt_html_export(html_chart, start_of_week)
+    handle_chart_click(clicked_safe_id, safe_mapping)
     gantt_staff_transfer.render_transfer(
         wk_groups, st.session_state.assignments, st.session_state.employees,
         utils.save_assignment_batch, clear_bar_selection,
     )
+    gantt_excel_export.render_employee_day_excel_export(get_local_today())
+    gantt_excel_export.render_visual_gantt_month_export(filtered_assignments_by_date, start_of_week)
+    gantt_excel_export.render_visual_gantt_excel_export(wk_groups, start_of_week)
+    gantt_export.render_gantt_export(export_data, start_of_week)
+else:
+    gantt_live_view.render(
+        start_of_week, zoom_factor, gantt_height_px,
+        visible_recurring_project_ids, search_prefix="gantt", detector_key=detector_key,
+        desktop=True, initial_week=(filtered_assignments_by_date, wk_groups, export_data),
+        opening_search=opening_search_result, on_click=handle_chart_click,
+        can_refresh=lambda: not st.session_state.get("clicked_key"),
+    )
 
 if st.session_state.get("clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
-
-# --- ΕΝΟΤΗΤΑ ΕΞΑΓΩΓΗΣ EXCEL ---
-# Η απλή εξαγωγή παραμένει στο gantt_export.py.
-# Η οπτική εξαγωγή με συγχωνευμένα κελιά μπαίνει σε ξεχωριστό module,
-# ώστε να μην αλλάξει η λειτουργία του Gantt.
-gantt_excel_export.render_employee_day_excel_export(get_local_today())
-gantt_excel_export.render_visual_gantt_month_export(filtered_assignments_by_date, start_of_week)
-gantt_excel_export.render_visual_gantt_excel_export(wk_groups, start_of_week)
-gantt_export.render_gantt_export(export_data, start_of_week)
 
 # --- ΠΡΟΣΩΡΙΝΗ ΑΝΤΙΓΡΑΦΗ ΣΤΟΙΧΕΙΩΝ ΦΟΡΜΩΝ / ΕΠΙΛΟΓΗ ΗΜΕΡΟΜΗΝΙΩΝ ---
 # Το πρόχειρο παραμένει μόνο στο session του χρήστη. Δεν γράφει στη Supabase.
