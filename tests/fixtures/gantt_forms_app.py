@@ -121,11 +121,15 @@ st.caption("Οι πραγματικές φόρμες ακολουθούν. Κα�
 if st.session_state.get("fixture_transfer"):
     transfer_mode = gantt_staff_transfer.render_mode(clear_bar_selection)
     if transfer_mode:
-        transfer_panel = next(n for n in tree.body if isinstance(n, ast.If)
-                              and isinstance(n.test, ast.Name) and n.test.id == "transfer_mode"
-                              and any(isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
-                                      and ast.unparse(stmt.value.func) == "gantt_staff_transfer.render_transfer"
-                                      for stmt in n.body))
+        # The fixture already renders its synthetic chart. Run only the real transfer panel.
+        transfer_panel = next(
+            stmt for node in tree.body
+            if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+            and node.test.id == "transfer_mode"
+            for stmt in node.body
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and ast.unparse(stmt.value.func) == "gantt_staff_transfer.render_transfer"
+        )
         exec(compile(ast.Module(body=[transfer_panel], type_ignores=[]), str(path), "exec"), globals())
     st.stop()
 
