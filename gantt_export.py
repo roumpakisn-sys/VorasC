@@ -1,4 +1,5 @@
 from datetime import timedelta
+from functools import partial
 import io
 
 import pandas as pd
@@ -13,7 +14,7 @@ def create_gantt_excel(export_data):
     return buffer.getvalue()
 
 
-def render_gantt_export(export_data, start_of_week, *, get_data=None):
+def render_gantt_export(export_data, start_of_week):
     """Render της ενότητας συμβουλών και εξαγωγής Excel για το Gantt."""
     hint_text = "💡 *Συμβουλές:* **1)** Κάντε κλικ σε μια μπάρα για επεξεργασία. **2)** Κρατήστε αριστερό κλικ και κάντε drag μέσα στο gantt για κίνηση δεξιά/αριστερά. **3)** Σύρετε με τη ροδέλα πάνω-κάτω για τις ημέρες. **4)** Ρυθμίστε το κάθετο μέγεθος από το slider 'Ύψος Gantt'."
 
@@ -24,7 +25,8 @@ def render_gantt_export(export_data, start_of_week, *, get_data=None):
         with col_btn:
             st.download_button(
                 label="📥 Εξαγωγή (Excel)",
-                data=get_data() if get_data is not None else create_gantt_excel(export_data),
+                data=partial(create_gantt_excel, export_data),
+                on_click="ignore",
                 file_name=f"Gantt_Programma_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
@@ -77,6 +79,7 @@ def render_gantt_html_export(html_chart, start_of_week):
     st.download_button(
         "🌐 Εξαγωγή Gantt σε HTML",
         data=downloadable_gantt_html.encode("utf-8"),
+        on_click="ignore",
         file_name=f"gantt_programma_{start_of_week.strftime('%Y_%m_%d')}.html",
         mime="text/html",
         use_container_width=True,

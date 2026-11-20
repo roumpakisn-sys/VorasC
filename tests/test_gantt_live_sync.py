@@ -22,6 +22,19 @@ class GanttLiveSyncTests(unittest.TestCase):
         marker_patch = patch.object(gantt_live_sync, "_marker", self.marker)
         marker_patch.start()
         self.addCleanup(marker_patch.stop)
+        self.rest_jobs = []
+        worker_patch = patch.object(
+            gantt_live_sync, "Thread",
+            side_effect=lambda *, target, args, daemon: SimpleNamespace(
+                start=lambda: self.rest_jobs.append((target, args)),
+            ),
+        )
+        worker_patch.start()
+        self.addCleanup(worker_patch.stop)
+
+    def finish_rest_check(self):
+        target, args = self.rest_jobs.pop(0)
+        target(*args)
 
     def client(self, changed_at):
         client = Mock()
@@ -59,14 +72,25 @@ class GanttLiveSyncTests(unittest.TestCase):
         self.change(stamp=OLD)
         self.assertIsNotNone(gantt_live_sync.pending_revision(client, OLD))
         self.assertIsNone(gantt_live_sync.pending_revision(client, CURRENT))
+        self.query.execute.assert_not_called()
+        self.assertEqual(len(self.rest_jobs), 1)
+        self.finish_rest_check()
         self.query.execute.assert_called_once()
 
-    def test_rest_check_recovers_from_missing_realtime_events(self):
+    def test_rest_check_recovers_without_blocking_or_overlapping(self):
         client = self.client(OLD)
-        with patch.object(gantt_live_sync, "monotonic", side_effect=[100, 103, 130]):
+        with patch.object(gantt_live_sync, "monotonic", side_effect=[100, 130, 131, 132, 133]):
             self.assertIsNone(gantt_live_sync.pending_revision(client, OLD))
+            self.assertIsNone(gantt_live_sync.pending_revision(client, OLD))
+            self.assertEqual(len(self.rest_jobs), 1)
+            self.query.execute.assert_not_called()
+            self.finish_rest_check()
+
             self.query.execute.return_value.data = [{"last_changed_at": CHANGED}]
             self.assertIsNone(gantt_live_sync.pending_revision(client, OLD))
+            self.assertIsNone(gantt_live_sync.pending_revision(client, OLD))
+            self.assertEqual(len(self.rest_jobs), 1)
+            self.finish_rest_check()
             self.assertIsNotNone(gantt_live_sync.pending_revision(client, OLD))
         self.assertEqual(self.query.execute.call_count, 2)
 
@@ -116,16 +140,19 @@ class GanttLiveSyncTests(unittest.TestCase):
 
     def test_failed_viewer_update_preserves_chart_and_offers_refresh(self):
         client = self.client(CHANGED)
+        self.change()
         viewer = self.view(OLD)
         chart = Mock()
         build = Mock(return_value=chart)
         refresh = Mock()
         with patch.dict(sys.modules, streamlit=viewer):
             gantt_live_sync.render_live_view(client, build=build, refresh=refresh)
+            refresh.assert_not_called()
+            viewer.fragments[0]()
             viewer.fragments[0]()
         build.assert_called_once_with(first_render=True)
         refresh.assert_called_once()
-        self.assertEqual(chart.call_count, 2)
+        self.assertEqual(chart.call_count, 3)
         viewer.rerun.assert_not_called()
         self.assertEqual(viewer.button.call_count, 2)
 
@@ -159,6 +186,7 @@ class GanttLiveSyncTests(unittest.TestCase):
 
     def test_manual_mode_refreshes_only_on_request(self):
         client = self.client(CHANGED)
+        self.change()
         editor = self.view(OLD)
         with patch.dict(sys.modules, streamlit=editor):
             gantt_live_sync.render_update_check(client)

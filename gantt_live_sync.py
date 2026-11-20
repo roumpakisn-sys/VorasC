@@ -24,6 +24,7 @@ class ChangeMarker:
         self._lock = Lock()
         self._latest = None
         self._next_check = 0
+        self._checking_rest = False
         self._worker = None
 
     def _remember(self, value):
@@ -40,8 +41,9 @@ class ChangeMarker:
     def latest(self, client):
         with self._lock:
             now = monotonic()
-            check_rest = now >= self._next_check
+            check_rest = not self._checking_rest and now >= self._next_check
             if check_rest:
+                self._checking_rest = True
                 self._next_check = now + FALLBACK_SECONDS
             if self._worker is None:
                 key = getattr(client, "supabase_key", None)
@@ -51,22 +53,28 @@ class ChangeMarker:
                     self._worker.start()
 
         if check_rest:
-            try:
-                rows = (
-                    client.table("app_sync_state")
-                    .select("last_changed_at")
-                    .eq("id", "global")
-                    .limit(1)
-                    .execute()
-                    .data
-                )
-                if rows:
-                    self._remember(rows[0].get("last_changed_at"))
-            except Exception:
-                pass  # A failed REST check must not hide a received Realtime revision.
+            Thread(target=self._check_rest, args=(client,), daemon=True).start()
 
         with self._lock:
             return self._latest
+
+    def _check_rest(self, client):
+        try:
+            rows = (
+                client.table("app_sync_state")
+                .select("last_changed_at")
+                .eq("id", "global")
+                .limit(1)
+                .execute()
+                .data
+            )
+            if rows:
+                self._remember(rows[0].get("last_changed_at"))
+        except Exception:
+            pass  # A failed REST check must not hide a received Realtime revision.
+        finally:
+            with self._lock:
+                self._checking_rest = False
 
     def _listen(self, url, key):
         asyncio.run(self._listen_with_retry(url, key))
@@ -148,12 +156,19 @@ def render_live_view(client, *, build, refresh, can_refresh=None):
     snapshot = build(first_render=True)
     attempted_revision = None
     retry_after = 0
+    initial_render = True
 
     @st.fragment(run_every=CHECK_SECONDS if client is not None else None)
     def view():
-        nonlocal snapshot, attempted_revision, retry_after
+        nonlocal snapshot, attempted_revision, retry_after, initial_render
         state = st.session_state
         revision = pending_revision(client, state.get("last_sync_time"))
+        if initial_render:
+            # The page has its own current snapshot, including any confirmed local write.
+            # A pending Realtime revision can wait for the first scheduled update.
+            initial_render = False
+            snapshot()
+            return
         if (
             revision
             and (can_refresh is None or can_refresh())

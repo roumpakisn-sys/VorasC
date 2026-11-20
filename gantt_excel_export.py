@@ -1,6 +1,7 @@
 import io
 import math
 from datetime import date, datetime, timedelta
+from functools import partial
 
 import streamlit as st
 
@@ -369,7 +370,7 @@ def _week_starts_for_month(month_start):
     return weeks
 
 
-def _render_week_to_sheet(wb, ws, wk_groups, start_of_week, assignments_by_date=None, slot_minutes=30):
+def _render_week_to_sheet(wb, ws, wk_groups, start_of_week, assignments_by_date=None, slot_minutes=30, *, day_labels=None):
     """
     Ζωγραφίζει μία εβδομάδα σε ένα worksheet.
     Χρησιμοποιείται και στην εβδομαδιαία και στη μηνιαία εξαγωγή.
@@ -513,7 +514,10 @@ def _render_week_to_sheet(wb, ws, wk_groups, start_of_week, assignments_by_date=
             if group.get("Date") == current_date
         ]
 
-        day_info_text, day_info_lines = _day_left_label(current_date, assignments_by_date=assignments_by_date)
+        if day_labels is None:
+            day_info_text, day_info_lines = _day_left_label(current_date, assignments_by_date=assignments_by_date)
+        else:
+            day_info_text, day_info_lines = day_labels[current_date]
         placed_groups, lane_count = _build_lanes(day_groups)
 
         min_rows_for_label = max(1, math.ceil(day_info_lines / 2.2))
@@ -661,7 +665,7 @@ def _generate_week_groups_for_export(week_start, assignments_by_date):
     return wk_groups
 
 
-def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30, assignments_by_date=None):
+def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30, assignments_by_date=None, *, day_labels=None):
     """Δημιουργεί Excel τύπου Gantt για μία εβδομάδα."""
     try:
         from openpyxl import Workbook
@@ -678,6 +682,7 @@ def create_visual_gantt_excel(wk_groups, start_of_week, slot_minutes=30, assignm
         start_of_week,
         assignments_by_date=assignments_by_date,
         slot_minutes=slot_minutes,
+        day_labels=day_labels,
     )
 
     buffer = io.BytesIO()
@@ -719,27 +724,25 @@ def create_visual_gantt_month_excel(assignments_by_date, selected_month, slot_mi
     return buffer.getvalue()
 
 
-def render_visual_gantt_excel_export(wk_groups, start_of_week, *, get_data=None):
+def prepare_visual_gantt_download(wk_groups, start_of_week):
+    # The download thread cannot read Streamlit's session state. Keep the labels
+    # from the same chart snapshot as the groups.
+    week = [start_of_week + timedelta(days=offset) for offset in range(7)]
+    day_labels = {day: _day_left_label(day) for day in week}
+    return partial(create_visual_gantt_excel, wk_groups, start_of_week, day_labels=day_labels)
+
+
+def render_visual_gantt_excel_export(wk_groups, start_of_week, *, get_download=None):
     """Κουμπί εξαγωγής οπτικού Gantt σε Excel με συγχωνευμένα κελιά για την τρέχουσα εβδομάδα."""
     if not wk_groups:
         return
 
-    try:
-        if get_data is None:
-            data = create_visual_gantt_excel(
-                wk_groups,
-                start_of_week,
-                assignments_by_date=st.session_state.get("assignments_by_date", {}),
-            )
-        else:
-            data = get_data()
-    except Exception as exc:
-        st.warning(f"Δεν ήταν δυνατή η δημιουργία του οπτικού Excel Gantt: {exc}")
-        return
-
+    if get_download is None:
+        get_download = prepare_visual_gantt_download(wk_groups, start_of_week)
     st.download_button(
         label="📊 Εξαγωγή Gantt σε Excel με μπάρες",
-        data=data,
+        data=get_download,
+        on_click="ignore",
         file_name=f"Gantt_Bars_{start_of_week.strftime('%d_%m_%Y')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
