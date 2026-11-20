@@ -545,6 +545,15 @@ def init_data_and_sync():
     cleanup_duplicates()
     cleanup_projects()
 
+    rebuild_schedule_indexes()
+
+    st.session_state.data_dirty = False
+
+    if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
+        auto_extend_recurring_patterns()
+        st.session_state.last_auto_extend_check = time.time()
+
+def rebuild_schedule_indexes():
     st.session_state.emp_map = {e['id']: e for e in st.session_state.get('employees', []) if isinstance(e, dict) and 'id' in e}
     st.session_state.proj_map = {p['id']: p for p in st.session_state.get('projects', []) if isinstance(p, dict) and 'id' in p}
 
@@ -564,11 +573,6 @@ def init_data_and_sync():
             leaves_by_emp[eid].append(l)
     st.session_state.leaves_by_emp = leaves_by_emp
 
-    st.session_state.data_dirty = False
-
-    if "last_auto_extend_check" not in st.session_state or time.time() - st.session_state.last_auto_extend_check > 3600:
-        auto_extend_recurring_patterns()
-        st.session_state.last_auto_extend_check = time.time()
 
 def setup_shared_ui(show_menu=False, menu_options=None):
     """

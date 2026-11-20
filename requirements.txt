@@ -1,7 +1,8 @@
 streamlit
 pandas
 plotly
-supabase
+supabase>=2.15,<3
 openpyxl
 st-click-detector
 streamlit-plotly-events
+

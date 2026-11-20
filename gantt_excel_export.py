@@ -719,17 +719,20 @@ def create_visual_gantt_month_excel(assignments_by_date, selected_month, slot_mi
     return buffer.getvalue()
 
 
-def render_visual_gantt_excel_export(wk_groups, start_of_week):
+def render_visual_gantt_excel_export(wk_groups, start_of_week, *, get_data=None):
     """Κουμπί εξαγωγής οπτικού Gantt σε Excel με συγχωνευμένα κελιά για την τρέχουσα εβδομάδα."""
     if not wk_groups:
         return
 
     try:
-        data = create_visual_gantt_excel(
-            wk_groups,
-            start_of_week,
-            assignments_by_date=st.session_state.get("assignments_by_date", {}),
-        )
+        if get_data is None:
+            data = create_visual_gantt_excel(
+                wk_groups,
+                start_of_week,
+                assignments_by_date=st.session_state.get("assignments_by_date", {}),
+            )
+        else:
+            data = get_data()
     except Exception as exc:
         st.warning(f"Δεν ήταν δυνατή η δημιουργία του οπτικού Excel Gantt: {exc}")
         return

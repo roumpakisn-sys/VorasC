@@ -12,6 +12,7 @@ import utils
 import gantt_engine
 import gantt_html
 import gantt_live_sync
+import gantt_live_view
 import gantt_filters
 import gantt_search
 import placement_roles
@@ -96,7 +97,8 @@ components.html(
 )
 
 is_full_admin = st.session_state.get("current_user") != "TAN"
-gantt_live_sync.render_update_check(utils.supabase, live_view=not is_full_admin)
+if is_full_admin:
+    gantt_live_sync.render_update_check(utils.supabase)
 active_employee_ids = [
     e["id"]
     for e in st.session_state.get("employees", [])
@@ -547,6 +549,18 @@ visible_recurring_project_ids = _get_mobile_visible_recurring_project_ids(
     recurring_patterns=st.session_state.recurring_patterns,
 )
 
+if not is_full_admin:
+    gantt_live_view.render(
+        start_of_week, zoom_factor, gantt_height_px,
+        visible_recurring_project_ids, search_prefix="mobile",
+        detector_key=(
+            f"mobile_gantt_detector_{st.session_state.mobile_detector_version}"
+            f"_{gantt_height_px}_{zoom_factor}_{app_scale}"
+        ),
+    )
+    st.info("Ο συγκεκριμένος χρήστης έχει μόνο προβολή.")
+    st.stop()
+
 filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
     assignments_by_date=st.session_state.assignments_by_date,
     visible_project_ids=visible_recurring_project_ids,
@@ -617,12 +631,6 @@ if clicked_safe_id:
 
 if st.session_state.get("mobile_clicked_key"):
     st.markdown('<div id="is_editing_flag" style="display:none;"></div>', unsafe_allow_html=True)
-
-
-# --- MOBILE FORMS ---
-if not is_full_admin:
-    st.info("Ο συγκεκριμένος χρήστης έχει μόνο προβολή.")
-    st.stop()
 
 
 st.divider()

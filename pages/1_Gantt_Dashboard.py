@@ -34,6 +34,7 @@ import utils
 import gantt_engine
 import gantt_html
 import gantt_live_sync
+import gantt_live_view
 import gantt_controls
 import gantt_export
 import gantt_excel_export
@@ -134,7 +135,8 @@ def preserve_context_notes(original_notes, edited_notes):
 # Το πάνω control panel του Gantt μεταφέρθηκε στο gantt_controls.py.
 # Επιστρέφει τις ίδιες τιμές που υπολογίζονταν πριν μέσα στη σελίδα.
 start_of_week, zoom_level, zoom_factor, presentation_mode, gantt_height_px = gantt_controls.render_gantt_controls(clear_bar_selection)
-gantt_live_sync.render_update_check(utils.supabase, live_view=presentation_mode or not is_full_admin)
+if is_full_admin and not presentation_mode:
+    gantt_live_sync.render_update_check(utils.supabase)
 gantt_search.render_schedule_search(st.session_state, get_local_today(), open_search_result, key="desktop_search")
 
 # --- ΦΙΛΤΡΟ ΟΡΑΤΟΤΗΤΑΣ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΩΝ ΕΡΓΩΝ ---
@@ -145,6 +147,17 @@ visible_recurring_project_ids = gantt_filters.render_recurring_project_visibilit
     recurring_patterns=st.session_state.recurring_patterns,
     on_change=clear_bar_selection,
 )
+if presentation_mode or not is_full_admin:
+    gantt_live_view.render(
+        start_of_week, zoom_factor, gantt_height_px,
+        visible_recurring_project_ids, search_prefix="gantt",
+        detector_key=f"gantt_detector_{st.session_state.detector_version}_{gantt_height_px}",
+        desktop=True,
+    )
+    if not presentation_mode:
+        st.divider()
+    st.stop()
+
 filtered_assignments_by_date = gantt_filters.apply_recurring_project_visibility_filter(
     assignments_by_date=st.session_state.assignments_by_date,
     visible_project_ids=visible_recurring_project_ids,
@@ -248,54 +261,7 @@ clicked_safe_id = click_detector(
     key=f"gantt_detector_{st.session_state.detector_version}_{st.session_state.gantt_height_px}",
 )
 
-# --- ΕΞΑΓΩΓΗ GANTT ΣΕ HTML ---
-downloadable_gantt_html = f"""<!doctype html>
-<html lang="el">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gantt Πρόγραμμα - {start_of_week.strftime('%d/%m/%Y')}</title>
-    <style>
-        body {{
-            margin: 0;
-            padding: 18px;
-            background: #f8fafc;
-            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        }}
-        .export-title {{
-            margin: 0 0 12px 0;
-            color: #0f172a;
-            font-size: 22px;
-            font-weight: 800;
-        }}
-        .export-subtitle {{
-            margin: 0 0 18px 0;
-            color: #475569;
-            font-size: 14px;
-        }}
-        #gantt-master-container {{
-            height: calc(100vh - 110px) !important;
-            max-height: none !important;
-        }}
-    </style>
-</head>
-<body>
-    <h1 class="export-title">Πρόγραμμα Gantt</h1>
-    <div class="export-subtitle">
-        Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} - {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}
-    </div>
-    {html_chart}
-</body>
-</html>
-"""
-
-st.download_button(
-    "🌐 Εξαγωγή Gantt σε HTML",
-    data=downloadable_gantt_html.encode("utf-8"),
-    file_name=f"gantt_programma_{start_of_week.strftime('%Y_%m_%d')}.html",
-    mime="text/html",
-    use_container_width=True,
-)
+gantt_export.render_gantt_html_export(html_chart, start_of_week)
 
 if st.session_state.get("suppress_next_detector_click", False):
     st.session_state.suppress_next_detector_click = False

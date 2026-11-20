@@ -99,14 +99,15 @@ def track_deletion(table_name, record_id):
     except Exception as e:
         print(f"Error logging deletion: {e}")
 
-def sync_data_incremental():
+def sync_data_incremental(*, silent=False):
     """
     Ο έξυπνος μηχανισμός Delta Updates.
     Φέρνει ΜΟΝΟ τις αλλαγές που έγιναν μετά το last_sync_time, χρησιμοποιώντας 
     χωρίς polling guard 30'' ώστε να μη χάνονται αλλαγές μεταξύ χρηστών.
     """
     # Ενεργοποίηση της "αόρατης" λειτουργίας για το Auto-Polling
-    inject_silent_refresh_css()
+    if not silent:
+        inject_silent_refresh_css()
 
     if not supabase:
         return
@@ -207,3 +208,4 @@ def sync_data_incremental():
     except Exception as e:
         print(f"Incremental Sync Error: {e}")
         pass
+
