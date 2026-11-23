@@ -3,7 +3,7 @@ import base64
 import json
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 TARGET_TYPE = 'Μηνιαίος στόχος επισκέψεων'
 MENU = 'Περιοδικές Εργασίες'
@@ -248,12 +248,22 @@ def _linked_visits(task, assignments, start, end):
     return visits
 
 
+def _scheduled_visits(task, assignments, start, end):
+    visits = _linked_visits(task, assignments, start, end)
+    return sorted(visits.items(), key=lambda item: (item[0][0], str(item[1][0].get('startTime') or '')))
+
+
 def count_visits(task, assignments, month):
     bounds = period_bounds(task, month)
     if bounds is None:
         return []
-    visits = _linked_visits(task, assignments, *bounds)
-    return sorted(visits.items(), key=lambda item: (item[0][0], str(item[1][0].get('startTime') or '')))
+    return _scheduled_visits(task, assignments, *bounds)
+
+
+def previous_month_visits(task, assignments, month):
+    month_start = month.replace(day=1)
+    previous_start = (month_start - timedelta(days=1)).replace(day=1)
+    return _scheduled_visits(task, assignments, previous_start, month_start)
 
 
 def remaining_visits(tasks, assignments, month):
@@ -321,6 +331,7 @@ def prepare_new_placement(task, month):
     today = get_local_today()
     first = max(today, month) if (today.year, today.month) == (month.year, month.month) else month
     st.session_state.qa_form_prefill = {
+        **task.get('placement_defaults', {}),
         'first_date': first, 'project_id': task['project_id'], 'periodic_task_id': task['id'],
     }
     st.session_state.qa_rc = st.session_state.get('qa_rc', 0) + 1
@@ -396,6 +407,53 @@ def _spacing_inputs(task=None):
     return minimum, maximum
 
 
+def _placement_defaults_inputs(active_employee_names, defaults=None):
+    import streamlit as st
+
+    defaults = defaults or {}
+    first, last = st.columns(2)
+    start = first.time_input(
+        'Ώρα έναρξης (προαιρετικό)',
+        value=time.fromisoformat(defaults['start_time']) if defaults.get('start_time') else None,
+        step=300,
+    )
+    end = last.time_input(
+        'Ώρα λήξης (προαιρετικό)',
+        value=time.fromisoformat(defaults['end_time']) if defaults.get('end_time') else None,
+        step=300,
+    )
+    staff = st.multiselect(
+        'Προσωπικό (προαιρετικό)', list(active_employee_names),
+        default=[eid for eid in defaults.get('employee_ids', []) if eid in active_employee_names],
+        format_func=active_employee_names.get,
+    )
+    st.caption('Οι προεπιλογές συμπληρώνονται όταν πατήσετε «Προγραμμάτισε».')
+    return start, end, staff
+
+
+def _placement_defaults(start, end, staff):
+    if (start is None) != (end is None):
+        raise ValueError('Συμπληρώστε και τις δύο ώρες ή αφήστε τες κενές.')
+    if start is not None and start >= end:
+        raise ValueError('Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.')
+    defaults = {'employee_ids': staff} if staff else {}
+    if start is not None:
+        defaults.update(start_time=start.strftime('%H:%M'), end_time=end.strftime('%H:%M'))
+    return defaults
+
+
+def _render_visit_list(visits, employee_names, *, section):
+    import streamlit as st
+
+    for (day, _), rows in visits:
+        row = rows[0]
+        names = list(dict.fromkeys(employee_names.get(r.get('employeeId'), 'Χωρίς προσωπικό') for r in rows))
+        st.write(f"{day:%d/%m/%Y} · {row.get('startTime', '')}–{row.get('endTime', '')}")
+        st.caption(', '.join(names))
+        if st.button('Άνοιγμα μπάρας', key=f"periodic_open_{section}_{row['id']}"):
+            open_placement(day, row['id'])
+
+
 def render_management(is_admin):
     import streamlit as st
     import utils
@@ -406,6 +464,9 @@ def render_management(is_admin):
     tasks = get_targets(st.session_state.recurring_patterns)
     assignments = st.session_state.assignments
     project_names = {p['id']: p['name'] for p in st.session_state.projects}
+    employee_names = {e['id']: e['name'] for e in st.session_state.employees}
+    active_employee_names = {e['id']: e['name'] for e in st.session_state.employees
+                             if e.get('status', 'Ενεργός') == 'Ενεργός'}
     month = st.date_input('Μήνας αναφοράς', value=today.replace(day=1),
                           key='periodic_month').replace(day=1)
     if tasks:
@@ -415,9 +476,27 @@ def render_management(is_admin):
     st.caption('Για κάθε εργασία εμφανίζεται η περίοδος που περιλαμβάνει τον μήνα αναφοράς. '
                'Μετρούν οι καταχωρισμένες επισκέψεις που δεν έχουν ακυρωθεί.')
 
-    def save_target(record, original=None):
+    def save_project(project):
         if not utils.supabase:
             st.error('Απαιτείται σύνδεση στη βάση για αποθήκευση.')
+            return False
+        try:
+            result = utils.supabase.table('projects').insert(project).execute()
+            if not result.data:
+                st.error('Δεν επιβεβαιώθηκε η δημιουργία του έργου.')
+                return False
+        except Exception as exc:
+            st.error(f'Δεν αποθηκεύτηκε το νέο έργο: {exc}')
+            return False
+        st.session_state.projects = [*st.session_state.projects, project]
+        project_names[project['id']] = project['name']
+        return True
+
+    def save_target(record, original=None, *, project=None):
+        if not utils.supabase:
+            st.error('Απαιτείται σύνδεση στη βάση για αποθήκευση.')
+            return
+        if project is not None and not save_project(project):
             return
         try:
             if original:
@@ -427,9 +506,16 @@ def render_management(is_admin):
                 result = utils.supabase.table('recurring_patterns').insert(utils.serialize_dates(record)).execute()
             if not result.data:
                 st.error('Δεν επιβεβαιώθηκε η αποθήκευση. Ανανεώστε τη λίστα και δοκιμάστε ξανά.')
-                return
         except Exception as exc:
             st.error(f'Δεν αποθηκεύτηκε η περιοδική εργασία: {exc}')
+            result = None
+        if project is not None:
+            utils.log_activity('ΠΡΟΣΘΗΚΗ', 'projects', project['name'])
+        if result is None or not result.data:
+            if project is not None:
+                utils.mark_data_changed()
+                utils.touch_app_sync_state()
+                st.info('Το νέο έργο δημιουργήθηκε. Μπορείτε να ξαναδοκιμάσετε την αποθήκευση της εργασίας.')
             return
         records = st.session_state.recurring_patterns
         st.session_state.recurring_patterns = [p for p in records if p['id'] != record['id']] + [record]
@@ -437,6 +523,8 @@ def render_management(is_admin):
         utils.touch_app_sync_state()
         utils.log_activity('ΠΕΡΙΟΔΙΚΗ ΕΡΓΑΣΙΑ', 'recurring_patterns',
                            f"{project_names.get(record['projectId'], '')} · {json.loads(record['notes'])['name']}")
+        if original is None:
+            st.session_state.periodic_new_counter = st.session_state.get('periodic_new_counter', 0) + 1
         st.rerun()
 
     def update_target(task, **changes):
@@ -449,33 +537,53 @@ def render_management(is_admin):
         st.session_state.last_sync_time = None
         st.rerun()
 
-    if is_admin and project_names:
+    if is_admin:
         with st.expander('➕ Νέα περιοδική εργασία'):
-            with st.form('periodic_new', clear_on_submit=True):
+            form_key = f"periodic_new_{st.session_state.get('periodic_new_counter', 0)}"
+            with st.form(form_key):
                 project_id = st.selectbox('Έργο', list(project_names), format_func=project_names.get)
+                new_project_name = st.text_input('Όνομα νέου έργου (προαιρετικό)',
+                                                 help='Συμπληρώστε το για να χρησιμοποιήσετε νέο έργο.')
                 name = st.text_input('Περιγραφή εργασίας', placeholder='π.χ. Καθαρισμός υαλοπινάκων')
                 frequency = st.selectbox('Συχνότητα', list(FREQUENCIES), format_func=FREQUENCIES.get)
                 target = st.number_input('Επισκέψεις ανά περίοδο', min_value=1, value=1, step=1)
                 minimum, maximum = _spacing_inputs()
                 start = st.date_input('Μήνας έναρξης', value=month,
                                       help='Η πρώτη περίοδος ξεκινά την πρώτη ημέρα αυτού του μήνα.')
+                defaults_input = _placement_defaults_inputs(active_employee_names)
                 if st.form_submit_button('Δημιουργία'):
+                    project = None
+                    new_project_name = new_project_name.strip()
+                    if new_project_name:
+                        project_id = next((pid for pid, project_name in project_names.items()
+                                           if project_name.strip().casefold() == new_project_name.casefold()), None)
+                        if project_id is None:
+                            project_id = str(uuid.uuid4())
+                            project = {'id': project_id, 'name': new_project_name, 'color': '#4a86e8'}
                     if not name.strip():
                         st.error('Συμπληρώστε περιγραφή εργασίας.')
+                    elif project_id is None:
+                        st.error('Επιλέξτε ένα έργο ή συμπληρώστε όνομα νέου έργου.')
                     elif maximum and minimum > maximum:
                         st.error('Η ελάχιστη απόσταση πρέπει να είναι έως τη μέγιστη.')
                     elif any(t['project_id'] == project_id and t['name'].strip().casefold() == name.strip().casefold()
                              for t in tasks):
                         st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                     else:
-                        info = {'name': name.strip(), 'visit_target': int(target),
-                                'period_months': frequency, 'active': True,
-                                'min_gap_days': minimum, 'max_gap_days': maximum}
-                        save_target({'id': str(uuid.uuid4()), 'projectId': project_id, 'type': TARGET_TYPE,
-                                     'notes': json.dumps(info, ensure_ascii=False), 'employeeIds': [],
-                                     'weekdays': [], 'startDate': start.replace(day=1),
-                                     'startTime': '09:00', 'endTime': '17:00', 'arrivalTime': '',
-                                     'colorName': 'Προεπιλογή'})
+                        try:
+                            defaults = _placement_defaults(*defaults_input)
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            info = {'name': name.strip(), 'visit_target': int(target),
+                                    'period_months': frequency, 'active': True,
+                                    'min_gap_days': minimum, 'max_gap_days': maximum,
+                                    'placement_defaults': defaults}
+                            save_target({'id': str(uuid.uuid4()), 'projectId': project_id, 'type': TARGET_TYPE,
+                                         'notes': json.dumps(info, ensure_ascii=False), 'employeeIds': [],
+                                         'weekdays': [], 'startDate': start.replace(day=1),
+                                         'startTime': '09:00', 'endTime': '17:00', 'arrivalTime': '',
+                                         'colorName': 'Προεπιλογή'}, project=project)
 
     include_inactive = st.checkbox('Εμφάνιση ανενεργών εργασιών')
     for task in tasks:
@@ -500,13 +608,14 @@ def render_management(is_admin):
                             f"{exception['reason']}")
         with cols[2]:
             with st.expander(f'Στο πρόγραμμα · {count}'):
-                for (day, _), rows in visits:
-                    employee_names = {e['id']: e['name'] for e in st.session_state.employees}
-                    names = list(dict.fromkeys(employee_names.get(r.get('employeeId'), 'Χωρίς προσωπικό') for r in rows))
-                    st.write(f"{day:%d/%m/%Y} · {rows[0].get('startTime', '')}–{rows[0].get('endTime', '')}")
-                    st.caption(', '.join(names))
-                    if st.button('Άνοιγμα μπάρας', key=f"periodic_open_{rows[0]['id']}"):
-                        open_placement(day, rows[0]['id'])
+                _render_visit_list(visits, employee_names, section='period')
+                previous = previous_month_visits(task, assignments, month)
+                previous_start = (month - timedelta(days=1)).replace(day=1)
+                st.markdown(f'**Προηγούμενος μήνας · {previous_start:%m/%Y} · {len(previous)}**')
+                if previous:
+                    _render_visit_list(previous, employee_names, section='previous')
+                else:
+                    st.caption('Δεν υπάρχουν προγραμματισμένες επισκέψεις για αυτόν τον μήνα.')
         cols[3].metric('Απομένουν', remaining)
         if is_admin and task.get('active', True) and cols[4].button('Προγραμμάτισε', key=f"periodic_add_{task['id']}"):
             prepare_new_placement(task, month)
@@ -543,6 +652,7 @@ def render_management(is_admin):
                                                     value=task['visit_target'], step=1)
                     minimum, maximum = _spacing_inputs(task)
                     active = st.checkbox('Ενεργή', value=task.get('active', True))
+                    defaults_input = _placement_defaults_inputs(active_employee_names, task.get('placement_defaults'))
                     if st.form_submit_button('Αποθήκευση ρύθμισης'):
                         if not edited_name.strip():
                             st.error('Συμπληρώστε περιγραφή εργασίας.')
@@ -552,9 +662,14 @@ def render_management(is_admin):
                                  t['name'].strip().casefold() == edited_name.strip().casefold() for t in tasks):
                             st.error('Υπάρχει ήδη αυτή η περιοδική εργασία στο έργο.')
                         else:
-                            update_target(task, name=edited_name.strip(), visit_target=int(edited_target),
-                                          period_months=edited_frequency, active=active,
-                                          min_gap_days=minimum, max_gap_days=maximum)
+                            try:
+                                defaults = _placement_defaults(*defaults_input)
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                update_target(task, name=edited_name.strip(), visit_target=int(edited_target),
+                                              period_months=edited_frequency, active=active,
+                                              min_gap_days=minimum, max_gap_days=maximum, placement_defaults=defaults)
         st.divider()
     if not tasks:
         st.info('Προσθέστε περιοδική εργασία για να ορίσετε τη συχνότητα και τον στόχο επισκέψεων.')
