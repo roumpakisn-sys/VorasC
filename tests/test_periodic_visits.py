@@ -1,10 +1,10 @@
 from copy import deepcopy
-from datetime import date
+from datetime import date, time
 import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import uuid
 
 import periodic_visits as visits
@@ -86,6 +86,39 @@ class PeriodicVisitTests(unittest.TestCase):
         cycle = visits.count_visits(task, rows, date(2027, 2, 15))
         self.assertEqual([day for (day, _), _ in cycle], days[1:3])
         self.assertEqual(visits.remaining_visits([task], rows, days[-1]), 1)
+
+    def test_previous_calendar_month_does_not_follow_the_visit_cycle(self):
+        task = {**self.task, 'start': date(2026, 11, 1), 'period_months': 6}
+        december = {**self.row, 'date': date(2026, 12, 31)}
+        rows = [self.row, december, {**december, 'id': 'crew'},
+                {**december, 'id': 'cancelled', 'is_cancelled': True},
+                {**december, 'id': 'unlinked', 'notes': ''},
+                {**december, 'id': 'january', 'date': date(2027, 1, 1)}]
+        previous, = visits.previous_month_visits(task, rows, date(2027, 1, 22))
+        self.assertEqual(previous[0][0], date(2026, 12, 31))
+        self.assertEqual([r['id'] for r in previous[1]], ['a', 'crew'])
+        self.assertEqual(len(visits.count_visits(task, rows, date(2027, 1, 1))), 3)
+
+    def test_optional_defaults_are_copied_into_new_placement(self):
+        from test_ui_storage import State
+
+        self.assertEqual(visits._placement_defaults(None, None, []), {})
+        with self.assertRaises(ValueError):
+            visits._placement_defaults(time(8), None, [])
+        with self.assertRaises(ValueError):
+            visits._placement_defaults(time(12), time(8), [])
+
+        defaults = visits._placement_defaults(time(8, 15), time(12), ['e'])
+        state = State()
+        ui = SimpleNamespace(session_state=state, switch_page=Mock())
+        with patch.dict('sys.modules', {'streamlit': ui}):
+            visits.prepare_new_placement({**self.task, 'placement_defaults': defaults}, date(2026, 12, 1))
+        self.assertEqual(state.qa_form_prefill, {
+            'first_date': date(2026, 12, 1), 'project_id': 'p',
+            'periodic_task_id': self.task_id, 'employee_ids': ['e'],
+            'start_time': '08:15', 'end_time': '12:00',
+        })
+        ui.switch_page.assert_called_once_with('pages/1_Gantt_Dashboard.py')
 
     def test_semiannual_deadline_is_shown_from_30_days_and_only_for_missing_visits(self):
         task = {**self.task, 'period_months': 6}
@@ -238,7 +271,7 @@ with st.form('placement'):
         source = '''
 import streamlit as st
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import periodic_visits
 st.session_state.setdefault('recurring_patterns', [])
 st.session_state.setdefault('projects', [{'id': 'p', 'name': 'ISOMAT'}])
@@ -277,6 +310,80 @@ with patch.dict('sys.modules', {'utils': fake}):
         self.assertEqual(tasks[0]['period_months'], 6)
         self.assertTrue(any(metric.label == 'Απομένουν' and metric.value == '1' for metric in app.metric))
         self.assertTrue(any('Ανά εξάμηνο' in caption.value for caption in app.caption))
+
+    def test_management_creates_project_once_and_shows_previous_month_visits(self):
+        source = """
+from datetime import date
+from types import SimpleNamespace
+from unittest.mock import patch
+import streamlit as st
+import periodic_visits
+import gantt_helpers
+st.session_state.setdefault('recurring_patterns', [])
+st.session_state.setdefault('projects', [])
+st.session_state.setdefault('employees', [
+    {'id': 'a', 'name': 'Άννα'},
+    {'id': 'old', 'name': 'Νίκος', 'status': 'Ανενεργός'},
+])
+st.session_state.setdefault('assignments', [])
+st.checkbox('Αποτυχία εργασίας', key='fail_task')
+class Query:
+    def __init__(self, table):
+        self.table = table
+    def insert(self, data):
+        self.data = data
+        return self
+    def execute(self):
+        if self.table == 'recurring_patterns' and st.session_state.fail_task:
+            raise RuntimeError('offline')
+        return SimpleNamespace(data=[self.data])
+fake = SimpleNamespace(supabase=SimpleNamespace(table=Query),
+    serialize_dates=lambda data: data, mark_data_changed=lambda: None,
+    touch_app_sync_state=lambda: None, log_activity=lambda *args: None)
+with patch.dict('sys.modules', {'utils': fake}), patch.object(
+        gantt_helpers, 'get_local_today', return_value=date(2026, 12, 1)):
+    periodic_visits.render_management(True)
+"""
+        app = AppTest.from_string(source).run()
+        app.checkbox(key='fail_task').set_value(True).run()
+
+        def fields():
+            next(t for t in app.text_input if t.label.startswith('Όνομα νέου')).set_value('Νέο έργο')
+            next(t for t in app.text_input if t.label == 'Περιγραφή εργασίας').set_value('Υαλοπίνακες')
+            next(s for s in app.selectbox if s.label == 'Συχνότητα').set_value(2)
+            next(d for d in app.date_input if d.label == 'Μήνας έναρξης').set_value(date(2026, 11, 1))
+            app.time_input[0].set_value(time(8, 15))
+            app.time_input[1].set_value(time(12))
+            self.assertEqual(app.multiselect[0].options, ['Άννα'])
+            app.multiselect[0].set_value(['a'])
+
+        fields()
+        next(b for b in app.button if b.label == 'Δημιουργία').click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.error)
+        self.assertEqual(app.session_state['recurring_patterns'], [])
+        saved_project, = app.session_state['projects']
+
+        app.checkbox(key='fail_task').set_value(False).run()
+        fields()
+        next(b for b in app.button if b.label == 'Δημιουργία').click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state['projects'], [saved_project])
+        task, = visits.get_targets(app.session_state['recurring_patterns'])
+        self.assertEqual(task['project_id'], saved_project['id'])
+        self.assertEqual(task['placement_defaults'], {
+            'start_time': '08:15', 'end_time': '12:00', 'employee_ids': ['a'],
+        })
+        self.assertEqual(app.session_state['assignments'], [])
+        link = visits.make_link(task['id'], saved_project['id'], app.session_state['recurring_patterns'])
+        app.session_state['assignments'] = [{
+            'id': 'visit', 'projectId': saved_project['id'], 'employeeId': 'a', 'date': date(2026, 11, 23),
+            'startTime': '08:15', 'endTime': '12:00', 'notes': visits.combine_notes('', link),
+        }]
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any('Προηγούμενος μήνας · 11/2026 · 1' in m.value for m in app.markdown))
+        self.assertEqual(len([b for b in app.button if b.label == 'Άνοιγμα μπάρας']), 2)
 
     def test_link_existing_crew_reload_and_unlink_in_both_forms(self):
         for view in ('desktop', 'mobile'):

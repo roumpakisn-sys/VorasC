@@ -5,7 +5,7 @@ from threading import Lock
 
 
 _load_lock = Lock()
-_required_functions = ('spacing_review_control', 'confirm_spacing', 'spacing_warnings', 'target_for_period')
+_required_functions = ('spacing_review_control', 'confirm_spacing', 'spacing_warnings', 'target_for_period', 'previous_month_visits')
 
 
 def load_periodic_visits():
