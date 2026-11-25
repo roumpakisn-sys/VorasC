@@ -820,48 +820,55 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         return copyTextFallback(text);
       }
 
-      function copyTextFallback(text) {
+      function copyTextFallback(text, htmlText) {
         return new Promise(function(resolve, reject) {
+          var textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.setAttribute('readonly', '');
+          textarea.style.position = 'fixed';
+          textarea.style.left = '-9999px';
+          textarea.style.top = '-9999px';
+
+          function setFormattedClipboard(event) {
+            if (!event.clipboardData) return;
+            event.clipboardData.setData('text/plain', text);
+            event.clipboardData.setData('text/html', htmlText);
+            event.preventDefault();
+          }
+
+          document.body.appendChild(textarea);
+          if (htmlText) document.addEventListener('copy', setFormattedClipboard);
           try {
-            var textarea = document.createElement('textarea');
-            textarea.value = text;
-            textarea.setAttribute('readonly', '');
-            textarea.style.position = 'fixed';
-            textarea.style.left = '-9999px';
-            textarea.style.top = '-9999px';
-            document.body.appendChild(textarea);
             textarea.select();
-            var ok = document.execCommand('copy');
-            document.body.removeChild(textarea);
-            if (ok) resolve();
+            if (document.execCommand('copy')) resolve();
             else reject(new Error('copy command failed'));
           } catch (err) {
             reject(err);
+          } finally {
+            if (htmlText) document.removeEventListener('copy', setFormattedClipboard);
+            document.body.removeChild(textarea);
           }
         });
       }
 
-      function copyCrewToClipboard(text, htmlText) {
-        // Όπου υποστηρίζεται, η επικεφαλίδα παραμένει έντονη
-        // και τα ονόματα γίνονται κανονική λίστα σε email/έγγραφα.
-        // Διαφορετικά αντιγράφουμε το ίδιο περιεχόμενο ως απλό κείμενο.
+      function copyFormattedToClipboard(text, htmlText) {
         if (navigator.clipboard && window.isSecureContext &&
             typeof navigator.clipboard.write === 'function' &&
             typeof ClipboardItem !== 'undefined' &&
-            typeof Blob !== 'undefined') {
+            typeof Blob !== 'undefined' && htmlText) {
           try {
             var clipboardItem = new ClipboardItem({
               'text/plain': new Blob([text], {type: 'text/plain'}),
               'text/html': new Blob([htmlText], {type: 'text/html'})
             });
             return navigator.clipboard.write([clipboardItem]).catch(function() {
-              return copyTextToClipboard(text);
+              return copyTextFallback(text, htmlText).catch(function() { return copyTextToClipboard(text); });
             });
           } catch (err) {
-            return copyTextToClipboard(text);
+            // Try the copy event if the browser rejects the ClipboardItem.
           }
         }
-        return copyTextToClipboard(text);
+        return copyTextFallback(text, htmlText).catch(function() { return copyTextToClipboard(text); });
       }
 
       function flashCopyButton(btn, ok) {
@@ -878,7 +885,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           var crewText = btn.getAttribute('data-crew-text') || '';
           var crewHtml = btn.getAttribute('data-crew-html') || '';
           if (!crewText) return;
-          copyCrewToClipboard(crewText, crewHtml).then(function() {
+          copyFormattedToClipboard(crewText, crewHtml).then(function() {
             flashCopyButton(btn, true);
           }).catch(function() {
             flashCopyButton(btn, false);
@@ -909,7 +916,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       function onEmailChange(e) {
         var select = e.target.closest('.gantt-email-select');
         if (!select) return;
-        var text = select.options[select.selectedIndex].getAttribute('data-email-copy');
+        var option = select.options[select.selectedIndex];
+        if (!option) return;
+        var text = option.getAttribute('data-email-copy');
+        var htmlText = option.getAttribute('data-email-html') || '';
         select.selectedIndex = 0;
         if (!text) return;
         var indicator = select.options[0];
@@ -924,10 +934,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           }, 900);
         }
 
-        var copy = navigator.clipboard && window.isSecureContext
-          ? copyTextToClipboard(text).catch(function() { return copyTextFallback(text); })
-          : copyTextToClipboard(text);
-        copy.then(function() { feedback(true); }).catch(function() { feedback(false); });
+        copyFormattedToClipboard(text, htmlText)
+          .then(function() { feedback(true); }).catch(function() { feedback(false); });
       }
 
       function onClickCapture(e) {

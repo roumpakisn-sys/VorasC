@@ -1,6 +1,7 @@
 """Client email copy templates for a scheduled Gantt bar."""
 from html import escape
 import re
+from typing import NamedTuple
 
 
 _WEEKDAYS = ("τη Δευτέρα", "την Τρίτη", "την Τετάρτη", "την Πέμπτη",
@@ -9,13 +10,31 @@ _MENU_LABEL = "Αντιγραφή κειμένου email"
 _MENU_PATTERN = re.compile(r"<select class='gantt-email-select'[^>]*>.*?</select>", re.DOTALL)
 
 
-def _person(name, card=""):
+class EmailBody(NamedTuple):
+    text: str
+    html: str
+
+
+def _paragraph(text):
+    return EmailBody(text, f"<p>{escape(text)}</p>" if text else "")
+
+
+def _person(name, card="", *, prefix=""):
     card = str(card or "").strip()
-    return f"{name} με ΑΔΤ: {card}" if card else name
+    identity = f" με ΑΔΤ: {card}" if card else ""
+    return EmailBody(f"{prefix}{name}{identity}", f"{escape(prefix)}<strong>{escape(name)}</strong>{escape(identity)}")
+
+
+def _people_list(people, heading=""):
+    if not people:
+        return EmailBody("", "")
+    text = "\n".join(line for line in (heading, *(f"- {person.text}" for person in people)) if line)
+    items = "".join(f"<li>{person.html}</li>" for person in people)
+    return EmailBody(text, f"{_paragraph(heading).html}<ul>{items}</ul>")
 
 
 def drafts(group, employees_by_id):
-    """Return paste-ready text suitable for the actual status of the placement."""
+    """Return plain and formatted email bodies for the status of the placement."""
     project = group["Project"]
     day = group["Date"]
     when = f"{_WEEKDAYS[day.weekday()]} {day:%d/%m}"
@@ -23,8 +42,13 @@ def drafts(group, employees_by_id):
     slot = f"{when}, με ώρα έναρξης {start}"
     work = f"οι εργασίες καθαριότητας για το έργο «{project}»"
 
-    def message(*paragraphs):
-        return "\n\n".join(part for part in ("Καλησπέρα σας,", *paragraphs, "Με εκτίμηση,") if part)
+    def message(intro, *sections, closing=""):
+        parts = (_paragraph("Καλησπέρα σας,"), _paragraph(intro), *sections,
+                 _paragraph(closing), _paragraph("Με εκτίμηση,"))
+        return EmailBody(
+            "\n\n".join(part.text for part in parts if part.text),
+            "".join(part.html for part in parts),
+        )
 
     if group.get("is_cancelled"):
         return {"Ενημέρωση ακύρωσης": message(
@@ -36,21 +60,23 @@ def drafts(group, employees_by_id):
         employee = employees_by_id.get(employee_id, {})
         name = str(employee.get("name") or "").strip()
         if name:
-            crew.append(f"- {_person(name, employee.get('id_number'))}")
+            crew.append(_person(name, employee.get("id_number")))
 
     supervisor = (group.get("SupportRoles") or {}).get("supervisor", "").strip()
-    supervisor_line = ""
+    supervision = []
     if supervisor:
         normalized = " ".join(supervisor.casefold().split())
         matches = [employee for employee in employees_by_id.values()
                    if " ".join(str(employee.get("name") or "").casefold().split()) == normalized]
         supervisor_card = matches[0].get("id_number") if len(matches) == 1 else None
-        supervisor_line = f"Επόπτης εργασιών: {_person(supervisor, supervisor_card)}"
+        supervision.append(_person(supervisor, supervisor_card, prefix="Επόπτης εργασιών: "))
 
-    crew_block = "\n".join(("Ομάδα καθαριότητας:", *crew)) if crew else ""
-    replacement_block = "\n".join(("Την αντικατάσταση θα αναλάβουν:", *crew)) if crew else ""
-    if len(crew) == 1:
-        replacement_block = f"Την αντικατάσταση θα αναλάβει:\n{crew[0]}"
+    supervisor_block = _people_list(supervision)
+    crew_block = _people_list(crew, "Ομάδα καθαριότητας:")
+    replacement_heading = ("Την αντικατάσταση θα αναλάβει:" if len(crew) == 1
+                           else "Την αντικατάσταση θα αναλάβουν:")
+    replacement_block = (_people_list(crew, replacement_heading) if crew else
+                         _paragraph("Θα σας ενημερώσουμε για το προσωπικό που θα καλύψει την εργασία."))
 
     if group.get("CustomerConfirmation") is not None:
         scheduled = f"Προτείνουμε να πραγματοποιηθούν {work} {slot}."
@@ -69,13 +95,10 @@ def drafts(group, employees_by_id):
         update = f"Σας ενημερώνουμε ότι {work} έχουν προγραμματιστεί για {when}, {start}–{end}."
         closing = ""
 
-    if not replacement_block:
-        replacement_block = "Θα σας ενημερώσουμε για το προσωπικό που θα καλύψει την εργασία."
-
     return {
-        "Προγραμματισμός / έναρξη έργου": message(scheduled, crew_block, supervisor_line, closing),
-        "Αντικατάσταση προσωπικού": message(replacement, replacement_block, supervisor_line, closing),
-        "Ενημέρωση πελάτη": message(update, supervisor_line, closing),
+        "Προγραμματισμός / έναρξη έργου": message(scheduled, crew_block, supervisor_block, closing=closing),
+        "Αντικατάσταση προσωπικού": message(replacement, replacement_block, supervisor_block, closing=closing),
+        "Ενημέρωση πελάτη": message(update, supervisor_block, closing=closing),
     }
 
 
@@ -83,7 +106,10 @@ def menu_html(group, employees_by_id, *, compact=False):
     style = " style='top:22px;right:2px;'" if compact else ""
     options = ["<option value=''>▾</option>"]
     for label, body in drafts(group, employees_by_id).items():
-        options.append(f"<option data-email-copy='{escape(body, quote=True)}'>{escape(label)}</option>")
+        options.append(
+            f"<option data-email-copy='{escape(body.text, quote=True)}' "
+            f"data-email-html='{escape(body.html, quote=True)}'>{escape(label)}</option>"
+        )
     return (
         f"<select class='gantt-email-select' aria-label='{_MENU_LABEL}' title='{_MENU_LABEL}'{style}>"
         + "".join(options) + "</select>"
