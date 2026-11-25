@@ -110,6 +110,7 @@ def _format_hours(value):
 
 def _get_employee_assignments(employee_id):
     """Επιστρέφει μόνο πραγματικές, μη ακυρωμένες βάρδιες του εργαζομένου."""
+    import placement_confirmation
     import placement_hours
     import periodic_visits
     rows = []
@@ -145,7 +146,9 @@ def _get_employee_assignments(employee_id):
             "end": end_time,
             "hours": hours,
             "actual_hours": actual_hours,
-            "notes": periodic_visits.split_notes(placement_hours.split_notes(assignment.get("notes"))[0])[0],
+            "notes": placement_confirmation.split_notes(
+                periodic_visits.split_notes(placement_hours.split_notes(assignment.get("notes"))[0])[0]
+            )[0],
             "assignment_id": assignment.get("id"),
         })
 

@@ -352,6 +352,7 @@ def open_placement(day, assignment_id):
     st.session_state.gantt_presentation_mode = False
     st.session_state.gantt_search_target = (day, str(assignment_id))
     st.session_state.gantt_search_pending = True
+    st.session_state.pop("gantt_customer_pending_only", None)
     st.session_state.suppress_next_detector_click = True
     st.session_state.detector_version = st.session_state.get('detector_version', 0) + 1
     st.session_state.pop('edit_form_prefill', None)

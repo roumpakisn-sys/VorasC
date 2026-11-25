@@ -19,6 +19,8 @@ def get_local_today():
 
 def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
                      *, focused_key=None, scroll_to_focus=False, staff_drag_token=None):
+    import placement_confirmation
+
     timeline_width_px = int(2400 * zoom_factor)
     day_names_gr = ["Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή"]
 
@@ -473,6 +475,15 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 f"{html_utils.escape(proj_name)} | {emps_html}"
             )
 
+            pending = g.get("CustomerConfirmation")
+            if pending is not None and not g["is_cancelled"]:
+                pending_label = placement_confirmation.PENDING_LABEL
+                follow_up = placement_confirmation.follow_up_label(pending)
+                base_text_plain = " · ".join(part for part in (pending_label, follow_up, base_text_plain) if part)
+                base_text = (
+                    "<span style='background:#fef3c7;color:#78350f;padding:0 3px;border-radius:3px;'>"
+                    f"{pending_label}</span> {base_text}"
+                )
             if g["Notes"]:
                 notes_upper = g["Notes"].upper()
                 base_text_plain += f" ({notes_upper})"
@@ -534,6 +545,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 if is_general_bar
                 else "0 3px 6px rgba(0,0,0,0.15)"
             )
+
+            if pending is not None and not g["is_cancelled"]:
+                bar_border = "2px dashed #92400e" if not is_general_bar else "3px dashed #dc2626"
+                bar_outline = "none"
 
             safe_id = key_to_safe_id.get(g["Key"], "")
             is_focused = g["Key"] == focused_key

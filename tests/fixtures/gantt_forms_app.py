@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import placement_roles
 import placement_details
+import placement_confirmation
 import placement_hours
 import placement_text
 import periodic_visits

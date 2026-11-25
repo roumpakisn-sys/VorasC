@@ -4,6 +4,7 @@ import re
 from datetime import datetime, date
 import utils
 import placement_roles
+import placement_confirmation
 import placement_details
 
 
@@ -50,6 +51,8 @@ def _employee_viber_label(assignment, day_assignments):
     που έχει αρχίσει πριν ή ίδια ώρα και τελειώνει μετά την έναρξη
     της τρέχουσας βάρδιας, ενώ η τρέχουσα τελειώνει μετά από εκείνη.
     """
+    import placement_confirmation
+
     employee_id = assignment.get("employeeId")
     if not employee_id:
         return ""
@@ -72,7 +75,7 @@ def _employee_viber_label(assignment, day_assignments):
         if other.get("id") == assignment_id:
             continue
 
-        if other.get("is_cancelled", False):
+        if other.get("is_cancelled", False) or placement_confirmation.is_pending(other):
             continue
 
         if other.get("employeeId") != employee_id:
@@ -190,11 +193,12 @@ def _group_viber_assignments(assignments, day_assignments):
     ordinary notes and separate contacts, hiding leave annotations under projects.
     This changes the export only, never the underlying assignment/leave records.
     """
+    import placement_confirmation
     import placement_hours
     import periodic_visits
     groups, prepared, known_details = {}, [], {}
     for assignment in assignments:
-        if assignment.get("is_cancelled"):
+        if assignment.get("is_cancelled") or placement_confirmation.is_pending(assignment):
             continue
         project_id = assignment.get("projectId")
         start = str(assignment.get("startTime") or "")[:5]
@@ -254,7 +258,7 @@ st.divider()
 # 1. Συλλογή Δεδομένων για τη συγκεκριμένη ημέρα
 day_assigns = [
     a for a in st.session_state.assignments
-    if a.get("date") == target_date and not a.get("is_cancelled")
+    if a.get("date") == target_date and not a.get("is_cancelled") and not placement_confirmation.is_pending(a)
 ]
 
 # Ταξινόμηση βάσει ώρας έναρξης
