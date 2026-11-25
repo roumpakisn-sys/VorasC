@@ -61,17 +61,29 @@ class ConfirmationTests(unittest.TestCase):
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")
 class ConfirmationFormTests(unittest.TestCase):
+    def app(self, view, *, records=None, add=False):
+        app = AppTest.from_file(str(ROOT / "tests/fixtures/gantt_forms_app.py"))
+        app.session_state["fixture_headless"] = True
+        app.session_state["fixture_persist"] = True
+        app.session_state["fixture_show_add"] = add
+        if records is not None:
+            app.session_state["assignments"] = records
+        app.run()
+        if view == "mobile":
+            next(w for w in app.selectbox if w.label == "Έκδοση").set_value(view).run()
+        self.assertFalse(app.exception)
+        return app
+
+    def select_pending(self, app, view):
+        key = "edit_bar_select_widget" if view == "desktop" else "mobile_edit_select_widget"
+        pending_key = next(k for k in app.session_state.fixture_group_keys if "_customer_pending_" in k)
+        app.selectbox(key=key).set_value(pending_key).run()
+        self.assertFalse(app.exception)
+
     def test_add_reschedule_and_confirm_in_both_gantt_forms(self):
         for view in ("desktop", "mobile"):
             with self.subTest(view=view):
-                app = AppTest.from_file(str(ROOT / "tests/fixtures/gantt_forms_app.py"))
-                app.session_state["fixture_headless"] = True
-                app.session_state["fixture_persist"] = True
-                app.session_state["fixture_show_add"] = True
-                app.run()
-                if view == "mobile":
-                    next(w for w in app.selectbox if w.label == "Έκδοση").set_value(view).run()
-
+                app = self.app(view, add=True)
                 prefix = "qa" if view == "desktop" else "mqa"
                 app.checkbox(key=f"{prefix}_customer_0_pending").set_value(True)
                 follow_up = date(2026, 11, 17)
@@ -84,10 +96,10 @@ class ConfirmationFormTests(unittest.TestCase):
                 self.assertEqual(len(rows), 2)
                 self.assertTrue(all(confirmation.split_notes(r["notes"])[1] == follow_up.isoformat() for r in rows))
 
-                key = "edit_bar_select_widget" if view == "desktop" else "mobile_edit_select_widget"
-                pending_key = next(k for k in app.session_state.fixture_group_keys if "_customer_pending_" in k)
-                app.selectbox(key=key).set_value(pending_key).run()
-                edit_date = next(w for w in reversed(app.date_input) if w.label == "Ημερομηνία")
+                app = self.app(view, records=app.session_state.assignments)
+                self.select_pending(app, view)
+                date_label = "Αλλαγή Ημερομηνίας" if view == "desktop" else "Ημερομηνία"
+                edit_date = next(w for w in app.date_input if w.label == date_label)
                 edit_date.set_value(date(2026, 11, 20))
                 next(b for b in app.button if b.label == "💾 Αποθήκευση").click().run()
                 self.assertFalse(app.exception)
@@ -95,8 +107,8 @@ class ConfirmationFormTests(unittest.TestCase):
                 self.assertEqual({r["date"] for r in pending_rows}, {date(2026, 11, 20)})
                 self.assertEqual({r["employeeId"] for r in pending_rows}, {"e1", "e2"})
 
-                pending_key = next(k for k in app.session_state.fixture_group_keys if "_customer_pending_" in k)
-                app.selectbox(key=key).set_value(pending_key).run()
+                app = self.app(view, records=app.session_state.assignments)
+                self.select_pending(app, view)
                 next(b for b in app.button if b.label == "✓ Επιβεβαιώθηκε από τον πελάτη").click().run()
                 self.assertFalse(app.exception)
                 call = app.session_state.save_calls[-1]
