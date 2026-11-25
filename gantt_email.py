@@ -3,7 +3,8 @@ from html import escape
 import re
 
 
-_WEEKDAYS = ("Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Σάββατο", "Κυριακή")
+_WEEKDAYS = ("τη Δευτέρα", "την Τρίτη", "την Τετάρτη", "την Πέμπτη",
+             "την Παρασκευή", "το Σάββατο", "την Κυριακή")
 _MENU_LABEL = "Αντιγραφή κειμένου email"
 _MENU_PATTERN = re.compile(r"<select class='gantt-email-select'[^>]*>.*?</select>", re.DOTALL)
 
@@ -17,7 +18,7 @@ def drafts(group, employees_by_id):
     """Return paste-ready text suitable for the actual status of the placement."""
     project = group["Project"]
     day = group["Date"]
-    when = f"την {_WEEKDAYS[day.weekday()]} {day:%d/%m}"
+    when = f"{_WEEKDAYS[day.weekday()]} {day:%d/%m}"
     start, end = group["StartTime"], group["EndTime"]
     slot = f"{when}, με ώρα έναρξης {start}"
     work = f"οι εργασίες καθαριότητας για το έργο «{project}»"
