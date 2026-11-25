@@ -584,7 +584,8 @@ gantt_live_view.render(
     start_of_week, zoom_factor, gantt_height_px,
     visible_recurring_project_ids, search_prefix="mobile", detector_key=detector_key,
     initial_week=week, opening_search=opening_search_result, on_click=handle_chart_click,
-    can_refresh=lambda: not st.session_state.get("mobile_clicked_key"), only_pending=only_pending,
+    can_refresh=lambda: not st.session_state.get("mobile_clicked_key"),
+    only_pending=only_pending, email_menu=True,
 )
 
 if st.session_state.get("mobile_clicked_key"):
