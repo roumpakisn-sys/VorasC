@@ -13,6 +13,7 @@ import gantt_filters
 import gantt_html
 import gantt_live_sync
 import gantt_search
+import placement_confirmation
 import utils
 from gantt_helpers import get_local_today
 
@@ -43,7 +44,7 @@ def week_data(start_of_week, zoom_factor, visible_project_ids, search_target, *,
 
 def render(start_of_week, zoom_factor, height, visible_project_ids, *,
            search_prefix, detector_key, desktop=False, presentation_mode=False,
-           initial_week=None, opening_search=None, on_click=None, can_refresh=None):
+           initial_week=None, opening_search=None, on_click=None, can_refresh=None, only_pending=False):
     state = st.session_state
     id_prefix = "bar_" if desktop else "mobile_bar_"
     selected_key = "clicked_key" if desktop else "mobile_clicked_key"
@@ -59,13 +60,14 @@ def render(start_of_week, zoom_factor, height, visible_project_ids, *,
                 start_of_week, zoom_factor, visible_project_ids, search_target,
                 presentation_mode=presentation_mode,
             )
-        focus = gantt_search.find_search_bar(groups, search_target)
+        visible_groups = placement_confirmation.chart_groups(groups, only_pending)
+        focus = gantt_search.find_search_bar(visible_groups, search_target)
         missing_result = first_render and opening_search and not focus
         if on_click is not None and state.get(selected_key) != focus:
             focus = None
-        ids = {key: id_prefix + hashlib.md5(key.encode("utf-8")).hexdigest() for key in groups}
+        ids = {key: id_prefix + hashlib.md5(key.encode("utf-8")).hexdigest() for key in visible_groups}
         html = gantt_html.build_html_gantt(
-            groups, start_of_week, zoom_factor, ids, height,
+            visible_groups, start_of_week, zoom_factor, ids, height,
             focused_key=focus, scroll_to_focus=first_render and opening_search,
         )
         click_map = {value: key for key, value in ids.items()}

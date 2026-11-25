@@ -42,6 +42,7 @@ import gantt_search
 import gantt_staff_transfer
 import placement_roles
 import placement_details
+import placement_confirmation
 import placement_hours
 import placement_text
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
@@ -108,6 +109,7 @@ def open_search_result(day, assignment_id):
         st.session_state.gantt_presentation_mode = False
     st.session_state.gantt_search_target = (day, assignment_id)
     st.session_state.gantt_search_pending = True
+    st.session_state.pop("gantt_customer_pending_only", None)
 
 
 def preserve_context_notes(original_notes, edited_notes):
@@ -144,12 +146,13 @@ visible_recurring_project_ids = gantt_filters.render_recurring_project_visibilit
     recurring_patterns=st.session_state.recurring_patterns,
     on_change=clear_bar_selection,
 )
+only_pending = placement_confirmation.render_filter(start_of_week, key="gantt_customer_pending_only")
 if presentation_mode or not is_full_admin:
     gantt_live_view.render(
         start_of_week, zoom_factor, gantt_height_px,
         visible_recurring_project_ids, search_prefix="gantt",
         detector_key=f"gantt_detector_{st.session_state.detector_version}_{gantt_height_px}",
-        desktop=True, presentation_mode=presentation_mode,
+        desktop=True, presentation_mode=presentation_mode, only_pending=only_pending,
     )
     if not presentation_mode:
         st.divider()
@@ -213,12 +216,13 @@ if transfer_mode:
     gantt_live_sync.render_update_check(utils.supabase)
     if opening_search_result and not search_bar_key:
         st.info("Η τοποθέτηση έχει αλλάξει. Διάλεξε ξανά από τα αποτελέσματα.")
-    key_to_safe_id = {key: "bar_" + hashlib.md5(key.encode("utf-8")).hexdigest() for key in wk_groups}
+    chart_groups = placement_confirmation.chart_groups(wk_groups, only_pending)
+    key_to_safe_id = {key: "bar_" + hashlib.md5(key.encode("utf-8")).hexdigest() for key in chart_groups}
     safe_mapping = {safe_id: key for key, safe_id in key_to_safe_id.items()}
     focused_bar_key = st.session_state.get(gantt_staff_transfer.TARGET) or st.session_state.get(gantt_staff_transfer.SOURCE)
     st.session_state.setdefault("gantt_staff_drag_token", uuid.uuid4().hex)
     html_chart = gantt_html.build_html_gantt(
-        wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
+        chart_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
         focused_key=focused_bar_key,
         scroll_to_focus=opening_search_result,
         staff_drag_token=st.session_state.gantt_staff_drag_token,
@@ -240,7 +244,7 @@ else:
         visible_recurring_project_ids, search_prefix="gantt", detector_key=detector_key,
         desktop=True, initial_week=(filtered_assignments_by_date, wk_groups, export_data),
         opening_search=opening_search_result, on_click=handle_chart_click,
-        can_refresh=lambda: not st.session_state.get("clicked_key"),
+        can_refresh=lambda: not st.session_state.get("clicked_key"), only_pending=only_pending,
     )
 
 if st.session_state.get("clicked_key"):
@@ -493,6 +497,7 @@ if not presentation_mode:
                         key=f"qa_end_{qa_rc}",
                     )
 
+                add_confirmation = placement_confirmation.inputs(key=f"qa_customer_{qa_rc}")
                 c_add_save, c_add_copy = st.columns(2)
                 with c_add_save:
                     submit_new = st.form_submit_button("✅ Καταχώρηση", use_container_width=True)
@@ -608,6 +613,7 @@ if not presentation_mode:
                                     "recurring_id": None,
                                     "is_general": bool(is_general),
                                 }
+                                new_assign["notes"] = placement_confirmation.combine_notes(new_assign["notes"], add_confirmation)
                                 new_assigns.append(new_assign)
 
                         periodic_visits.confirm_spacing([], new_assigns, add_spacing_key, override=add_spacing_override)
@@ -697,6 +703,10 @@ if not presentation_mode:
                     edit_form_revision = st.session_state.get("edit_form_revision", 0)
                     edit_key = hashlib.sha1(selected_key.encode("utf-8")).hexdigest()[:12]
                     edit_key = f"{edit_key}_{edit_form_revision}"
+                    placement_confirmation.render_confirm_button(
+                        target_group, utils.save_assignment_batch, clear_bar_selection,
+                        key=f"confirm_customer_{edit_key}",
+                    )
                     st.markdown("⚡ **Γρήγορη Μετακίνηση**")
                     move_spacing_key = f"desktop_move_{edit_key}"
                     move_spacing_override = periodic_visits.spacing_review_control(move_spacing_key, in_form=False)
@@ -903,6 +913,13 @@ if not presentation_mode:
                             )
 
                         st.markdown("---")
+                        target_confirmation = target_group.get("CustomerConfirmation")
+                        edit_confirmation = placement_confirmation.inputs(
+                            key=f"edit_customer_{edit_key}", default=target_confirmation,
+                        )
+                        if e_is_cancelled:
+                            edit_confirmation = None
+
                         col_btn1, col_btn2, col_btn3 = st.columns(3)
                         with col_btn1:
                             save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
@@ -987,6 +1004,7 @@ if not presentation_mode:
                                 and placement_details.normalize(edit_project_details) == placement_details.normalize(target_project_details)
                                 and edit_actual_hours == target_actual_hours
                                 and edit_periodic_task == target_periodic_task
+                                and edit_confirmation == target_confirmation
                                 and bool(e_is_cancelled) == bool(target_group.get("is_cancelled", False))
                                 and normalized_cancel_reason == target_cancel_reason
                                 and bool(e_is_general) == bool(target_group.get("IsGeneral", False))
@@ -1026,7 +1044,7 @@ if not presentation_mode:
                                     if msg and msg != "Allowed Overlap":
                                         c_notes = f"{c_notes} {msg}".strip()
 
-                                    new_assigns.append({
+                                    new_assignment = {
                                         "id": str(uuid.uuid4()),
                                         "employeeId": eid,
                                         "projectId": final_edit_proj_id,
@@ -1051,7 +1069,11 @@ if not presentation_mode:
                                             target_recurring_id if current_edit_date == edit_date else None
                                         ),
                                         "is_general": bool(e_is_general),
-                                    })
+                                    }
+                                    new_assignment["notes"] = placement_confirmation.combine_notes(
+                                        new_assignment["notes"], edit_confirmation,
+                                    )
+                                    new_assigns.append(new_assignment)
                                 if has_blocking_error:
                                     break
 

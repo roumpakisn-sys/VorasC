@@ -11,6 +11,7 @@ import gantt_live_view
 import gantt_search
 import placement_roles
 import placement_details
+import placement_confirmation
 import placement_hours
 from gantt_helpers import get_local_today, normalize_id_list, clean_conflict_leave_notes
 from periodic_visits_runtime import load_periodic_visits
@@ -202,6 +203,7 @@ def open_search_result(day, assignment_id):
     st.session_state.mobile_week_date_input = day
     st.session_state.mobile_search_target = (day, assignment_id)
     st.session_state.mobile_search_pending = True
+    st.session_state.pop("mobile_customer_pending_only", None)
 
 
 def _start_of_week(d):
@@ -541,6 +543,7 @@ visible_recurring_project_ids = _get_mobile_visible_recurring_project_ids(
     recurring_patterns=st.session_state.recurring_patterns,
 )
 
+only_pending = placement_confirmation.render_filter(start_of_week, key="mobile_customer_pending_only")
 detector_key = (
     f"mobile_gantt_detector_{st.session_state.mobile_detector_version}"
     f"_{gantt_height_px}_{zoom_factor}_{app_scale}"
@@ -549,7 +552,7 @@ if not is_full_admin:
     gantt_live_view.render(
         start_of_week, zoom_factor, gantt_height_px,
         visible_recurring_project_ids, search_prefix="mobile",
-        detector_key=detector_key,
+        detector_key=detector_key, only_pending=only_pending,
     )
     st.info("Ο συγκεκριμένος χρήστης έχει μόνο προβολή.")
     st.stop()
@@ -581,7 +584,7 @@ gantt_live_view.render(
     start_of_week, zoom_factor, gantt_height_px,
     visible_recurring_project_ids, search_prefix="mobile", detector_key=detector_key,
     initial_week=week, opening_search=opening_search_result, on_click=handle_chart_click,
-    can_refresh=lambda: not st.session_state.get("mobile_clicked_key"),
+    can_refresh=lambda: not st.session_state.get("mobile_clicked_key"), only_pending=only_pending,
 )
 
 if st.session_state.get("mobile_clicked_key"):
@@ -669,6 +672,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
             key=f"mqa_end_{qa_rc}",
         )
 
+        add_confirmation = placement_confirmation.inputs(key=f"mqa_customer_{qa_rc}")
         submit_add = st.form_submit_button("Καταχώρηση", use_container_width=True)
         add_spacing_key = f"mobile_add_{qa_rc}"
         add_spacing_override = periodic_visits.spacing_review_control(add_spacing_key)
@@ -714,7 +718,7 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                         if va["msg"] and va["msg"] != "Allowed Overlap":
                             final_notes = f"{add_notes} {va['msg']}".strip()
 
-                        new_assigns.append({
+                        new_assignment = {
                             "id": str(uuid.uuid4()),
                             "employeeId": va["eid"],
                             "projectId": final_proj_id,
@@ -735,7 +739,11 @@ with st.expander("➕ Νέα Τοποθέτηση", expanded=False):
                             "cancel_reason": "",
                             "recurring_id": None,
                             "is_general": bool(is_general),
-                        })
+                        }
+                        new_assignment["notes"] = placement_confirmation.combine_notes(
+                            new_assignment["notes"], add_confirmation,
+                        )
+                        new_assigns.append(new_assignment)
 
                 periodic_visits.confirm_spacing([], new_assigns, add_spacing_key, override=add_spacing_override)
                 saved = utils.save_assignment_batch([], new_assigns, project=pending_new_project)
@@ -793,6 +801,10 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
             )
 
             edit_suffix = "_" + hashlib.sha1(selected_key.encode()).hexdigest()[:12]
+            placement_confirmation.render_confirm_button(
+                target_group, utils.save_assignment_batch, clear_mobile_selection,
+                key=f"mobile_confirm_customer{edit_suffix}",
+            )
             with st.form("mobile_quick_edit" + edit_suffix):
                 edit_date = st.date_input("Ημερομηνία", value=target_group["Date"])
 
@@ -911,6 +923,12 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                     key=f"mobile_edit_cancel_reason{edit_suffix}",
                 )
 
+                edit_confirmation = placement_confirmation.inputs(
+                    key=f"mobile_edit_customer{edit_suffix}", default=target_group.get("CustomerConfirmation"),
+                )
+                if e_is_cancelled:
+                    edit_confirmation = None
+
                 save_edit = st.form_submit_button("💾 Αποθήκευση", use_container_width=True)
                 delete_edit = st.form_submit_button("🗑️ Οριστική Διαγραφή", use_container_width=True)
                 edit_spacing_key = f"mobile_edit{edit_suffix}"
@@ -983,7 +1001,7 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                 if va["msg"] and va["msg"] != "Allowed Overlap":
                                     final_notes = f"{edit_notes} {va['msg']}".strip()
 
-                                new_assigns.append({
+                                new_assignment = {
                                     "id": str(uuid.uuid4()),
                                     "employeeId": va["eid"],
                                     "projectId": final_edit_proj_id,
@@ -1004,7 +1022,11 @@ with st.expander("✏️ Επεξεργασία Μπάρας", expanded=bool(st.
                                     "cancel_reason": normalized_cancel_reason,
                                     "recurring_id": target_group.get("RecurringId"),
                                     "is_general": bool(e_is_general),
-                                })
+                                }
+                                new_assignment["notes"] = placement_confirmation.combine_notes(
+                                    new_assignment["notes"], edit_confirmation,
+                                )
+                                new_assigns.append(new_assignment)
 
                             periodic_visits.confirm_spacing(
                                 old_assigns, new_assigns, edit_spacing_key, override=edit_spacing_override,

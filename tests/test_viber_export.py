@@ -8,6 +8,7 @@ import unittest
 
 import placement_roles
 import placement_details
+import placement_confirmation
 from test_regression_smoke import get_source_functions
 
 try:
@@ -51,6 +52,15 @@ class ViberGroupingTests(unittest.TestCase):
             text = self.env["_format_viber_employees"](group["employees"])
             self.assertEqual(text, "*Άννα*")
             self.assertNotIn("Χωρίς Προσωπικό", text)
+
+    def test_pending_shift_is_excluded_from_both_viber_groups_and_overlap_labels(self):
+        pending = assignment("pending", "e1", projectId="previous", startTime="08:00", endTime="10:00",
+                             notes=placement_confirmation.combine_notes("Εσωτερικά", "2026-11-15"))
+        confirmed = assignment("confirmed", "e1")
+        group, = self.groups([pending, confirmed])
+        self.assertEqual(group["employees"], ["Άννα"])
+        self.assertEqual(group["notes"], [])
+        self.assertEqual(self.groups([pending]), [])
 
     def test_actual_unstaffed_shift_remains_unstaffed(self):
         group, = self.groups([assignment(notes="[Άδεια: Μαρία]")])

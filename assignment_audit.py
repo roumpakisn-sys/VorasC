@@ -5,6 +5,7 @@ import placement_details
 import placement_roles
 import placement_hours
 import periodic_visits
+import placement_confirmation
 
 
 def format_assignment_changes(before, after, employees=(), projects=()):
@@ -29,6 +30,7 @@ def format_assignment_changes(before, after, employees=(), projects=()):
         notes, details = placement_details.split_notes(notes)
         notes, actual_hours = placement_hours.split_notes(notes)
         notes, visit = periodic_visits.split_notes(notes)
+        notes, pending = placement_confirmation.split_notes(notes)
         return {
             'Εργαζόμενος': name(row.get('employeeId'), employee_names, 'Χωρίς προσωπικό'),
             'Έργο': name(row.get('projectId'), project_names, 'Άγνωστο έργο'),
@@ -43,6 +45,8 @@ def format_assignment_changes(before, after, employees=(), projects=()):
             'Γενικός καθαρισμός': 'Ναι' if row.get('is_general') else 'Όχι',
             'Επαναλαμβανόμενη σειρά': row.get('recurring_id') or '',
             'Παρατηρήσεις': notes,
+            'Επιβεβαίωση πελάτη': placement_confirmation.PENDING_LABEL if pending is not None else '',
+            'Επανεπικοινωνία': day(pending),
             'Περιοδική εργασία': visit['name'] if visit else '',
             'Πραγματικές ώρες': f'{actual_hours:g}' if actual_hours is not None else '',
             **{label: roles[key] for key, label in placement_roles.LABELS.items()},
@@ -68,8 +72,13 @@ def format_assignment_changes(before, after, employees=(), projects=()):
             lines.append(snapshot('Προσθήκη', current))
             continue
         previous = fields(old)
-        changes = [f'{key}: {previous[key] or "(κενό)"} → {value or "(κενό)"}'
-                   for key, value in current.items() if value != previous[key]]
+        changes = []
+        for key, value in current.items():
+            if value == previous[key]:
+                continue
+            if key == 'Επιβεβαίωση πελάτη' and not value and not row.get('is_cancelled'):
+                value = 'Επιβεβαιώθηκε'
+            changes.append(f'{key}: {previous[key] or "(κενό)"} → {value or "(κενό)"}')
         if changes:
             lines.append(f'Αλλαγή: {heading(previous)}; ' + '; '.join(changes))
     for row in before:
