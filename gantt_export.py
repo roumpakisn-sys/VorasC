@@ -5,6 +5,8 @@ import io
 import pandas as pd
 import streamlit as st
 
+from gantt_email import without_email_menu
+
 
 def create_gantt_excel(export_data):
     df_export = pd.DataFrame(export_data)
@@ -71,7 +73,7 @@ def render_gantt_html_export(html_chart, start_of_week):
     <div class="export-subtitle">
         Εβδομάδα: {start_of_week.strftime('%d/%m/%Y')} - {(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}
     </div>
-    {html_chart}
+    {without_email_menu(html_chart)}
 </body>
 </html>
 """

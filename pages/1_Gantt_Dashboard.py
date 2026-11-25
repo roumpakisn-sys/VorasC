@@ -153,6 +153,7 @@ if presentation_mode or not is_full_admin:
         visible_recurring_project_ids, search_prefix="gantt",
         detector_key=f"gantt_detector_{st.session_state.detector_version}_{gantt_height_px}",
         desktop=True, presentation_mode=presentation_mode, only_pending=only_pending,
+        email_menu=is_full_admin,
     )
     if not presentation_mode:
         st.divider()
@@ -225,7 +226,7 @@ if transfer_mode:
         chart_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
         focused_key=focused_bar_key,
         scroll_to_focus=opening_search_result,
-        staff_drag_token=st.session_state.gantt_staff_drag_token,
+        staff_drag_token=st.session_state.gantt_staff_drag_token, email_menu=True,
     )
     clicked_safe_id = click_detector(html_chart, key=detector_key)
     gantt_export.render_gantt_html_export(html_chart, start_of_week)
@@ -244,7 +245,7 @@ else:
         visible_recurring_project_ids, search_prefix="gantt", detector_key=detector_key,
         desktop=True, initial_week=(filtered_assignments_by_date, wk_groups, export_data),
         opening_search=opening_search_result, on_click=handle_chart_click,
-        can_refresh=lambda: not st.session_state.get("clicked_key"), only_pending=only_pending,
+        can_refresh=lambda: not st.session_state.get("clicked_key"), only_pending=only_pending, email_menu=True,
     )
 
 if st.session_state.get("clicked_key"):

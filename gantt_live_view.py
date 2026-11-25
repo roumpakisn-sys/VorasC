@@ -44,7 +44,7 @@ def week_data(start_of_week, zoom_factor, visible_project_ids, search_target, *,
 
 def render(start_of_week, zoom_factor, height, visible_project_ids, *,
            search_prefix, detector_key, desktop=False, presentation_mode=False,
-           initial_week=None, opening_search=None, on_click=None, can_refresh=None, only_pending=False):
+           initial_week=None, opening_search=None, on_click=None, can_refresh=None, only_pending=False, email_menu=False):
     state = st.session_state
     id_prefix = "bar_" if desktop else "mobile_bar_"
     selected_key = "clicked_key" if desktop else "mobile_clicked_key"
@@ -68,7 +68,7 @@ def render(start_of_week, zoom_factor, height, visible_project_ids, *,
         ids = {key: id_prefix + hashlib.md5(key.encode("utf-8")).hexdigest() for key in visible_groups}
         html = gantt_html.build_html_gantt(
             visible_groups, start_of_week, zoom_factor, ids, height,
-            focused_key=focus, scroll_to_focus=first_render and opening_search,
+            focused_key=focus, scroll_to_focus=first_render and opening_search, email_menu=email_menu,
         )
         click_map = {value: key for key, value in ids.items()}
 

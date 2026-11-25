@@ -18,7 +18,8 @@ def get_local_today():
 
 
 def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gantt_height_px,
-                     *, focused_key=None, scroll_to_focus=False, staff_drag_token=None):
+                     *, focused_key=None, scroll_to_focus=False, staff_drag_token=None, email_menu=False):
+    import gantt_email
     import placement_confirmation
 
     timeline_width_px = int(2400 * zoom_factor)
@@ -144,6 +145,21 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         """
 
     html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; } .gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn { position:absolute; top:2px; width:18px; height:18px; border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.78); color:#ffffff; font-size:11px; line-height:16px; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.35); } .gantt-copy-project-btn { right:2px; } .gantt-copy-full-btn { right:24px; } .gantt-copy-crew-btn { right:46px; } .gantt-copy-project-btn:hover, .gantt-copy-full-btn:hover, .gantt-copy-crew-btn:hover { background:rgba(220,38,38,0.92); transform:scale(1.08); }</style>"
+
+    if email_menu:
+        html += """
+        <style>
+          .gantt-email-select {
+              position:absolute; top:2px; right:68px; width:18px; max-width:100%; height:18px;
+              border:1px solid rgba(255,255,255,0.75); border-radius:5px;
+              background:rgba(15,23,42,0.78); color:#fff; font-size:14px; text-align:center;
+              appearance:none; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto;
+          }
+          .gantt-email-select option { background:#fff; color:#0f172a; font-size:14px; }
+          .gantt-email-select + div { padding-right:88px !important; }
+          .gantt-email-select[style] + div { padding-right:66px !important; }
+        </style>
+        """
 
     html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
     html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b; font-size: 14px;'>Ημέρα / Προσωπικό</div>"
@@ -556,6 +572,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             focus_style = "outline: 3px solid #2563eb; outline-offset: 2px; z-index: 25;" if is_focused else ""
             drop_attr = " data-staff-drop-target='true'" if staff_drag_token and not g.get("is_cancelled") else ""
 
+            email_select = ""
+            if email_menu:
+                email_select = gantt_email.menu_html(
+                    g, employee_details_by_id, compact=width_pct * timeline_width_px < 8800,
+                )
+
             html += (
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
@@ -566,6 +588,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 f"<button type='button' class='gantt-copy-crew-btn' data-crew-text='{crew_text_attr}' data-crew-html='{crew_html_attr}' title='Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων'>👥</button>"
                 f"<button type='button' class='gantt-copy-full-btn' data-full-content='{full_bar_copy_attr}' title='Αντιγραφή όλου του περιεχομένου μπάρας'>⧉</button>"
                 f"<button type='button' class='gantt-copy-project-btn' data-project='{project_copy_attr}' title='Αντιγραφή ονόματος έργου'>📋</button>"
+                f"{email_select}"
                 f"<div style='line-height: 1.15; pointer-events: none; width: 100%; padding: 0 66px 0 4px; display: -webkit-box; "
                 f"-webkit-line-clamp: {TEXT_LINES}; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
             )
@@ -658,7 +681,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (isCopyProjectButtonTarget(e)) return;
+        if (isCopyProjectButtonTarget(e) || e.target.closest('.gantt-email-select')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -685,7 +708,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (isCopyProjectButtonTarget(e)) return;
+        if (isCopyProjectButtonTarget(e) || e.target.closest('.gantt-email-select')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
@@ -794,7 +817,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         if (navigator.clipboard && window.isSecureContext) {
           return navigator.clipboard.writeText(text);
         }
+        return copyTextFallback(text);
+      }
 
+      function copyTextFallback(text) {
         return new Promise(function(resolve, reject) {
           try {
             var textarea = document.createElement('textarea');
@@ -880,7 +906,35 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         return e && e.target && e.target.closest && e.target.closest('.gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn');
       }
 
+      function onEmailChange(e) {
+        var select = e.target.closest('.gantt-email-select');
+        if (!select) return;
+        var text = select.options[select.selectedIndex].getAttribute('data-email-copy');
+        select.selectedIndex = 0;
+        if (!text) return;
+        var indicator = select.options[0];
+        clearTimeout(select.copyFeedbackTimeout);
+
+        function feedback(ok) {
+          indicator.textContent = ok ? '✓' : '!';
+          select.title = ok ? 'Το κείμενο αντιγράφηκε' : 'Αδυναμία αντιγραφής';
+          select.copyFeedbackTimeout = setTimeout(function() {
+            indicator.textContent = '▾';
+            select.title = select.getAttribute('aria-label');
+          }, 900);
+        }
+
+        var copy = navigator.clipboard && window.isSecureContext
+          ? copyTextToClipboard(text).catch(function() { return copyTextFallback(text); })
+          : copyTextToClipboard(text);
+        copy.then(function() { feedback(true); }).catch(function() { feedback(false); });
+      }
+
       function onClickCapture(e) {
+        if (e.target.closest('.gantt-email-select')) {
+          e.stopPropagation();
+          return;
+        }
         var copyBtn = isCopyProjectButtonTarget(e);
         if (copyBtn) {
           e.preventDefault();
@@ -896,6 +950,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         }
       }
 
+      s.addEventListener('change', onEmailChange);
       s.addEventListener('scroll', onScroll);
       if (target) onScroll();
       s.addEventListener('mousedown', onMouseDown, true);
@@ -917,6 +972,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       document.addEventListener('click', onClickCapture, true);
 
       window.ganttDragCleanup = function () {
+        s.removeEventListener('change', onEmailChange);
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
         s.removeEventListener('mousemove', onMouseMoveLocal, true);
