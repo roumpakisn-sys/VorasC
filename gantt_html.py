@@ -60,11 +60,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 return True
         return False
 
-    def drag_worker(eid, label_html, *, from_list=False):
+    def drag_worker(eid, label_html, *, from_list=False, description=None):
         if not staff_drag_token:
             return label_html
         origin = " data-staff-origin='availability'" if from_list else ""
-        title = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
+        action = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
+        title = html_utils.escape(f"{description} · {action}" if description else action, quote=True)
         return (
             f"<span class='gantt-transfer-worker' draggable='true'{origin} "
             f"data-employee='{html_utils.escape(str(eid), quote=True)}' title='{title}'>"
@@ -109,6 +110,44 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
             }
             #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
+            #gantt-master-container .gantt-bar-content.gantt-transfer-content {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+            }
+            #gantt-master-container .gantt-transfer-names {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-content: flex-start;
+                gap: 2px;
+                min-height: 15px;
+                overflow-y: auto;
+                pointer-events: auto;
+                scrollbar-width: thin;
+            }
+            #gantt-master-container .gantt-transfer-names .gantt-transfer-worker {
+                display: block;
+                min-width: 0;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                line-height: 13px;
+            }
+            #gantt-master-container .gantt-transfer-summary {
+                flex: 0 0 auto;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-content { padding: 0 1px; }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names { scrollbar-width: none; }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names .gantt-transfer-worker {
+                padding-inline: 2px;
+            }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names .gantt-transfer-worker::before {
+                display: none;
+            }
             #gantt-master-container .gantt-transfer-worker:hover,
             #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
@@ -454,7 +493,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             width_pct = t2p(g["EndTime"]) - left_pct
             top_px = lane_idx * LANE_STEP_PX + ROW_PAD_TOP_PX
 
-            def _employee_text_html(employee_name):
+            def _employee_text_html(employee_name, *, name_only=False):
                 """
                 Μορφοποίηση μόνο του ονόματος εργαζόμενου μέσα στη μπάρα.
                 - Κανονικά ονόματα: λευκά γράμματα.
@@ -462,8 +501,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 Δεν αλλάζει δεδομένα ή λογική, μόνο HTML εμφάνιση.
                 """
                 text_value = str(employee_name or "").upper().strip()
-                escaped_value = html_utils.escape(text_value)
-
                 if text_value.startswith("[ΜΕΤΑ ΑΠΟ ") and "▶" in text_value:
                     before_arrow, after_arrow = text_value.split("▶", 1)
                     after_arrow = after_arrow.strip()
@@ -472,25 +509,27 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         after_arrow = after_arrow[:-1].strip()
                         closing = "]"
 
-                    red_part = html_utils.escape(before_arrow.strip() + " ▶")
-                    white_name = html_utils.escape(after_arrow)
-                    red_closing = html_utils.escape(closing)
-
-                    return (
-                        "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
-                        + red_part
-                        + " </span>"
-                        + "<span style='color:#ffffff; font-weight:900; text-shadow:0 1px 2px rgba(0,0,0,0.55);'>"
-                        + white_name
-                        + "</span>"
-                        + "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
-                        + red_closing
-                        + "</span>"
-                    )
+                    if name_only:
+                        text_value = after_arrow
+                    else:
+                        red_part = html_utils.escape(before_arrow.strip() + " ▶")
+                        white_name = html_utils.escape(after_arrow)
+                        red_closing = html_utils.escape(closing)
+                        return (
+                            "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
+                            + red_part
+                            + " </span>"
+                            + "<span style='color:#ffffff; font-weight:900; text-shadow:0 1px 2px rgba(0,0,0,0.55);'>"
+                            + white_name
+                            + "</span>"
+                            + "<span style='color:var(--gantt-context-color, #dc2626); font-weight:900;'>"
+                            + red_closing
+                            + "</span>"
+                        )
 
                 return (
                     "<span style='color:#ffffff; font-weight:900; text-shadow:0 1px 2px rgba(0,0,0,0.55);'>"
-                    + escaped_value
+                    + html_utils.escape(text_value)
                     + "</span>"
                 )
 
@@ -533,17 +572,18 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             grouped_employee_labels = _group_employee_labels(g["Employees"])
             emps_plain = ", ".join(grouped_employee_labels).upper()
             emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
+            handles = []
             if staff_drag_token and not g.get("is_cancelled"):
-                handles = []
                 seen = set()
                 employee_ids = [eid for eid in g.get("EmployeeIds", []) if eid]
                 for eid, employee_label in zip(employee_ids, g["Employees"]):
                     if eid in seen:
                         continue
                     seen.add(eid)
-                    handles.append(drag_worker(eid, _employee_text_html(employee_label)))
-                if handles:
-                    emps_html = ", ".join(handles)
+                    full_name = employee_details_by_id.get(eid, {}).get("name") or employee_label
+                    handles.append(drag_worker(
+                        eid, _employee_text_html(employee_label, name_only=True), description=full_name,
+                    ))
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
@@ -552,9 +592,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 emps_html = "⚠️ " + emps_html
 
             base_text_plain = f"{arr_str}{g['StartTime']}-{g['EndTime']} | {proj_name} | {emps_plain}"
-            base_text = (
+            summary = (
                 f"{html_utils.escape(arr_str)}{g['StartTime']}-{g['EndTime']} | "
-                f"{html_utils.escape(proj_name)} | {emps_html}"
+                f"{html_utils.escape(proj_name)}"
             )
 
             pending = g.get("CustomerConfirmation")
@@ -562,15 +602,17 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 pending_label = placement_confirmation.PENDING_LABEL
                 follow_up = placement_confirmation.follow_up_label(pending)
                 base_text_plain = " · ".join(part for part in (pending_label, follow_up, base_text_plain) if part)
-                base_text = (
+                summary = (
                     "<span style='background:#fef3c7;color:#78350f;padding:0 3px;border-radius:3px;'>"
-                    f"{pending_label}</span> {base_text}"
+                    f"{pending_label}</span> {summary}"
                 )
+            notes_html = ""
             if g["Notes"]:
                 notes_upper = g["Notes"].upper()
                 base_text_plain += f" ({notes_upper})"
-                base_text += f" ({html_utils.escape(notes_upper)})"
+                notes_html = f" ({html_utils.escape(notes_upper)})"
 
+            base_text = f"{summary} | {emps_html}{notes_html}"
             if g["is_cancelled"]:
                 base_text = f"<s>{base_text}</s>"
                 if g["cancel_reason"]:
@@ -668,6 +710,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         f"<template>{email_options}</template>"
                     )
 
+            if handles:
+                content = (
+                    "<div class='gantt-bar-content gantt-transfer-content'>"
+                    "<div class='gantt-transfer-names' role='group' aria-label='Προσωπικό για μεταφορά' tabindex='0'>"
+                    + "".join(handles)
+                    + f"</div><div class='gantt-transfer-summary'>{summary}{notes_html}</div></div>"
+                )
+            else:
+                content = f"<div class='gantt-bar-content'>{base_text}</div>"
+
             html += (
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
@@ -675,8 +727,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; {focus_style}' title='{tooltip}'>"
-                f"<div class='gantt-bar-content'>{base_text}</div>"
-                f"<div class='gantt-bar-actions'>{actions}</div></a>"
+                f"{content}<div class='gantt-bar-actions'>{actions}</div></a>"
             )
 
         html += "</div></div>"
@@ -770,7 +821,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (e.target.closest('.gantt-bar-actions')) return;
+        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-names')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -797,7 +848,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (e.target.closest('.gantt-bar-actions')) return;
+        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-names')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
