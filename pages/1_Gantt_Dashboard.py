@@ -228,7 +228,7 @@ if transfer_mode:
         scroll_to_focus=opening_search_result,
         staff_drag_token=st.session_state.gantt_staff_drag_token, email_menu=True,
     )
-    clicked_safe_id = click_detector(html_chart, key=detector_key)
+    clicked_safe_id = click_detector(html_chart, key=f"{detector_key}_transfer")
     gantt_export.render_gantt_html_export(html_chart, start_of_week)
     handle_chart_click(clicked_safe_id, safe_mapping)
     gantt_staff_transfer.render_transfer(

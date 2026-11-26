@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from urllib.parse import quote
@@ -197,7 +198,7 @@ class DragMarkupTests(unittest.TestCase):
         handles = [attrs for _, attrs in parsed.tags
                    if attrs.get("class") == "gantt-transfer-worker" and "data-staff-origin" not in attrs]
         self.assertEqual([(handle["data-employee"], handle["draggable"]) for handle in handles],
-                         [("e", "true"), ("e", "true")])
+                         [("e", "true")])
         self.assertEqual(sum("data-staff-drop-target" in attrs for _, attrs in parsed.tags), 2)
         self.assertEqual(sum("data-staff-unassign-target" in attrs for _, attrs in parsed.tags), 7)
         for heading, employee_id in (("ΔΙΑΘΕΣΙΜΟΙ", "free"), ("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ", "early"),
@@ -206,30 +207,39 @@ class DragMarkupTests(unittest.TestCase):
                                      rf"data-employee='{employee_id}'")
 
         source = next(group for group in groups.values() if group["Employees"] != ["ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"])
+        extra_staff = [
+            {"id": f"extra-{index}", "name": f"Εργαζόμενος Δοκιμαστικού Συνεργείου {index}"}
+            for index in range(4)
+        ]
+        staff.extend(extra_staff)
         short_bar = {
             **source,
+            "StartTime": "09:00",
             "EndTime": "09:15",
-            "ProjectDisplay": "Μακρύ όνομα έργου για μικρή μπάρα",
-            "Employees": ["[ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ]", "ΕΛΕΝΗ"],
-            "EmployeeIds": ["", "free", "early"],
+            "ProjectDisplay": "Μακρύ όνομα έργου για πολύ μικρή μπάρα",
+            "Employees": ["[ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ]", *[e["name"] for e in extra_staff]],
+            "EmployeeIds": ["", "free", *[e["id"] for e in extra_staff]],
         }
-        short_groups = {source["Key"]: short_bar}
-        narrow = build(short_groups, day, 1, mapping, 500, staff_drag_token="token")
+        next_bar = {**source, "Key": "next-bar", "StartTime": "09:15", "EndTime": "09:30"}
+        short_groups = {source["Key"]: short_bar, next_bar["Key"]: next_bar}
+        short_mapping = {source["Key"]: "short-bar", next_bar["Key"]: "next-bar"}
+        narrow = build(short_groups, day, 0.5, short_mapping, 500, staff_drag_token="token")
         narrow_tags = Collector()
         narrow_tags.feed(narrow)
-        bar, = [attrs for _, attrs in narrow_tags.tags if attrs.get("class") == "mygantt-bar"]
-        self.assertEqual(bar["data-gantt-stacked"], "true")
-        self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bar["title"])
-        self.assertEqual(bar["data-staff-preview"], "true")
+        bars = {attrs["id"]: attrs for _, attrs in narrow_tags.tags if attrs.get("class") == "mygantt-bar"}
+        self.assertIn("data-staff-widened", bars["short-bar"])
+        self.assertNotIn("data-gantt-stacked", bars["short-bar"])
+        self.assertIn("09:00-09:15", bars["short-bar"]["title"])
+        self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bars["short-bar"]["title"])
         project = html.escape(short_bar["ProjectDisplay"].upper())
-        schedule = f"{short_bar['StartTime']}-{short_bar['EndTime']}"
-        self.assertIn(f"<div class='gantt-bar-content'>{project} | ", narrow)
-        preview = narrow.split("<template class='gantt-transfer-preview-template'>", 1)[1].split("</template>", 1)[0]
-        self.assertIn(f"<strong class='gantt-transfer-preview-project'>{project}</strong>", preview)
-        self.assertIn(schedule, preview)
-        for employee_id, name in (("free", "Άννα"), ("early", "Ελένη")):
-            self.assertRegex(preview, rf"draggable='true' data-employee='{employee_id}' title='[^']+'>{name}</span>")
-        self.assertNotIn("class='gantt-transfer-preview-template'", build(short_groups, day, 1, mapping, 500))
+        self.assertIn(f"<strong class='gantt-transfer-project'>{project}</strong>", narrow)
+        for employee in [{"id": "free", "name": "Άννα"}, *extra_staff]:
+            self.assertIn(f"data-employee='{employee['id']}'", narrow)
+            self.assertIn(f">{employee['name']}</span>", narrow)
+        ordinary_short = build(short_groups, day, 0.5, short_mapping, 500)
+        self.assertNotIn("data-staff-widened", ordinary_short)
+        self.assertNotIn("class='gantt-transfer-roster'", ordinary_short)
+        self.check_short_bar_in_browser(narrow)
 
         node = shutil.which("node")
         if not node:
@@ -238,23 +248,14 @@ class DragMarkupTests(unittest.TestCase):
         harness = r'''
 const assert = require('assert');
 const handlers = {};
-const documentHandlers = {};
-const panelHandlers = {};
 const displayClasses = () => {
   const classes = new Set();
   return {add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name)};
 };
-const template = {content:{cloneNode(deep){assert.strictEqual(deep,true);return {type:'roster'};}}};
-const source = {
-  id:'bar-0',isConnected:true,style:{backgroundColor:'#ee0'},
-  querySelector(selector) {assert.strictEqual(selector,'.gantt-transfer-preview-template');return template;},
-  getBoundingClientRect(){return {left:570,top:430,bottom:475};}
-};
+const source = {id:'bar-0'};
 const target = {id:'bar-1', classList:displayClasses()};
 const chip = {dataset:{employee:'e'},classList:displayClasses(),closest(){return source;}};
 let reported;
-let panel;
-const panelChip = {dataset:{employee:'e2'},classList:displayClasses(),closest(){return null;}};
 const link = {click(){reported = this.id;}};
 const surface = {
   dataset:{staffDragToken:'token'},classList:displayClasses(),style:{},offsetLeft:0,scrollWidth:600,scrollLeft:0,scrollTop:0,
@@ -264,20 +265,8 @@ const surface = {
 global.sessionStorage = {getItem(){return null;},setItem(){}};
 global.window = {addEventListener(){},removeEventListener(){}};
 global.document = {
-  documentElement:{clientWidth:600,clientHeight:500},
-  body:{style:{},appendChild(el){panel = el;}},
-  getElementById(){return surface;},querySelector(){return link;},
-  createElement(name){
-    assert.strictEqual(name,'div');
-    return {
-      style:{setProperty(){}},classList:displayClasses(),offsetWidth:310,offsetHeight:130,
-      setAttribute(){},appendChild(el){this.content=el;},
-      addEventListener(type,fn){panelHandlers[type] = fn;},
-      contains(el){return el === panelChip;},
-      remove(){panel = null;}
-    };
-  },
-  addEventListener(type,fn){documentHandlers[type] = fn;},removeEventListener(){}
+  body:{style:{}},getElementById(){return surface;},querySelector(){return link;},
+  addEventListener(){},removeEventListener(){}
 };
 global.setTimeout = fn => {fn();};
 '''
@@ -328,29 +317,53 @@ assert.ok(!leftList.classList.contains('gantt-drop-hover'));
 const unassignment = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
 assert.deepStrictEqual([unassignment.source,unassignment.target,unassignment.employee],['bar-0',null,'e']);
 
-const hover = {pointerType:'mouse',target:{closest(selector){
-  return selector === 'a[data-staff-preview]' ? source : null;
-}}};
-documentHandlers.pointerover(hover);
-assert.strictEqual(panel.content.type,'roster');
-assert.strictEqual(panel.style.top,'300px');
-assert.strictEqual(panel.style.left,'284px');
-documentHandlers.pointerover({pointerType:'mouse',target:panelChip});
-assert.ok(panel);
-panelHandlers.dragstart({...e,target:{closest(){return panelChip;}}});
-assert.ok(panel.classList.contains('gantt-preview-dragging'));
-handlers.dragover(dest);
-handlers.drop(dest);
-assert.strictEqual(panel,null);
-const expandedMove = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
-assert.deepStrictEqual([expandedMove.source,expandedMove.target,expandedMove.employee],['bar-0','bar-1','e2']);
-documentHandlers.pointerover(hover);
-panelHandlers.dragstart({...e,target:{closest(){return panelChip;}}});
-panelHandlers.dragend();
-assert.strictEqual(panel,null);
 '''
         run = subprocess.run([node, "-"], input=harness + script + checks, text=True, capture_output=True)
         self.assertEqual(run.returncode, 0, run.stderr)
+
+    def check_short_bar_in_browser(self, chart_html):
+        browser = shutil.which("google-chrome") or shutil.which("chromium")
+        if browser is None or subprocess.run([browser, "--version"], capture_output=True, timeout=5).returncode:
+            return
+        script = """
+<script>
+window.addEventListener('load', () => {
+    const bar = document.getElementById('short-bar');
+    const next = document.getElementById('next-bar');
+    const bounds = bar.getBoundingClientRect();
+    const project = bar.querySelector('.gantt-transfer-project');
+    const workers = Array.from(bar.querySelectorAll('.gantt-transfer-worker'));
+    const withinBar = (element) => {
+        const box = element.getBoundingClientRect();
+        return box.height > 0 && box.width > 0 && box.top >= bounds.top
+            && box.bottom <= bounds.bottom && box.left >= bounds.left && box.right <= bounds.right
+            && element.scrollWidth <= element.clientWidth;
+    };
+    document.body.dataset.transferLayout = JSON.stringify({
+        barWidth: Math.round(bounds.width),
+        project: withinBar(project),
+        workers: workers.length === 5 && workers.every(withinBar),
+        separateLanes: next.getBoundingClientRect().top >= bounds.bottom,
+    });
+});
+</script>
+"""
+        with TemporaryDirectory() as folder:
+            fixture = Path(folder) / "transfer.html"
+            fixture.write_text(f"<!doctype html><meta charset='utf-8'><body>{chart_html}{script}</body>",
+                               encoding="utf-8")
+            result = subprocess.run(
+                [browser, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                 "--disable-background-networking", "--window-size=960,740", "--virtual-time-budget=1000",
+                 f"--user-data-dir={folder}/profile", "--dump-dom", fixture.as_uri()],
+                text=True, capture_output=True, timeout=25,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        page = re.search(r'data-transfer-layout="([^"]+)"', result.stdout)
+        self.assertIsNotNone(page, "The browser did not report the transfer layout.")
+        self.assertEqual(json.loads(html.unescape(page[1])), {
+            "barWidth": 220, "project": True, "workers": True, "separateLanes": True,
+        })
 
 
 @unittest.skipIf(AppTest is None, "Install Streamlit UI test dependencies")

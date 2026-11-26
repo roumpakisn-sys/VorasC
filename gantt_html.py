@@ -32,6 +32,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     ROW_PAD_BOTTOM_PX = 6
     COMPACT_ACTIONS_WIDTH = 160
     STACKED_ACTIONS_WIDTH = 54
+    TRANSFER_BAR_MIN_PX = 220
 
     emp_short_names = {}
     employee_details_by_id = {}
@@ -60,12 +61,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 return True
         return False
 
-    def drag_worker(eid, label_html, *, from_list=False, description=None):
+    def drag_worker(eid, label_html, *, from_list=False):
         if not staff_drag_token:
             return label_html
         origin = " data-staff-origin='availability'" if from_list else ""
-        action = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
-        title = html_utils.escape(f"{description} · {action}" if description else action, quote=True)
+        title = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
         return (
             f"<span class='gantt-transfer-worker' draggable='true'{origin} "
             f"data-employee='{html_utils.escape(str(eid), quote=True)}' title='{title}'>"
@@ -85,8 +85,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     if staff_drag_token:
         html += """
         <style>
-            #gantt-master-container .gantt-transfer-worker,
-            .gantt-transfer-preview .gantt-transfer-worker {
+            #gantt-master-container .gantt-transfer-worker {
                 --gantt-context-color: #fda4af;
                 pointer-events: auto;
                 cursor: grab;
@@ -101,8 +100,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 box-shadow: inset 0 0 0 1px #64748b, 0 1px 2px rgb(15 23 42 / 22%);
                 transition: background-color 120ms ease, box-shadow 120ms ease;
             }
-            #gantt-master-container .gantt-transfer-worker::before,
-            .gantt-transfer-preview .gantt-transfer-worker::before {
+            #gantt-master-container .gantt-transfer-worker::before {
                 content: "";
                 display: inline-block;
                 width: 8px;
@@ -112,52 +110,45 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
             }
             #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-worker { padding-inline: 2px; }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-worker::before { display: none; }
-            .gantt-transfer-preview {
-                position: fixed;
-                z-index: 9999;
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                box-sizing: border-box;
-                width: min(26rem, calc(100vw - 12px));
-                max-height: calc(100vh - 12px);
-                overflow: auto;
-                padding: 10px;
-                border: 1px solid var(--gantt-edge, #cbd5e1);
-                border-left: 4px solid var(--gantt-transfer-bar-color, #64748b);
-                border-radius: 8px;
-                background: var(--gantt-menu-bg, #fff);
-                color: var(--gantt-text, #0f172a);
-                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
-                font: 13px/1.35 system-ui, sans-serif;
-                overflow-wrap: anywhere;
-                user-select: none;
-                overscroll-behavior: contain;
+            #gantt-master-container .gantt-transfer-lane { display: flex; margin-bottom: 2px; }
+            #gantt-master-container [data-staff-transfer-bar] .gantt-bar-content {
+                display: block;
+                max-height: none;
+                overflow: visible;
+                align-self: stretch;
+                padding: 5px 6px;
+                -webkit-line-clamp: unset;
             }
-            .gantt-transfer-preview-project { font-size: 14px; }
-            .gantt-transfer-preview-staff {
+            #gantt-master-container .gantt-transfer-project { display: block; }
+            #gantt-master-container .gantt-transfer-schedule { margin: 2px 0; }
+            #gantt-master-container .gantt-transfer-roster {
                 display: flex;
+                justify-content: center;
                 flex-wrap: wrap;
-                align-content: flex-start;
-                gap: 5px;
-                min-height: 22px;
-                overflow: auto;
-                overscroll-behavior: contain;
+                gap: 4px;
             }
-            .gantt-transfer-preview .gantt-transfer-worker {
-                padding: 3px 7px;
+            #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker {
                 color: #f8fafc;
-                font-weight: 700;
+                padding: 2px 6px;
             }
-            .gantt-transfer-preview.gantt-preview-dragging { opacity: 0; }
-            .gantt-transfer-preview.gantt-preview-dragging,
-            .gantt-transfer-preview.gantt-preview-dragging .gantt-transfer-worker { pointer-events: none; }
+            #gantt-master-container .gantt-transfer-notes {
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+            }
+            #gantt-master-container [data-staff-transfer-bar]:hover { transform: none; }
+            #gantt-master-container [data-staff-widened]::after {
+                content: "";
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                width: var(--gantt-shift-span);
+                height: 3px;
+                background: rgba(0, 0, 0, 0.65);
+                pointer-events: none;
+            }
             #gantt-master-container .gantt-transfer-worker:hover,
-            #gantt-master-container .gantt-transfer-worker.gantt-drag-origin,
-            .gantt-transfer-preview .gantt-transfer-worker:hover,
-            .gantt-transfer-preview .gantt-transfer-worker.gantt-drag-origin {
+            #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
                 box-shadow: inset 0 0 0 1px #7dd3fc, 0 1px 2px rgb(15 23 42 / 22%);
             }
@@ -187,8 +178,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 pointer-events: none;
             }
             @media (prefers-reduced-motion: reduce) {
-                #gantt-master-container .gantt-transfer-worker,
-                .gantt-transfer-preview .gantt-transfer-worker { transition: none; }
+                #gantt-master-container .gantt-transfer-worker { transition: none; }
             }
         </style>
         """
@@ -448,36 +438,39 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         non_blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() != blue_stack_hex]
         blue_groups = [g for g in day_groups if str(g.get("ColorHex", "")).lower() == blue_stack_hex]
 
+        def t2p(t_str):
+            h, m = map(int, t_str.split(":"))
+            if h < 4:
+                h += 24
+            mins = (h - 4) * 60 + m
+            return max(0, min(100, (mins / 1200.0) * 100))
+
         group_lanes = []
+        transfer_min_width_pct = TRANSFER_BAR_MIN_PX * 100 / timeline_width_px if staff_drag_token else 0
 
-        non_blue_lanes = []
-        for g in sorted(non_blue_groups, key=lambda x: x["StartTime"]):
-            placed = False
-            for idx, lane_end in enumerate(non_blue_lanes):
-                if g["StartTime"] >= lane_end:
-                    non_blue_lanes[idx] = g["EndTime"]
-                    group_lanes.append((g, idx))
-                    placed = True
-                    break
-            if not placed:
-                non_blue_lanes.append(g["EndTime"])
-                group_lanes.append((g, len(non_blue_lanes) - 1))
+        def pack_lanes(groups, offset=0):
+            lane_ends = []
+            for group in sorted(groups, key=lambda g: t2p(g["StartTime"]) if staff_drag_token else g["StartTime"]):
+                left_pct = t2p(group["StartTime"])
+                actual_width_pct = t2p(group["EndTime"]) - left_pct
+                if staff_drag_token:
+                    width_pct = max(actual_width_pct, transfer_min_width_pct)
+                    start, end = left_pct, left_pct + width_pct
+                else:
+                    width_pct = actual_width_pct
+                    start, end = group["StartTime"], group["EndTime"]
+                lane = next((i for i, lane_end in enumerate(lane_ends) if start >= lane_end), len(lane_ends))
+                if lane == len(lane_ends):
+                    lane_ends.append(end)
+                else:
+                    lane_ends[lane] = end
+                group_lanes.append((group, offset + lane, left_pct, width_pct, actual_width_pct))
+            return len(lane_ends)
 
-        blue_lanes = []
-        blue_lane_offset = len(non_blue_lanes)
-        for g in sorted(blue_groups, key=lambda x: x["StartTime"]):
-            placed = False
-            for idx, lane_end in enumerate(blue_lanes):
-                if g["StartTime"] >= lane_end:
-                    blue_lanes[idx] = g["EndTime"]
-                    group_lanes.append((g, blue_lane_offset + idx))
-                    placed = True
-                    break
-            if not placed:
-                blue_lanes.append(g["EndTime"])
-                group_lanes.append((g, blue_lane_offset + len(blue_lanes) - 1))
-
-        total_lanes = len(non_blue_lanes) + len(blue_lanes)
+        non_blue_lane_count = pack_lanes(non_blue_groups)
+        total_lanes = non_blue_lane_count + pack_lanes(blue_groups, non_blue_lane_count)
+        transfer_lanes = [[] for _ in range(total_lanes)] if staff_drag_token else []
+        transfer_lane_edges = [0] * len(transfer_lanes)
         row_height = max(1, total_lanes) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
         if curr_date == get_local_today():
             bg_color_row = "var(--gantt-today, #eef2ff)"
@@ -490,16 +483,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         html += f"<div{unassign_attr} style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid var(--gantt-edge, #1e293b); padding: 10px; box-sizing: border-box;'>{label_html}</div>"
         html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, var(--gantt-grid, rgba(148, 163, 184, 0.3)) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
 
-        for g, lane_idx in group_lanes:
-            def t2p(t_str):
-                h, m = map(int, t_str.split(":"))
-                if h < 4:
-                    h += 24
-                mins = (h - 4) * 60 + m
-                return max(0, min(100, (mins / 1200.0) * 100))
-
-            left_pct = t2p(g["StartTime"])
-            width_pct = t2p(g["EndTime"]) - left_pct
+        for g, lane_idx, left_pct, width_pct, actual_width_pct in group_lanes:
             top_px = lane_idx * LANE_STEP_PX + ROW_PAD_TOP_PX
 
             def _employee_text_html(employee_name, *, name_only=False):
@@ -582,7 +566,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             emps_plain = ", ".join(grouped_employee_labels).upper()
             emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
             handles = []
-            preview_handles = []
             if staff_drag_token and not g.get("is_cancelled"):
                 seen = set()
                 employee_ids = [eid for eid in g.get("EmployeeIds", []) if eid]
@@ -592,9 +575,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     seen.add(eid)
                     full_name = employee_details_by_id.get(eid, {}).get("name")
                     short_label = _employee_text_html(employee_label, name_only=True)
-                    handles.append(drag_worker(eid, short_label, description=full_name))
-                    preview_label = html_utils.escape(full_name) if full_name else short_label
-                    preview_handles.append(drag_worker(eid, preview_label))
+                    label = html_utils.escape(full_name) if full_name else short_label
+                    handles.append(drag_worker(eid, label))
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
@@ -698,9 +680,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 ("full", f"data-full-content='{full_bar_copy_attr}'", "Αντιγραφή περιεχομένου μπάρας", "⧉"),
                 ("project", f"data-project='{project_copy_attr}'", "Αντιγραφή ονόματος έργου", "📋"),
             )
-            width_px = width_pct * timeline_width_px / 100
+            width_px = actual_width_pct * timeline_width_px / 100
             compact = width_px < COMPACT_ACTIONS_WIDTH
-            stacked_attr = " data-gantt-stacked='true'" if width_px < STACKED_ACTIONS_WIDTH else ""
+            stacked_attr = " data-gantt-stacked='true'" if not staff_drag_token and width_px < STACKED_ACTIONS_WIDTH else ""
             buttons = "".join(
                 f"<button type='button' class='gantt-copy-{kind}-btn' {data} title='{label}' aria-label='{label}'>"
                 f"{label if compact else icon}</button>"
@@ -722,30 +704,48 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         f"<template>{email_options}</template>"
                     )
 
-            preview = ""
-            preview_attr = ""
-            if handles:
-                base_text = f"{project_html} | {pending_html}{schedule} | {', '.join(handles)}{notes_html}"
-                preview_attr = " data-staff-preview='true'"
-                preview = (
-                    "<template class='gantt-transfer-preview-template'>"
-                    f"<strong class='gantt-transfer-preview-project'>{project_html}</strong>"
-                    f"<div>{pending_html}{schedule}</div>"
-                    f"<div class='gantt-transfer-preview-staff'>{''.join(preview_handles)}</div>"
-                    "</template>"
+            transfer_attr = ""
+            if staff_drag_token:
+                gap_pct = max(0, left_pct - transfer_lane_edges[lane_idx])
+                transfer_lane_edges[lane_idx] = left_pct + width_pct
+                shift_span = max(0, actual_width_pct) / width_pct * 100
+                position = (
+                    f"position: relative; flex: 0 0 auto; margin-left: {gap_pct}%; "
+                    f"min-height: {BAR_HEIGHT_PX}px; --gantt-shift-span: {shift_span}%;"
                 )
+                transfer_attr = " data-staff-transfer-bar"
+                if actual_width_pct < width_pct:
+                    transfer_attr += " data-staff-widened"
+                roster = f"<div class='gantt-transfer-roster'>{''.join(handles)}</div>" if handles else emps_html
+                base_text = (
+                    f"<strong class='gantt-transfer-project'>{project_html}</strong>"
+                    f"<div class='gantt-transfer-schedule'>{pending_html}{schedule}</div>"
+                    f"{roster}<div class='gantt-transfer-notes'>{notes_html}</div>"
+                )
+                if g["is_cancelled"]:
+                    base_text = f"<s>{base_text}</s>"
+                    if g["cancel_reason"]:
+                        base_text += f"<div>{html_utils.escape(g['cancel_reason'].upper())}</div>"
+            else:
+                position = f"position: absolute; left: {left_pct}%; top: {top_px}px; height: {BAR_HEIGHT_PX}px;"
 
-            html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr}{preview_attr} "
-                f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
-                f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
+            bar = (
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr}{transfer_attr} "
+                f"style='{position} width: {width_pct}%; "
+                f"background-color: {bg_color}; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
-                f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; {focus_style}' title='{tooltip}'>"
+                f"box-sizing: border-box; overflow: hidden; z-index: 10; padding-block: 0; margin-block: 0; text-align: center; {focus_style}' title='{tooltip}'>"
                 f"<div class='gantt-bar-content'>{base_text}</div>"
-                f"<div class='gantt-bar-actions'>{actions}</div>{preview}</a>"
+                f"<div class='gantt-bar-actions'>{actions}</div></a>"
             )
+            if staff_drag_token:
+                transfer_lanes[lane_idx].append(bar)
+            else:
+                html += bar
 
+        for bars in transfer_lanes:
+            html += f"<div class='gantt-transfer-lane'>{''.join(bars)}</div>"
         html += "</div></div>"
 
     html += "</div>"
@@ -797,84 +797,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var blockBarClickUntil = 0;
       var menu = null;
       var menuTrigger = null;
-      var transferPreview = null;
-      var transferPreviewBar = null;
-      var hoveredTransferBar = null;
-      var transferPreviewTimer;
-
-      function closeTransferPreview() {
-        clearTimeout(transferPreviewTimer);
-        if (transferPreview) transferPreview.remove();
-        transferPreview = null;
-        transferPreviewBar = null;
-        hoveredTransferBar = null;
-      }
-
-      function showTransferPreview(bar) {
-        closeTransferPreview();
-        if (!bar.isConnected) return;
-        const template = bar.querySelector('.gantt-transfer-preview-template');
-        if (!template) return;
-
-        const panel = document.createElement('div');
-        panel.className = 'gantt-transfer-preview';
-        panel.setAttribute('role', 'group');
-        panel.setAttribute('aria-label', 'Προσωπικό για μεταφορά');
-        panel.style.setProperty('--gantt-transfer-bar-color', bar.style.backgroundColor);
-        panel.appendChild(template.content.cloneNode(true));
-        panel.addEventListener('dragstart', onDragStart);
-        panel.addEventListener('dragend', onStaffDragEnd);
-        document.body.appendChild(panel);
-
-        const edge = 6;
-        const anchor = bar.getBoundingClientRect();
-        const viewport = document.documentElement;
-        const spaceBelow = viewport.clientHeight - anchor.bottom - edge;
-        const spaceAbove = anchor.top - edge;
-        const above = panel.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
-        panel.style.maxHeight = Math.max(0, above ? spaceAbove : spaceBelow) + 'px';
-        panel.style.top = (above ? anchor.top - panel.offsetHeight : anchor.bottom) + 'px';
-        panel.style.left = Math.max(edge, Math.min(
-          anchor.left, viewport.clientWidth - panel.offsetWidth - edge
-        )) + 'px';
-
-        transferPreview = panel;
-        transferPreviewBar = bar;
-        hoveredTransferBar = bar;
-      }
-
-      function onTransferPointerOver(e) {
-        if (e.pointerType !== 'mouse' || staffDrag || isDown || menu) return;
-        let bar = null;
-        if (transferPreview && transferPreview.contains(e.target)) {
-          bar = transferPreviewBar;
-        } else if (!e.target.closest('.gantt-bar-actions')) {
-          const candidate = e.target.closest('a[data-staff-preview]');
-          if (candidate && s.contains(candidate)) bar = candidate;
-        }
-        if (bar === hoveredTransferBar) return;
-
-        hoveredTransferBar = bar;
-        clearTimeout(transferPreviewTimer);
-        if (bar !== transferPreviewBar) {
-          transferPreviewTimer = setTimeout(function() {
-            if (bar) showTransferPreview(bar);
-            else closeTransferPreview();
-          }, 160);
-        }
-      }
-
-      function onTransferPointerOut(e) {
-        if (!e.relatedTarget && !staffDrag) closeTransferPreview();
-      }
-
-      function closeBarOverlays() {
-        if (!staffDrag) closeTransferPreview();
-        closeBarMenu();
-      }
 
       function onScroll() {
-        closeBarOverlays();
+        closeBarMenu();
         clearTimeout(onScroll._t);
         onScroll._t = setTimeout(function() {
           sessionStorage.setItem('ganttScrollLeft', String(s.scrollLeft));
@@ -883,7 +808,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function startDrag(pageX) {
-        closeTransferPreview();
         isDown = true;
         moved = false;
         window.gIsDragging = false;
@@ -969,8 +893,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           e.preventDefault();
           return;
         }
-        var sourceBar = transferPreview && transferPreview.contains(handle)
-          ? transferPreviewBar : handle.closest('a.mygantt-bar');
+        var sourceBar = handle.closest('a.mygantt-bar');
         if (!sourceBar && handle.dataset.staffOrigin !== 'availability') {
           e.preventDefault();
           return;
@@ -984,8 +907,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         dragHandle = handle;
         dragHandle.classList.add('gantt-drag-origin');
         s.classList.add('gantt-staff-dragging');
-        clearTimeout(transferPreviewTimer);
-        if (transferPreview) transferPreview.classList.add('gantt-preview-dragging');
         e.stopPropagation();
       }
 
@@ -1044,7 +965,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         if (dragHandle) dragHandle.classList.remove('gantt-drag-origin');
         dragHandle = null;
         s.classList.remove('gantt-staff-dragging');
-        closeTransferPreview();
         clearStaffHover();
         blockBarClickUntil = Date.now() + 250;
       }
@@ -1172,7 +1092,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         menu.setAttribute('role', 'group');
         menu.setAttribute('aria-label', trigger.getAttribute('aria-label'));
         menu.appendChild(template.content.cloneNode(true));
-        document.body.appendChild(menu);
+        // ClickDetector replaces its last body child on each render.
+        s.parentElement.appendChild(menu);
         menuTrigger = trigger;
         trigger.setAttribute('aria-expanded', 'true');
 
@@ -1188,10 +1109,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMenuKeyDown(e) {
-        if (!menu) {
-          if (e.key === 'Escape' && !staffDrag) closeTransferPreview();
-          return;
-        }
+        if (!menu) return;
         if (e.key === 'Escape') {
           e.preventDefault();
           closeBarMenu(true);
@@ -1208,7 +1126,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onClickCapture(e) {
-        if (!staffDrag && (!transferPreview || !transferPreview.contains(e.target))) closeTransferPreview();
         var toggle = e.target.closest('.gantt-popup-toggle');
         if (toggle && s.contains(toggle)) {
           e.preventDefault();
@@ -1271,11 +1188,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       document.addEventListener('click', onClickCapture, true);
       document.addEventListener('keydown', onMenuKeyDown);
       document.addEventListener('focusin', onMenuFocus);
-      window.addEventListener('resize', closeBarOverlays);
-      if (s.dataset.staffDragToken) {
-        document.addEventListener('pointerover', onTransferPointerOver);
-        document.addEventListener('pointerout', onTransferPointerOut);
-      }
+      window.addEventListener('resize', closeBarMenu);
 
       // Follow the app theme in the live iframe. Downloaded HTML keeps its light palette.
       var themeObserver;
@@ -1296,7 +1209,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       window.ganttDragCleanup = function () {
         if (themeObserver) themeObserver.disconnect();
         closeBarMenu();
-        closeTransferPreview();
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
         s.removeEventListener('mousemove', onMouseMoveLocal, true);
@@ -1318,9 +1230,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         document.removeEventListener('click', onClickCapture, true);
         document.removeEventListener('keydown', onMenuKeyDown);
         document.removeEventListener('focusin', onMenuFocus);
-        window.removeEventListener('resize', closeBarOverlays);
-        document.removeEventListener('pointerover', onTransferPointerOver);
-        document.removeEventListener('pointerout', onTransferPointerOut);
+        window.removeEventListener('resize', closeBarMenu);
       };
     })();
     """
