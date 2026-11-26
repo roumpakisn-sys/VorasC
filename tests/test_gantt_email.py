@@ -92,8 +92,11 @@ class GanttEmailTests(unittest.TestCase):
         args = (groups, date(2026, 11, 16), 1, {group["Key"]: "bar-test"}, 500)
         live_html = draw(*args, email_menu=True)
         tags = ChartTags(live_html).tags
-        trigger, = [attrs for tag, attrs in tags if attrs.get("class") == "gantt-popup-toggle gantt-email-toggle"]
-        self.assertEqual(trigger["aria-label"], "Αντιγραφή κειμένου email")
+        trigger, = [attrs for tag, attrs in tags if attrs.get("class") == "gantt-floating-actions"]
+        self.assertEqual(trigger["aria-label"], "Ενέργειες μπάρας")
+        self.assertIn("hidden", trigger)
+        self.assertLess(live_html.index("</a>", live_html.index("id='bar-test'")),
+                        live_html.index("id='gantt-floating-actions'"))
         self.assertEqual(trigger["aria-expanded"], "false")
         self.assertFalse(any(tag == "select" for tag, attrs in tags))
         options = [attrs for tag, attrs in tags if tag == "button" and "data-email-copy" in attrs]
@@ -117,8 +120,8 @@ class GanttEmailTests(unittest.TestCase):
             bar, = [attrs for tag, attrs in compact_tags if attrs.get("class") == "mygantt-bar"]
             self.assertEqual("data-gantt-stacked" in bar, stacked)
             self.assertIn("<div class='gantt-bar-content'>", compact_html)
-            self.assertIn("<div class='gantt-bar-actions'><button type='button' class='gantt-popup-toggle'", compact_html)
-            self.assertIn("<template><button type='button' class='gantt-copy-crew-btn'", compact_html)
+            self.assertNotIn("class='gantt-bar-actions'", compact_html)
+            self.assertIn("<template class='gantt-action-options'><button type='button' class='gantt-copy-crew-btn'", compact_html)
             exported = gantt_email.without_email_menu(compact_html)
             self.assertIn("Ενέργειες μπάρας", exported)
             self.assertIn("data-crew-text=", exported)
