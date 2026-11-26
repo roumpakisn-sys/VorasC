@@ -234,7 +234,7 @@ class DragMarkupTests(unittest.TestCase):
         project = html.escape(short_bar["ProjectDisplay"].upper())
         self.assertIn(f"<strong class='gantt-transfer-project'>{project}</strong>", narrow)
         for employee in [{"id": "free", "name": "Άννα"}, *extra_staff]:
-            self.assertIn(f"data-employee='{employee['id']}'", narrow)
+            self.assertIn(f"data-employee='{employee['id']}' title='{employee['name']} · ", narrow)
             self.assertIn(f">{employee['name']}</span>", narrow)
         ordinary_short = build(short_groups, day, 0.5, short_mapping, 500)
         self.assertNotIn("data-staff-widened", ordinary_short)
@@ -332,17 +332,21 @@ window.addEventListener('load', () => {
     const next = document.getElementById('next-bar');
     const bounds = bar.getBoundingClientRect();
     const project = bar.querySelector('.gantt-transfer-project');
-    const workers = Array.from(bar.querySelectorAll('.gantt-transfer-worker'));
-    const withinBar = (element) => {
-        const box = element.getBoundingClientRect();
-        return box.height > 0 && box.width > 0 && box.top >= bounds.top
-            && box.bottom <= bounds.bottom && box.left >= bounds.left && box.right <= bounds.right
-            && element.scrollWidth <= element.clientWidth;
-    };
+    const roster = bar.querySelector('.gantt-transfer-roster');
+    const workers = Array.from(roster.querySelectorAll('.gantt-transfer-worker'));
+    const rosterBounds = roster.getBoundingClientRect();
+    const within = (box, area) => box.height > 0 && box.width > 0 && box.top >= area.top - 1
+        && box.bottom <= area.bottom + 1 && box.left >= area.left - 1 && box.right <= area.right + 1;
+    const workersReachable = workers.every(worker => {
+        roster.scrollTop += worker.getBoundingClientRect().top - rosterBounds.top;
+        return within(worker.getBoundingClientRect(), rosterBounds);
+    });
     document.body.dataset.transferLayout = JSON.stringify({
         barWidth: Math.round(bounds.width),
-        project: withinBar(project),
-        workers: workers.length === 5 && workers.every(withinBar),
+        barHeight: Math.round(bounds.height),
+        project: within(project.getBoundingClientRect(), bounds) && bar.title.includes(project.textContent),
+        workers: workers.length === 5 && workersReachable,
+        rosterScrolls: roster.scrollHeight > roster.clientHeight,
         separateLanes: next.getBoundingClientRect().top >= bounds.bottom,
     });
 });
@@ -362,7 +366,8 @@ window.addEventListener('load', () => {
         page = re.search(r'data-transfer-layout="([^"]+)"', result.stdout)
         self.assertIsNotNone(page, "The browser did not report the transfer layout.")
         self.assertEqual(json.loads(html.unescape(page[1])), {
-            "barWidth": 220, "project": True, "workers": True, "separateLanes": True,
+            "barWidth": 148, "barHeight": 52, "project": True, "workers": True,
+            "rosterScrolls": True, "separateLanes": True,
         })
 
 
