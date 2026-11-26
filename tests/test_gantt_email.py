@@ -92,9 +92,11 @@ class GanttEmailTests(unittest.TestCase):
         args = (groups, date(2026, 11, 16), 1, {group["Key"]: "bar-test"}, 500)
         live_html = draw(*args, email_menu=True)
         tags = ChartTags(live_html).tags
-        select, = [attrs for tag, attrs in tags if tag == "select"]
-        self.assertEqual(select["aria-label"], "Αντιγραφή κειμένου email")
-        options = [attrs for tag, attrs in tags if "data-email-copy" in attrs]
+        trigger, = [attrs for tag, attrs in tags if attrs.get("class") == "gantt-popup-toggle gantt-email-toggle"]
+        self.assertEqual(trigger["aria-label"], "Αντιγραφή κειμένου email")
+        self.assertEqual(trigger["aria-expanded"], "false")
+        self.assertFalse(any(tag == "select" for tag, attrs in tags))
+        options = [attrs for tag, attrs in tags if tag == "button" and "data-email-copy" in attrs]
         available = [(attrs["data-email-copy"], attrs["data-email-html"]) for attrs in options]
         self.assertEqual(available, list(gantt_email.drafts(group, STAFF).values()))
         self.assertIn("Έργο &lt;δοκιμή&gt; &#x27;α&#x27;", options[0]["data-email-html"])
@@ -103,5 +105,21 @@ class GanttEmailTests(unittest.TestCase):
         for exported in (draw(*args), gantt_email.without_email_menu(live_html)):
             self.assertNotIn("data-email-copy=", exported)
             self.assertNotIn("data-email-html=", exported)
+            self.assertNotIn("gantt-email-toggle", exported)
             self.assertNotIn("TEST-02", exported)
             self.assertIn("data-crew-text=", exported)
+
+        narrow = dict(group, EndTime="09:30")
+        tiny = dict(group, EndTime="09:15")
+        for placement, stacked in ((narrow, False), (tiny, True)):
+            compact_html = draw({group["Key"]: placement}, *args[1:], email_menu=True)
+            compact_tags = ChartTags(compact_html).tags
+            bar, = [attrs for tag, attrs in compact_tags if attrs.get("class") == "mygantt-bar"]
+            self.assertEqual("data-gantt-stacked" in bar, stacked)
+            self.assertIn("<div class='gantt-bar-content'>", compact_html)
+            self.assertIn("<div class='gantt-bar-actions'><button type='button' class='gantt-popup-toggle'", compact_html)
+            self.assertIn("<template><button type='button' class='gantt-copy-crew-btn'", compact_html)
+            exported = gantt_email.without_email_menu(compact_html)
+            self.assertIn("Ενέργειες μπάρας", exported)
+            self.assertIn("data-crew-text=", exported)
+            self.assertNotIn("data-email-html=", exported)
