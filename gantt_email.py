@@ -6,8 +6,11 @@ from typing import NamedTuple
 
 _WEEKDAYS = ("τη Δευτέρα", "την Τρίτη", "την Τετάρτη", "την Πέμπτη",
              "την Παρασκευή", "το Σάββατο", "την Κυριακή")
-_MENU_LABEL = "Αντιγραφή κειμένου email"
-_MENU_PATTERN = re.compile(r"<select class='gantt-email-select'[^>]*>.*?</select>", re.DOTALL)
+_MENU_PATTERN = re.compile(
+    r"<div class='gantt-email-options'>.*?</div>"
+    r"|<button type='button' class='gantt-popup-toggle gantt-email-toggle'[^>]*>.*?</button>",
+    re.DOTALL,
+)
 
 
 class EmailBody(NamedTuple):
@@ -102,18 +105,14 @@ def drafts(group, employees_by_id):
     }
 
 
-def menu_html(group, employees_by_id, *, compact=False):
-    style = " style='top:22px;right:2px;'" if compact else ""
-    options = ["<option value=''>▾</option>"]
+def menu_html(group, employees_by_id):
+    buttons = []
     for label, body in drafts(group, employees_by_id).items():
-        options.append(
-            f"<option data-email-copy='{escape(body.text, quote=True)}' "
-            f"data-email-html='{escape(body.html, quote=True)}'>{escape(label)}</option>"
+        buttons.append(
+            f"<button type='button' data-email-copy='{escape(body.text, quote=True)}' "
+            f"data-email-html='{escape(body.html, quote=True)}'>{escape(label)}</button>"
         )
-    return (
-        f"<select class='gantt-email-select' aria-label='{_MENU_LABEL}' title='{_MENU_LABEL}'{style}>"
-        + "".join(options) + "</select>"
-    )
+    return "<div class='gantt-email-options'>" + "".join(buttons) + "</div>"
 
 
 def without_email_menu(chart_html):

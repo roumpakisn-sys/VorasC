@@ -30,7 +30,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     LANE_STEP_PX = 46
     ROW_PAD_TOP_PX = 6
     ROW_PAD_BOTTOM_PX = 6
-    TEXT_LINES = 4
+    COMPACT_ACTIONS_WIDTH = 160
+    STACKED_ACTIONS_WIDTH = 54
 
     emp_short_names = {}
     employee_details_by_id = {}
@@ -144,22 +145,62 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         </style>
         """
 
-    html += "<style>#gantt-master-container::-webkit-scrollbar { width: 12px; height: 12px; } #gantt-master-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 8px; } #gantt-master-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 8px; border: 3px solid #f1f5f9; } #gantt-master-container::-webkit-scrollbar-thumb:hover { background: #64748b; } .mygantt-bar:hover { transform: scale(1.02); z-index: 30 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important; outline: 2px solid #1e293b !important; } .gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn { position:absolute; top:2px; width:18px; height:18px; border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.78); color:#ffffff; font-size:11px; line-height:16px; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.35); } .gantt-copy-project-btn { right:2px; } .gantt-copy-full-btn { right:24px; } .gantt-copy-crew-btn { right:46px; } .gantt-copy-project-btn:hover, .gantt-copy-full-btn:hover, .gantt-copy-crew-btn:hover { background:rgba(220,38,38,0.92); transform:scale(1.08); }</style>"
-
-    if email_menu:
-        html += """
-        <style>
-          .gantt-email-select {
-              position:absolute; top:2px; right:68px; width:18px; max-width:100%; height:18px;
-              border:1px solid rgba(255,255,255,0.75); border-radius:5px;
-              background:rgba(15,23,42,0.78); color:#fff; font-size:14px; text-align:center;
-              appearance:none; padding:0; margin:0; z-index:50; cursor:pointer; pointer-events:auto;
-          }
-          .gantt-email-select option { background:#fff; color:#0f172a; font-size:14px; }
-          .gantt-email-select + div { padding-right:88px !important; }
-          .gantt-email-select[style] + div { padding-right:66px !important; }
-        </style>
-        """
+    html += """
+    <style>
+      #gantt-master-container::-webkit-scrollbar { width:12px; height:12px; }
+      #gantt-master-container::-webkit-scrollbar-track { background:#f1f5f9; border-radius:8px; }
+      #gantt-master-container::-webkit-scrollbar-thumb {
+          background:#94a3b8; border-radius:8px; border:3px solid #f1f5f9;
+      }
+      #gantt-master-container::-webkit-scrollbar-thumb:hover { background:#64748b; }
+      .mygantt-bar:hover {
+          transform:scale(1.02); z-index:30 !important;
+          box-shadow:0 6px 12px rgba(0,0,0,0.3) !important; outline:2px solid #1e293b !important;
+      }
+      .gantt-bar-content {
+          flex:1 1 auto; min-width:0; max-height:100%; overflow:hidden;
+          box-sizing:border-box; padding:0 3px; line-height:1.15;
+          pointer-events:none; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+          overflow-wrap:anywhere;
+      }
+      .gantt-bar-actions {
+          display:flex; flex:0 0 auto; align-self:flex-start; gap:3px; padding:2px;
+      }
+      .gantt-bar-actions button {
+          display:grid; place-items:center; box-sizing:border-box; width:18px; height:18px;
+          border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.85);
+          color:#fff; font-size:11px; line-height:1; padding:0; cursor:pointer;
+      }
+      .gantt-bar-actions button:hover, .gantt-bar-actions button[aria-expanded='true'] {
+          background:#334155;
+      }
+      .gantt-bar-actions .gantt-popup-toggle { font-size:14px; }
+      .mygantt-bar[data-gantt-stacked] { flex-direction:column; }
+      .mygantt-bar[data-gantt-stacked] .gantt-bar-content {
+          flex:1 1 auto; align-self:stretch; min-height:0; -webkit-line-clamp:2;
+      }
+      .mygantt-bar[data-gantt-stacked] .gantt-bar-actions {
+          align-self:flex-end; max-width:100%; padding:0;
+      }
+      .mygantt-bar[data-gantt-stacked] .gantt-popup-toggle { height:14px; max-width:100%; }
+      .gantt-bar-menu {
+          position:fixed; z-index:10000; box-sizing:border-box; width:min(18rem, calc(100vw - 12px));
+          max-height:calc(100vh - 12px); overflow:auto; padding:5px;
+          background:#fff; border:1px solid #cbd5e1; border-radius:9px;
+          box-shadow:0 8px 24px rgba(15,23,42,0.22); font:13px/1.3 system-ui,sans-serif; color:#0f172a;
+      }
+      .gantt-bar-menu button {
+          display:block; width:100%; text-align:left; padding:8px 10px; border:0; border-radius:5px;
+          color:inherit; background:transparent; font:inherit; cursor:pointer;
+      }
+      .gantt-bar-menu button:hover, .gantt-bar-menu button:focus-visible {
+          background:#e0e7ff; outline:2px solid #6366f1; outline-offset:-2px;
+      }
+      .gantt-bar-menu > button + .gantt-email-options {
+          margin-top:4px; padding-top:4px; border-top:1px solid #e2e8f0;
+      }
+    </style>
+    """
 
     html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
     html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b; font-size: 14px;'>Ημέρα / Προσωπικό</div>"
@@ -572,25 +613,45 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             focus_style = "outline: 3px solid #2563eb; outline-offset: 2px; z-index: 25;" if is_focused else ""
             drop_attr = " data-staff-drop-target='true'" if staff_drag_token and not g.get("is_cancelled") else ""
 
-            email_select = ""
-            if email_menu:
-                email_select = gantt_email.menu_html(
-                    g, employee_details_by_id, compact=width_pct * timeline_width_px < 8800,
+            copy_actions = (
+                ("crew", f"data-crew-text='{crew_text_attr}' data-crew-html='{crew_html_attr}'",
+                 "Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων", "👥"),
+                ("full", f"data-full-content='{full_bar_copy_attr}'", "Αντιγραφή περιεχομένου μπάρας", "⧉"),
+                ("project", f"data-project='{project_copy_attr}'", "Αντιγραφή ονόματος έργου", "📋"),
+            )
+            width_px = width_pct * timeline_width_px / 100
+            compact = width_px < COMPACT_ACTIONS_WIDTH
+            stacked_attr = " data-gantt-stacked='true'" if width_px < STACKED_ACTIONS_WIDTH else ""
+            buttons = "".join(
+                f"<button type='button' class='gantt-copy-{kind}-btn' {data} title='{label}' aria-label='{label}'>"
+                f"{label if compact else icon}</button>"
+                for kind, data, label, icon in copy_actions
+            )
+            email_options = gantt_email.menu_html(g, employee_details_by_id) if email_menu else ""
+            if compact:
+                actions = (
+                    "<button type='button' class='gantt-popup-toggle' aria-expanded='false' "
+                    "title='Ενέργειες μπάρας' aria-label='Ενέργειες μπάρας'>▾</button>"
+                    f"<template>{buttons}{email_options}</template>"
                 )
+            else:
+                actions = buttons
+                if email_options:
+                    actions += (
+                        "<button type='button' class='gantt-popup-toggle gantt-email-toggle' aria-expanded='false' "
+                        "title='Αντιγραφή κειμένου email' aria-label='Αντιγραφή κειμένου email'>▾</button>"
+                        f"<template>{email_options}</template>"
+                    )
 
             html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr} "
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
                 f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; {focus_style}' title='{tooltip}'>"
-                f"<button type='button' class='gantt-copy-crew-btn' data-crew-text='{crew_text_attr}' data-crew-html='{crew_html_attr}' title='Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων'>👥</button>"
-                f"<button type='button' class='gantt-copy-full-btn' data-full-content='{full_bar_copy_attr}' title='Αντιγραφή όλου του περιεχομένου μπάρας'>⧉</button>"
-                f"<button type='button' class='gantt-copy-project-btn' data-project='{project_copy_attr}' title='Αντιγραφή ονόματος έργου'>📋</button>"
-                f"{email_select}"
-                f"<div style='line-height: 1.15; pointer-events: none; width: 100%; padding: 0 66px 0 4px; display: -webkit-box; "
-                f"-webkit-line-clamp: {TEXT_LINES}; -webkit-box-orient: vertical; overflow: hidden;'>{base_text}</div></a>"
+                f"<div class='gantt-bar-content'>{base_text}</div>"
+                f"<div class='gantt-bar-actions'>{actions}</div></a>"
             )
 
         html += "</div></div>"
@@ -642,8 +703,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var dragHandle = null;
       var hoverTarget = null;
       var blockBarClickUntil = 0;
+      var menu = null;
+      var menuTrigger = null;
 
       function onScroll() {
+        closeBarMenu();
         clearTimeout(onScroll._t);
         onScroll._t = setTimeout(function() {
           sessionStorage.setItem('ganttScrollLeft', String(s.scrollLeft));
@@ -681,7 +745,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (isCopyProjectButtonTarget(e) || e.target.closest('.gantt-email-select')) return;
+        if (e.target.closest('.gantt-bar-actions')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -708,7 +772,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (isCopyProjectButtonTarget(e) || e.target.closest('.gantt-email-select')) return;
+        if (e.target.closest('.gantt-bar-actions')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
@@ -873,22 +937,23 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
       function flashCopyButton(btn, ok) {
         if (!btn) return;
-        var oldText = btn.textContent;
+        clearTimeout(btn.copyFeedbackTimeout);
+        var original = btn.copyOriginalLabel || btn.textContent;
+        btn.copyOriginalLabel = original;
         btn.textContent = ok ? '✓' : '!';
-        setTimeout(function() {
-          btn.textContent = oldText || (btn.classList.contains('gantt-copy-crew-btn') ? '👥' : (btn.classList.contains('gantt-copy-full-btn') ? '⧉' : '📋'));
-        }, 900);
+        btn.copyFeedbackTimeout = setTimeout(function() { btn.textContent = original; }, 900);
       }
 
-      function handleProjectCopy(btn) {
+      function handleProjectCopy(btn, feedbackButton) {
+        var indicator = feedbackButton || btn;
         if (btn.classList.contains('gantt-copy-crew-btn')) {
           var crewText = btn.getAttribute('data-crew-text') || '';
           var crewHtml = btn.getAttribute('data-crew-html') || '';
           if (!crewText) return;
           copyFormattedToClipboard(crewText, crewHtml).then(function() {
-            flashCopyButton(btn, true);
+            flashCopyButton(indicator, true);
           }).catch(function() {
-            flashCopyButton(btn, false);
+            flashCopyButton(indicator, false);
           });
           return;
         }
@@ -903,9 +968,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         if (!textToCopy) return;
 
         copyTextToClipboard(textToCopy).then(function() {
-          flashCopyButton(btn, true);
+          flashCopyButton(indicator, true);
         }).catch(function() {
-          flashCopyButton(btn, false);
+          flashCopyButton(indicator, false);
         });
       }
 
@@ -913,38 +978,89 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         return e && e.target && e.target.closest && e.target.closest('.gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn');
       }
 
-      function onEmailChange(e) {
-        var select = e.target.closest('.gantt-email-select');
-        if (!select) return;
-        var option = select.options[select.selectedIndex];
-        if (!option) return;
-        var text = option.getAttribute('data-email-copy');
-        var htmlText = option.getAttribute('data-email-html') || '';
-        select.selectedIndex = 0;
-        if (!text) return;
-        var indicator = select.options[0];
-        clearTimeout(select.copyFeedbackTimeout);
+      function closeBarMenu(restoreFocus) {
+        if (!menu) return;
+        var trigger = menuTrigger;
+        menu.remove();
+        menu = null;
+        menuTrigger = null;
+        trigger.setAttribute('aria-expanded', 'false');
+        if (restoreFocus === true && trigger.isConnected) trigger.focus({preventScroll: true});
+      }
 
-        function feedback(ok) {
-          indicator.textContent = ok ? '✓' : '!';
-          select.title = ok ? 'Το κείμενο αντιγράφηκε' : 'Αδυναμία αντιγραφής';
-          select.copyFeedbackTimeout = setTimeout(function() {
-            indicator.textContent = '▾';
-            select.title = select.getAttribute('aria-label');
-          }, 900);
+      function toggleBarMenu(trigger) {
+        var wasOpen = menuTrigger === trigger;
+        closeBarMenu();
+        if (wasOpen) return;
+
+        var template = trigger.nextElementSibling;
+        if (!template || !template.content.querySelector('button')) return;
+        menu = document.createElement('div');
+        menu.className = 'gantt-bar-menu';
+        menu.setAttribute('role', 'group');
+        menu.setAttribute('aria-label', trigger.getAttribute('aria-label'));
+        menu.appendChild(template.content.cloneNode(true));
+        document.body.appendChild(menu);
+        menuTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+
+        var anchor = trigger.getBoundingClientRect();
+        var width = document.documentElement.clientWidth;
+        var height = document.documentElement.clientHeight;
+        var below = anchor.bottom + 4;
+        var above = anchor.top - menu.offsetHeight - 4;
+        var top = below + menu.offsetHeight > height - 6 && above >= 6 ? above : below;
+        menu.style.left = Math.max(6, Math.min(anchor.right - menu.offsetWidth, width - menu.offsetWidth - 6)) + 'px';
+        menu.style.top = Math.max(6, Math.min(top, height - menu.offsetHeight - 6)) + 'px';
+        menu.querySelector('button').focus({preventScroll: true});
+      }
+
+      function onMenuKeyDown(e) {
+        if (!menu) return;
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeBarMenu(true);
+        } else if (menu.contains(e.target) && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+          e.preventDefault();
+          var buttons = Array.from(menu.querySelectorAll('button'));
+          var delta = e.key === 'ArrowDown' ? 1 : -1;
+          buttons[(buttons.indexOf(e.target) + delta + buttons.length) % buttons.length].focus();
         }
+      }
 
-        copyFormattedToClipboard(text, htmlText)
-          .then(function() { feedback(true); }).catch(function() { feedback(false); });
+      function onMenuFocus(e) {
+        if (menu && e.target !== menuTrigger && !menu.contains(e.target)) closeBarMenu();
       }
 
       function onClickCapture(e) {
-        if (e.target.closest('.gantt-email-select')) {
+        var toggle = e.target.closest('.gantt-popup-toggle');
+        if (toggle && s.contains(toggle)) {
+          e.preventDefault();
           e.stopPropagation();
+          toggleBarMenu(toggle);
           return;
         }
+
         var copyBtn = isCopyProjectButtonTarget(e);
-        if (copyBtn) {
+        if (menu && menu.contains(e.target)) {
+          var email = e.target.closest('[data-email-copy]');
+          if (copyBtn || email) {
+            e.preventDefault();
+            e.stopPropagation();
+            var trigger = menuTrigger;
+            closeBarMenu(true);
+            if (email) {
+              copyFormattedToClipboard(email.getAttribute('data-email-copy'), email.getAttribute('data-email-html'))
+                .then(function() { flashCopyButton(trigger, true); })
+                .catch(function() { flashCopyButton(trigger, false); });
+            } else {
+              handleProjectCopy(copyBtn, trigger);
+            }
+          }
+          return;
+        }
+        closeBarMenu();
+        if (copyBtn && s.contains(copyBtn)) {
           e.preventDefault();
           e.stopPropagation();
           handleProjectCopy(copyBtn);
@@ -958,7 +1074,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         }
       }
 
-      s.addEventListener('change', onEmailChange);
       s.addEventListener('scroll', onScroll);
       if (target) onScroll();
       s.addEventListener('mousedown', onMouseDown, true);
@@ -978,9 +1093,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       s.addEventListener('drop', onStaffDrop);
       s.addEventListener('dragend', onStaffDragEnd);
       document.addEventListener('click', onClickCapture, true);
+      document.addEventListener('keydown', onMenuKeyDown);
+      document.addEventListener('focusin', onMenuFocus);
+      window.addEventListener('resize', closeBarMenu);
 
       window.ganttDragCleanup = function () {
-        s.removeEventListener('change', onEmailChange);
+        closeBarMenu();
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
         s.removeEventListener('mousemove', onMouseMoveLocal, true);
@@ -1000,6 +1118,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         s.removeEventListener('drop', onStaffDrop);
         s.removeEventListener('dragend', onStaffDragEnd);
         document.removeEventListener('click', onClickCapture, true);
+        document.removeEventListener('keydown', onMenuKeyDown);
+        document.removeEventListener('focusin', onMenuFocus);
+        window.removeEventListener('resize', closeBarMenu);
       };
     })();
     """
