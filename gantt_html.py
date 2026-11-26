@@ -257,15 +257,29 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           overflow-wrap:anywhere;
       }
       .gantt-floating-actions {
-          position:fixed; z-index:9999; display:grid; place-items:center;
+          appearance:none; position:fixed; z-index:9999; display:grid; place-items:center;
           box-sizing:border-box; width:24px; height:24px; padding:0;
-          border:1px solid #64748b; border-radius:6px; background:#1e293b;
-          color:#fff; font:700 18px/1 system-ui,sans-serif; cursor:pointer;
-          box-shadow:0 2px 6px rgba(15,23,42,0.24);
+          border:1px solid var(--gantt-edge, #94a3b8); border-radius:8px;
+          background:var(--gantt-menu-bg, #fff); color:var(--gantt-text, #334155);
+          font:700 13px/1 system-ui,sans-serif; cursor:pointer;
+          box-shadow:0 2px 5px rgba(15,23,42,0.18);
       }
       .gantt-floating-actions[hidden] { display:none; }
-      .gantt-floating-actions:hover, .gantt-floating-actions[aria-expanded='true'] { background:#334155; }
-      .gantt-floating-actions:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
+      .gantt-floating-actions::before {
+          content:""; width:3px; height:3px; border-radius:50%;
+          background:currentColor; box-shadow:-5px 0 currentColor, 5px 0 currentColor;
+      }
+      .gantt-floating-actions[data-copy-result]::before {
+          content:attr(data-copy-result); width:auto; height:auto;
+          background:none; box-shadow:none;
+      }
+      .gantt-floating-actions:hover, .gantt-floating-actions[aria-expanded='true'] {
+          background:var(--gantt-menu-active, #e0e7ff);
+          border-color:var(--gantt-menu-focus, #6366f1);
+      }
+      .gantt-floating-actions:focus-visible {
+          outline:2px solid var(--gantt-menu-focus, #6366f1); outline-offset:2px;
+      }
       .gantt-bar-menu {
           position:fixed; z-index:10000; box-sizing:border-box; width:min(18rem, calc(100vw - 12px));
           max-height:calc(100vh - 12px); overflow:auto; padding:5px;
@@ -733,7 +747,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
     html += (
         "</div><button type='button' id='gantt-floating-actions' class='gantt-floating-actions' "
-        "aria-label='Ενέργειες μπάρας' aria-expanded='false' title='Ενέργειες μπάρας' tabindex='-1' hidden>⋯</button>"
+        "aria-label='Ενέργειες μπάρας' aria-expanded='false' title='Ενέργειες μπάρας' tabindex='-1' hidden></button>"
     )
 
     if staff_drag_token:
@@ -1028,8 +1042,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         function showResult(ok) {
           if (bar !== actionBar) return;
           clearTimeout(actionButton.copyFeedbackTimeout);
-          actionButton.textContent = ok ? '✓' : '!';
-          actionButton.copyFeedbackTimeout = setTimeout(function() { actionButton.textContent = '⋯'; }, 900);
+          actionButton.dataset.copyResult = ok ? '✓' : '!';
+          actionButton.copyFeedbackTimeout = setTimeout(function() { delete actionButton.dataset.copyResult; }, 900);
         }
         copy.then(function() { showResult(true); }).catch(function() { showResult(false); });
       }
@@ -1048,7 +1062,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         actionBar = null;
         if (actionButton) {
           clearTimeout(actionButton.copyFeedbackTimeout);
-          actionButton.textContent = '⋯';
+          delete actionButton.dataset.copyResult;
           actionButton.hidden = true;
         }
       }
@@ -1103,7 +1117,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         }
 
         clearTimeout(actionButton.copyFeedbackTimeout);
-        actionButton.textContent = '⋯';
+        delete actionButton.dataset.copyResult;
         actionButton.style.left = x + 'px';
         actionButton.style.top = y + 'px';
         actionBar = bar;
