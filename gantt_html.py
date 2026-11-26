@@ -32,7 +32,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     ROW_PAD_BOTTOM_PX = 6
     COMPACT_ACTIONS_WIDTH = 160
     STACKED_ACTIONS_WIDTH = 54
-    TRANSFER_BAR_MIN_PX = 220
+    TRANSFER_BAR_MIN_PX = 148
+    TRANSFER_BAR_HEIGHT_PX = 52
 
     emp_short_names = {}
     employee_details_by_id = {}
@@ -61,11 +62,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 return True
         return False
 
-    def drag_worker(eid, label_html, *, from_list=False):
+    def drag_worker(eid, label_html, *, from_list=False, full_name=None):
         if not staff_drag_token:
             return label_html
         origin = " data-staff-origin='availability'" if from_list else ""
-        title = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
+        action = "Σύρε για ανάθεση" if from_list else "Σύρε το όνομα στη μπάρα προορισμού"
+        title = html_utils.escape(f"{full_name} · {action}" if full_name else action, quote=True)
         return (
             f"<span class='gantt-transfer-worker' draggable='true'{origin} "
             f"data-employee='{html_utils.escape(str(eid), quote=True)}' title='{title}'>"
@@ -112,29 +114,43 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
             #gantt-master-container .gantt-transfer-lane { display: flex; margin-bottom: 2px; }
             #gantt-master-container [data-staff-transfer-bar] .gantt-bar-content {
-                display: block;
-                max-height: none;
-                overflow: visible;
+                display: flex;
+                flex-direction: column;
                 align-self: stretch;
-                padding: 5px 6px;
+                gap: 1px;
+                padding: 2px 4px 3px;
                 -webkit-line-clamp: unset;
             }
-            #gantt-master-container .gantt-transfer-project { display: block; }
-            #gantt-master-container .gantt-transfer-schedule { margin: 2px 0; }
-            #gantt-master-container .gantt-transfer-roster {
-                display: flex;
-                justify-content: center;
-                flex-wrap: wrap;
-                gap: 4px;
-            }
-            #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker {
-                color: #f8fafc;
-                padding: 2px 6px;
-            }
-            #gantt-master-container .gantt-transfer-notes {
+            #gantt-master-container .gantt-transfer-project,
+            #gantt-master-container .gantt-transfer-schedule {
+                flex: 0 0 auto;
                 overflow: hidden;
                 white-space: nowrap;
                 text-overflow: ellipsis;
+            }
+            #gantt-master-container .gantt-transfer-roster {
+                flex: 1 1 auto;
+                min-height: 0;
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-content: flex-start;
+                gap: 2px;
+                overflow-y: auto;
+                scrollbar-width: thin;
+                pointer-events: auto;
+            }
+            #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker {
+                color: #f8fafc;
+                padding: 0 4px;
+                overflow: hidden;
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                line-height: 13px;
+            }
+            #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker::before {
+                height: 9px;
+                vertical-align: baseline;
             }
             #gantt-master-container [data-staff-transfer-bar]:hover { transform: none; }
             #gantt-master-container [data-staff-widened]::after {
@@ -576,7 +592,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     full_name = employee_details_by_id.get(eid, {}).get("name")
                     short_label = _employee_text_html(employee_label, name_only=True)
                     label = html_utils.escape(full_name) if full_name else short_label
-                    handles.append(drag_worker(eid, label))
+                    handles.append(drag_worker(eid, label, full_name=full_name))
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
@@ -711,16 +727,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 shift_span = max(0, actual_width_pct) / width_pct * 100
                 position = (
                     f"position: relative; flex: 0 0 auto; margin-left: {gap_pct}%; "
-                    f"min-height: {BAR_HEIGHT_PX}px; --gantt-shift-span: {shift_span}%;"
+                    f"height: {TRANSFER_BAR_HEIGHT_PX}px; --gantt-shift-span: {shift_span}%;"
                 )
                 transfer_attr = " data-staff-transfer-bar"
                 if actual_width_pct < width_pct:
                     transfer_attr += " data-staff-widened"
-                roster = f"<div class='gantt-transfer-roster'>{''.join(handles)}</div>" if handles else emps_html
+                roster = (
+                    f"<div class='gantt-transfer-roster' role='group' aria-label='Προσωπικό για μεταφορά'>"
+                    f"{''.join(handles)}</div>"
+                ) if handles else emps_html
                 base_text = (
                     f"<strong class='gantt-transfer-project'>{project_html}</strong>"
-                    f"<div class='gantt-transfer-schedule'>{pending_html}{schedule}</div>"
-                    f"{roster}<div class='gantt-transfer-notes'>{notes_html}</div>"
+                    f"<div class='gantt-transfer-schedule'>{pending_html}{schedule}{notes_html}</div>"
+                    f"{roster}"
                 )
                 if g["is_cancelled"]:
                     base_text = f"<s>{base_text}</s>"
@@ -837,7 +856,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (e.target.closest('.gantt-bar-actions')) return;
+        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-roster')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -864,7 +883,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (e.target.closest('.gantt-bar-actions')) return;
+        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-roster')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
