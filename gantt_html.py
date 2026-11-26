@@ -183,15 +183,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 height: 9px;
                 vertical-align: baseline;
             }
-            #gantt-master-container[data-staff-drag-token]:not([data-staff-drag-token=""]) .mygantt-bar:hover {
-                transform: none;
-            }
             #gantt-master-container .gantt-transfer-worker:hover,
             #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
                 box-shadow: inset 0 0 0 1px #7dd3fc, 0 1px 2px rgb(15 23 42 / 22%);
             }
-            #gantt-master-container.gantt-staff-dragging .mygantt-bar:hover { transform: none; }
             #gantt-master-container .mygantt-bar.gantt-drop-hover {
                 outline: 2px solid #2563eb !important;
                 outline-offset: 2px !important;
@@ -251,7 +247,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
       #gantt-master-container::-webkit-scrollbar-thumb:hover { background:#64748b; }
       .mygantt-bar:hover {
-          transform:scale(1.02); z-index:30 !important;
+          z-index:30 !important;
           box-shadow:0 6px 12px rgba(0,0,0,0.3) !important; outline:2px solid #1e293b !important;
       }
       .gantt-bar-content {
