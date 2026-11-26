@@ -76,8 +76,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     html += (
         "<div id='gantt-master-container' "
         f"data-staff-drag-token='{html_utils.escape(staff_drag_token or '', quote=True)}' "
-        f"style='overflow: auto; height: {gantt_height_px}px; min-height: 360px; width: 100%; max-width: 100%; position: relative; border: 4px solid #1e293b; border-radius: 12px; "
-        "background: #ffffff; user-select: none; cursor: grab; "
+        f"style='overflow: auto; height: {gantt_height_px}px; min-height: 360px; width: 100%; max-width: 100%; position: relative; border: 4px solid var(--gantt-edge, #1e293b); border-radius: 12px; "
+        "background: var(--gantt-surface, #ffffff); user-select: none; cursor: grab; "
         "box-shadow: 0px 12px 35px rgba(0,0,0,0.4); font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif;'>"
     )
 
@@ -147,10 +147,30 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
     html += """
     <style>
+      :root[data-staff-theme="dark"] {
+          --gantt-surface: #0f172a;
+          --gantt-alternate: #131e31;
+          --gantt-today: #1b2c46;
+          --gantt-header: #1e293b;
+          --gantt-edge: #475569;
+          --gantt-line: #334155;
+          --gantt-grid: #314158;
+          --gantt-tick: #64748b;
+          --gantt-text: #e2e8f0;
+          --gantt-heading: #f8fafc;
+          --gantt-leave: #fca5a5;
+          --gantt-available: #86efac;
+          --gantt-later: #7dd3fc;
+          --gantt-restricted: #c4b5fd;
+          --gantt-unavailable: #fcd34d;
+          --gantt-menu-bg: #1e293b;
+          --gantt-menu-active: #334b6d;
+          --gantt-menu-focus: #93c5fd;
+      }
       #gantt-master-container::-webkit-scrollbar { width:12px; height:12px; }
-      #gantt-master-container::-webkit-scrollbar-track { background:#f1f5f9; border-radius:8px; }
+      #gantt-master-container::-webkit-scrollbar-track { background:var(--gantt-header, #f1f5f9); border-radius:8px; }
       #gantt-master-container::-webkit-scrollbar-thumb {
-          background:#94a3b8; border-radius:8px; border:3px solid #f1f5f9;
+          background:#94a3b8; border-radius:8px; border:3px solid var(--gantt-header, #f1f5f9);
       }
       #gantt-master-container::-webkit-scrollbar-thumb:hover { background:#64748b; }
       .mygantt-bar:hover {
@@ -186,30 +206,30 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       .gantt-bar-menu {
           position:fixed; z-index:10000; box-sizing:border-box; width:min(18rem, calc(100vw - 12px));
           max-height:calc(100vh - 12px); overflow:auto; padding:5px;
-          background:#fff; border:1px solid #cbd5e1; border-radius:9px;
-          box-shadow:0 8px 24px rgba(15,23,42,0.22); font:13px/1.3 system-ui,sans-serif; color:#0f172a;
+          background:var(--gantt-menu-bg, #fff); border:1px solid var(--gantt-edge, #cbd5e1); border-radius:9px;
+          box-shadow:0 8px 24px rgba(15,23,42,0.22); font:13px/1.3 system-ui,sans-serif; color:var(--gantt-text, #0f172a);
       }
       .gantt-bar-menu button {
           display:block; width:100%; text-align:left; padding:8px 10px; border:0; border-radius:5px;
           color:inherit; background:transparent; font:inherit; cursor:pointer;
       }
       .gantt-bar-menu button:hover, .gantt-bar-menu button:focus-visible {
-          background:#e0e7ff; outline:2px solid #6366f1; outline-offset:-2px;
+          background:var(--gantt-menu-active, #e0e7ff); outline:2px solid var(--gantt-menu-focus, #6366f1); outline-offset:-2px;
       }
       .gantt-bar-menu > button + .gantt-email-options {
-          margin-top:4px; padding-top:4px; border-top:1px solid #e2e8f0;
+          margin-top:4px; padding-top:4px; border-top:1px solid var(--gantt-line, #e2e8f0);
       }
     </style>
     """
 
-    html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: #f8fafc; border-bottom: 3px solid #1e293b; min-width: max-content;'>"
-    html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: #f8fafc; border-right: 3px solid #1e293b; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #1e293b; font-size: 14px;'>Ημέρα / Προσωπικό</div>"
-    html += f"<div class='gantt-timeline-header' style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; height: 45px; background: #f8fafc;'>"
+    html += "<div style='display: flex; position: sticky; top: 0; z-index: 100; background: var(--gantt-header, #f8fafc); border-bottom: 3px solid var(--gantt-edge, #1e293b); min-width: max-content;'>"
+    html += "<div style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 101; background: var(--gantt-header, #f8fafc); border-right: 3px solid var(--gantt-edge, #1e293b); padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: bold; color: var(--gantt-heading, #1e293b); font-size: 14px;'>Ημέρα / Προσωπικό</div>"
+    html += f"<div class='gantt-timeline-header' style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; height: 45px; background: var(--gantt-header, #f8fafc);'>"
 
     for h in range(4, 25):
         pct = ((h - 4) / 20) * 100
         lbl = f"{h:02d}:00" if h < 24 else "00:00"
-        html += f"<div style='position: absolute; left: {pct}%; height: 100%; border-left: 2px solid #94a3b8; padding-left: 4px; padding-top: 14px; font-weight: bold; font-size: 13px; color: #334155;'>{lbl}</div>"
+        html += f"<div style='position: absolute; left: {pct}%; height: 100%; border-left: 2px solid var(--gantt-tick, #94a3b8); padding-left: 4px; padding-top: 14px; font-weight: bold; font-size: 13px; color: var(--gantt-text, #334155);'>{lbl}</div>"
     html += "</div></div>"
 
     unassign_attr = " data-staff-unassign-target" if staff_drag_token else ""
@@ -357,20 +377,20 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         f"({hours_label}{declared_label})</small>"
                     )
 
-        label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px;'>🗓️ {day_str}</div>"
+        label_html = f"<div style='font-size: 14px; font-weight: bold; margin-bottom: 8px; color: var(--gantt-heading, inherit);'>🗓️ {day_str}</div>"
         if leaves_today:
-            label_html += f"<div style='color: #d32f2f; margin-bottom: 8px; font-size: 11px;'><b>Άδειες:</b><br>{'<br>'.join(leaves_today)}</div>"
+            label_html += f"<div style='color: var(--gantt-leave, #d32f2f); margin-bottom: 8px; font-size: 11px;'><b>Άδειες:</b><br>{'<br>'.join(leaves_today)}</div>"
         if available_after_6:
-            label_html += f"<div style='color: #15803d; margin-bottom: 8px; font-size: 11px;'><b>ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(available_after_6)}</div>"
+            label_html += f"<div style='color: var(--gantt-available, #15803d); margin-bottom: 8px; font-size: 11px;'><b>ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(available_after_6)}</div>"
         if available_after_10:
-            label_html += f"<div style='color: #0369a1; font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_after_10)}</div>"
+            label_html += f"<div style='color: var(--gantt-later, #0369a1); font-size: 11px;'><b>ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ:</b><br>{'<br>'.join(available_after_10)}</div>"
         if restricted_staff:
             label_html += (
-                "<div style='color: #7c3aed; margin-top: 8px; font-size: 11px;'>"
+                "<div style='color: var(--gantt-restricted, #7c3aed); margin-top: 8px; font-size: 11px;'>"
                 f"<b>ΠΕΡΙΟΡΙΣΜΕΝΗ ΔΙΑΘΕΣΙΜΟΤΗΤΑ:</b><br>{'<br>'.join(restricted_staff)}</div>"
             )
         if unavailable_staff:
-            label_html += f"<div style='color: #b45309; margin-top: 8px; font-size: 11px;'><b>ΜΗ ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(unavailable_staff)}</div>"
+            label_html += f"<div style='color: var(--gantt-unavailable, #b45309); margin-top: 8px; font-size: 11px;'><b>ΜΗ ΔΙΑΘΕΣΙΜΟΙ:</b><br>{'<br>'.join(unavailable_staff)}</div>"
 
         day_groups = [g for g in wk_groups.values() if g["Date"] == curr_date]
 
@@ -411,11 +431,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
         total_lanes = len(non_blue_lanes) + len(blue_lanes)
         row_height = max(1, total_lanes) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
-        bg_color_row = "#eef2ff" if curr_date == get_local_today() else ("#f8fafc" if i % 2 == 1 else "#ffffff")
+        if curr_date == get_local_today():
+            bg_color_row = "var(--gantt-today, #eef2ff)"
+        elif i % 2 == 1:
+            bg_color_row = "var(--gantt-alternate, #f8fafc)"
+        else:
+            bg_color_row = "var(--gantt-surface, #ffffff)"
 
-        html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid #e2e8f0; background-color: {bg_color_row}; min-height: {row_height}px;'>"
-        html += f"<div{unassign_attr} style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid #1e293b; padding: 10px; box-sizing: border-box;'>{label_html}</div>"
-        html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, rgba(148, 163, 184, 0.3) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
+        html += f"<div style='display: flex; min-width: max-content; border-bottom: 2px solid var(--gantt-line, #e2e8f0); background-color: {bg_color_row}; min-height: {row_height}px;'>"
+        html += f"<div{unassign_attr} style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid var(--gantt-edge, #1e293b); padding: 10px; box-sizing: border-box;'>{label_html}</div>"
+        html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, var(--gantt-grid, rgba(148, 163, 184, 0.3)) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
 
         for g, lane_idx in group_lanes:
             def t2p(t_str):
@@ -1097,7 +1122,24 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       document.addEventListener('focusin', onMenuFocus);
       window.addEventListener('resize', closeBarMenu);
 
+      // Follow the app theme in the live iframe. Downloaded HTML keeps its light palette.
+      var themeObserver;
+      try {
+        if (window.parent !== window) {
+          const appRoot = window.parent.document.documentElement;
+          const applyTheme = () => {
+            document.documentElement.dataset.staffTheme = appRoot.dataset.staffTheme || "";
+          };
+          applyTheme();
+          themeObserver = new MutationObserver(applyTheme);
+          themeObserver.observe(appRoot, { attributes: true, attributeFilter: ['data-staff-theme'] });
+        }
+      } catch (e) {
+        // A standalone chart may be embedded by a page on another origin.
+      }
+
       window.ganttDragCleanup = function () {
+        if (themeObserver) themeObserver.disconnect();
         closeBarMenu();
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
