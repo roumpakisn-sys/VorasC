@@ -32,8 +32,6 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     ROW_PAD_BOTTOM_PX = 6
     COMPACT_ACTIONS_WIDTH = 160
     STACKED_ACTIONS_WIDTH = 54
-    TRANSFER_BAR_MIN_PX = 148
-    TRANSFER_BAR_HEIGHT_PX = 52
 
     emp_short_names = {}
     employee_details_by_id = {}
@@ -112,18 +110,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
             }
             #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
-            #gantt-master-container .gantt-transfer-lane { display: flex; margin-bottom: 2px; }
             #gantt-master-container [data-staff-transfer-bar] .gantt-bar-content {
                 display: flex;
                 flex-direction: column;
                 align-self: stretch;
+                min-height: 0;
                 gap: 1px;
-                padding: 2px 4px 3px;
+                padding: 1px 3px;
                 -webkit-line-clamp: unset;
             }
             #gantt-master-container .gantt-transfer-project,
             #gantt-master-container .gantt-transfer-schedule {
                 flex: 0 0 auto;
+                line-height: 11px;
                 overflow: hidden;
                 white-space: nowrap;
                 text-overflow: ellipsis;
@@ -137,8 +136,41 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 align-content: flex-start;
                 gap: 2px;
                 overflow-y: auto;
-                scrollbar-width: thin;
+                overscroll-behavior-y: contain;
                 pointer-events: auto;
+            }
+            #gantt-master-container .gantt-transfer-roster::-webkit-scrollbar { width: 4px; }
+            #gantt-master-container .gantt-transfer-roster::-webkit-scrollbar-thumb {
+                background: #334155;
+                border-radius: 3px;
+            }
+            #gantt-master-container .gantt-transfer-roster::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.55);
+            }
+            @supports not selector(::-webkit-scrollbar) {
+                #gantt-master-container .gantt-transfer-roster { scrollbar-width: thin; }
+            }
+            #gantt-master-container [data-gantt-stacked][data-staff-transfer-bar] .gantt-bar-content {
+                padding: 0 1px;
+                gap: 0;
+            }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-project {
+                font-size: 9px;
+                line-height: 10px;
+            }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-schedule { display: none; }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-roster .gantt-transfer-worker {
+                padding: 0 1px;
+                font-size: 9px;
+                line-height: 10px;
+                text-overflow: clip;
+            }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-roster .gantt-transfer-worker::before {
+                display: none;
+            }
+            #gantt-master-container .gantt-transfer-roster:focus-visible {
+                outline: 1px solid #fff;
+                outline-offset: -1px;
             }
             #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker {
                 color: #f8fafc;
@@ -146,22 +178,14 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 overflow: hidden;
                 white-space: nowrap;
                 text-overflow: ellipsis;
-                line-height: 13px;
+                line-height: 12px;
             }
             #gantt-master-container .gantt-transfer-roster .gantt-transfer-worker::before {
                 height: 9px;
                 vertical-align: baseline;
             }
-            #gantt-master-container [data-staff-transfer-bar]:hover { transform: none; }
-            #gantt-master-container [data-staff-widened]::after {
-                content: "";
-                position: absolute;
-                bottom: 0;
-                left: 0;
-                width: var(--gantt-shift-span);
-                height: 3px;
-                background: rgba(0, 0, 0, 0.65);
-                pointer-events: none;
+            #gantt-master-container[data-staff-drag-token]:not([data-staff-drag-token=""]) .mygantt-bar:hover {
+                transform: none;
             }
             #gantt-master-container .gantt-transfer-worker:hover,
             #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
@@ -462,31 +486,22 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             return max(0, min(100, (mins / 1200.0) * 100))
 
         group_lanes = []
-        transfer_min_width_pct = TRANSFER_BAR_MIN_PX * 100 / timeline_width_px if staff_drag_token else 0
 
         def pack_lanes(groups, offset=0):
             lane_ends = []
-            for group in sorted(groups, key=lambda g: t2p(g["StartTime"]) if staff_drag_token else g["StartTime"]):
-                left_pct = t2p(group["StartTime"])
-                actual_width_pct = t2p(group["EndTime"]) - left_pct
-                if staff_drag_token:
-                    width_pct = max(actual_width_pct, transfer_min_width_pct)
-                    start, end = left_pct, left_pct + width_pct
-                else:
-                    width_pct = actual_width_pct
-                    start, end = group["StartTime"], group["EndTime"]
+            for group in sorted(groups, key=lambda g: g["StartTime"]):
+                start = group["StartTime"]
+                end = group["EndTime"]
                 lane = next((i for i, lane_end in enumerate(lane_ends) if start >= lane_end), len(lane_ends))
                 if lane == len(lane_ends):
                     lane_ends.append(end)
                 else:
                     lane_ends[lane] = end
-                group_lanes.append((group, offset + lane, left_pct, width_pct, actual_width_pct))
+                group_lanes.append((group, offset + lane))
             return len(lane_ends)
 
         non_blue_lane_count = pack_lanes(non_blue_groups)
         total_lanes = non_blue_lane_count + pack_lanes(blue_groups, non_blue_lane_count)
-        transfer_lanes = [[] for _ in range(total_lanes)] if staff_drag_token else []
-        transfer_lane_edges = [0] * len(transfer_lanes)
         row_height = max(1, total_lanes) * LANE_STEP_PX + ROW_PAD_TOP_PX + ROW_PAD_BOTTOM_PX
         if curr_date == get_local_today():
             bg_color_row = "var(--gantt-today, #eef2ff)"
@@ -499,7 +514,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         html += f"<div{unassign_attr} style='width: 230px; min-width: 230px; position: sticky; left: 0; z-index: 50; background-color: {bg_color_row}; border-right: 3px solid var(--gantt-edge, #1e293b); padding: 10px; box-sizing: border-box;'>{label_html}</div>"
         html += f"<div style='position: relative; width: {timeline_width_px}px; min-width: {timeline_width_px}px; background-image: linear-gradient(to right, var(--gantt-grid, rgba(148, 163, 184, 0.3)) 1px, transparent 1px); background-size: calc(100% / 20) 100%; padding-top: {ROW_PAD_TOP_PX}px; padding-bottom: {ROW_PAD_BOTTOM_PX}px;'>"
 
-        for g, lane_idx, left_pct, width_pct, actual_width_pct in group_lanes:
+        for g, lane_idx in group_lanes:
+            left_pct = t2p(g["StartTime"])
+            width_pct = t2p(g["EndTime"]) - left_pct
             top_px = lane_idx * LANE_STEP_PX + ROW_PAD_TOP_PX
 
             def _employee_text_html(employee_name, *, name_only=False):
@@ -696,9 +713,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 ("full", f"data-full-content='{full_bar_copy_attr}'", "Αντιγραφή περιεχομένου μπάρας", "⧉"),
                 ("project", f"data-project='{project_copy_attr}'", "Αντιγραφή ονόματος έργου", "📋"),
             )
-            width_px = actual_width_pct * timeline_width_px / 100
+            width_px = width_pct * timeline_width_px / 100
             compact = width_px < COMPACT_ACTIONS_WIDTH
-            stacked_attr = " data-gantt-stacked='true'" if not staff_drag_token and width_px < STACKED_ACTIONS_WIDTH else ""
+            stacked_attr = " data-gantt-stacked='true'" if width_px < STACKED_ACTIONS_WIDTH else ""
             buttons = "".join(
                 f"<button type='button' class='gantt-copy-{kind}-btn' {data} title='{label}' aria-label='{label}'>"
                 f"{label if compact else icon}</button>"
@@ -721,36 +738,19 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     )
 
             transfer_attr = ""
-            if staff_drag_token:
-                gap_pct = max(0, left_pct - transfer_lane_edges[lane_idx])
-                transfer_lane_edges[lane_idx] = left_pct + width_pct
-                shift_span = max(0, actual_width_pct) / width_pct * 100
-                position = (
-                    f"position: relative; flex: 0 0 auto; margin-left: {gap_pct}%; "
-                    f"height: {TRANSFER_BAR_HEIGHT_PX}px; --gantt-shift-span: {shift_span}%;"
-                )
+            if handles:
                 transfer_attr = " data-staff-transfer-bar"
-                if actual_width_pct < width_pct:
-                    transfer_attr += " data-staff-widened"
-                roster = (
-                    f"<div class='gantt-transfer-roster' role='group' aria-label='Προσωπικό για μεταφορά'>"
-                    f"{''.join(handles)}</div>"
-                ) if handles else emps_html
                 base_text = (
-                    f"<strong class='gantt-transfer-project'>{project_html}</strong>"
+                    f"<strong class='gantt-transfer-project' title='{html_utils.escape(proj_name, quote=True)}'>"
+                    f"{project_html}</strong>"
                     f"<div class='gantt-transfer-schedule'>{pending_html}{schedule}{notes_html}</div>"
-                    f"{roster}"
+                    "<div class='gantt-transfer-roster' role='group' aria-label='Προσωπικό για μεταφορά' tabindex='0'>"
+                    f"{''.join(handles)}</div>"
                 )
-                if g["is_cancelled"]:
-                    base_text = f"<s>{base_text}</s>"
-                    if g["cancel_reason"]:
-                        base_text += f"<div>{html_utils.escape(g['cancel_reason'].upper())}</div>"
-            else:
-                position = f"position: absolute; left: {left_pct}%; top: {top_px}px; height: {BAR_HEIGHT_PX}px;"
 
-            bar = (
+            html += (
                 f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr}{transfer_attr} "
-                f"style='{position} width: {width_pct}%; "
+                f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; height: {BAR_HEIGHT_PX}px; "
                 f"background-color: {bg_color}; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
@@ -758,13 +758,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 f"<div class='gantt-bar-content'>{base_text}</div>"
                 f"<div class='gantt-bar-actions'>{actions}</div></a>"
             )
-            if staff_drag_token:
-                transfer_lanes[lane_idx].append(bar)
-            else:
-                html += bar
 
-        for bars in transfer_lanes:
-            html += f"<div class='gantt-transfer-lane'>{''.join(bars)}</div>"
         html += "</div></div>"
 
     html += "</div>"

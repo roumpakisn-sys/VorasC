@@ -220,25 +220,30 @@ class DragMarkupTests(unittest.TestCase):
             "Employees": ["[ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ]", *[e["name"] for e in extra_staff]],
             "EmployeeIds": ["", "free", *[e["id"] for e in extra_staff]],
         }
-        next_bar = {**source, "Key": "next-bar", "StartTime": "09:15", "EndTime": "09:30"}
+        next_bar = {**source, "Key": "next-bar", "StartTime": "09:15", "EndTime": "12:30"}
         short_groups = {source["Key"]: short_bar, next_bar["Key"]: next_bar}
         short_mapping = {source["Key"]: "short-bar", next_bar["Key"]: "next-bar"}
         narrow = build(short_groups, day, 0.5, short_mapping, 500, staff_drag_token="token")
         narrow_tags = Collector()
         narrow_tags.feed(narrow)
         bars = {attrs["id"]: attrs for _, attrs in narrow_tags.tags if attrs.get("class") == "mygantt-bar"}
-        self.assertIn("data-staff-widened", bars["short-bar"])
-        self.assertNotIn("data-gantt-stacked", bars["short-bar"])
+        self.assertIn("data-gantt-stacked", bars["short-bar"])
         self.assertIn("09:00-09:15", bars["short-bar"]["title"])
         self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bars["short-bar"]["title"])
         project = html.escape(short_bar["ProjectDisplay"].upper())
-        self.assertIn(f"<strong class='gantt-transfer-project'>{project}</strong>", narrow)
+        self.assertIn(f"<strong class='gantt-transfer-project' title='{project}'>{project}</strong>", narrow)
         for employee in [{"id": "free", "name": "Άννα"}, *extra_staff]:
             self.assertIn(f"data-employee='{employee['id']}' title='{employee['name']} · ", narrow)
             self.assertIn(f">{employee['name']}</span>", narrow)
         ordinary_short = build(short_groups, day, 0.5, short_mapping, 500)
-        self.assertNotIn("data-staff-widened", ordinary_short)
         self.assertNotIn("class='gantt-transfer-roster'", ordinary_short)
+        ordinary_tags = Collector()
+        ordinary_tags.feed(ordinary_short)
+        original_bars = {attrs["id"]: attrs for _, attrs in ordinary_tags.tags if attrs.get("class") == "mygantt-bar"}
+        for bar_id in ("short-bar", "next-bar"):
+            geometry = r"^position: absolute; left: [^;]+; width: [^;]+; top: [^;]+; height: 44px;"
+            self.assertEqual(re.match(geometry, bars[bar_id]["style"])[0],
+                             re.match(geometry, original_bars[bar_id]["style"])[0])
         self.check_short_bar_in_browser(narrow)
 
         node = shutil.which("node")
@@ -334,6 +339,7 @@ window.addEventListener('load', () => {
     const project = bar.querySelector('.gantt-transfer-project');
     const roster = bar.querySelector('.gantt-transfer-roster');
     const workers = Array.from(roster.querySelectorAll('.gantt-transfer-worker'));
+    const nextRoster = next.querySelector('.gantt-transfer-roster');
     const rosterBounds = roster.getBoundingClientRect();
     const within = (box, area) => box.height > 0 && box.width > 0 && box.top >= area.top - 1
         && box.bottom <= area.bottom + 1 && box.left >= area.left - 1 && box.right <= area.right + 1;
@@ -347,7 +353,8 @@ window.addEventListener('load', () => {
         project: within(project.getBoundingClientRect(), bounds) && bar.title.includes(project.textContent),
         workers: workers.length === 5 && workersReachable,
         rosterScrolls: roster.scrollHeight > roster.clientHeight,
-        separateLanes: next.getBoundingClientRect().top >= bounds.bottom,
+        nextFits: nextRoster.scrollHeight === nextRoster.clientHeight,
+        sameLane: Math.abs(next.getBoundingClientRect().top - bounds.top) < 1,
     });
 });
 </script>
@@ -366,8 +373,8 @@ window.addEventListener('load', () => {
         page = re.search(r'data-transfer-layout="([^"]+)"', result.stdout)
         self.assertIsNotNone(page, "The browser did not report the transfer layout.")
         self.assertEqual(json.loads(html.unescape(page[1])), {
-            "barWidth": 148, "barHeight": 52, "project": True, "workers": True,
-            "rosterScrolls": True, "separateLanes": True,
+            "barWidth": 15, "barHeight": 44, "project": True, "workers": True,
+            "rosterScrolls": True, "nextFits": True, "sameLane": True,
         })
 
 
