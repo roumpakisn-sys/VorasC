@@ -205,6 +205,30 @@ class DragMarkupTests(unittest.TestCase):
             self.assertRegex(output, rf"<b>{heading}:</b><br><span[^>]+data-staff-origin='availability' "
                                      rf"data-employee='{employee_id}'")
 
+        source = next(group for group in groups.values() if group["Employees"] != ["ΧΩΡΙΣ ΠΡΟΣΩΠΙΚΟ"])
+        short_bar = {
+            **source,
+            "EndTime": "09:15",
+            "ProjectDisplay": "Μακρύ όνομα έργου για μικρή μπάρα",
+            "Employees": ["[ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ]", "ΕΛΕΝΗ"],
+            "EmployeeIds": ["", "free", "early"],
+        }
+        short_groups = {source["Key"]: short_bar}
+        narrow = build(short_groups, day, 1, mapping, 500, staff_drag_token="token")
+        narrow_tags = Collector()
+        narrow_tags.feed(narrow)
+        bar, = [attrs for _, attrs in narrow_tags.tags if attrs.get("class") == "mygantt-bar"]
+        self.assertEqual(bar["data-gantt-stacked"], "true")
+        self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bar["title"])
+        roster = narrow.split("<div class='gantt-transfer-names'", 1)[1].split("</div>", 1)[0]
+        self.assertIn("data-employee='free' title='Άννα ·", roster)
+        self.assertIn("data-employee='early' title='Ελένη ·", roster)
+        self.assertIn(">ΑΝΝΑ</span>", roster)
+        self.assertIn(">ΕΛΕΝΗ</span>", roster)
+        self.assertNotIn("ΑΛΛΟ ΕΡΓΟ", roster)
+        self.assertIn("<div class='gantt-transfer-summary'>", narrow)
+        self.assertNotIn("class='gantt-transfer-names'", build(short_groups, day, 1, mapping, 500))
+
         node = shutil.which("node")
         if not node:
             return
