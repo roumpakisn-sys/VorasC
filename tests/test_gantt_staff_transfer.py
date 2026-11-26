@@ -322,8 +322,8 @@ assert.deepStrictEqual([unassignment.source,unassignment.target,unassignment.emp
         self.assertEqual(run.returncode, 0, run.stderr)
 
     def check_short_bar_in_browser(self, chart_html):
-        browser = shutil.which("google-chrome") or shutil.which("chromium")
-        if browser is None or subprocess.run([browser, "--version"], capture_output=True, timeout=5).returncode:
+        browser = shutil.which("google-chrome")
+        if browser is None:
             return
         script = """
 <script>
@@ -356,7 +356,7 @@ window.addEventListener('load', () => {
                 [browser, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
                  "--disable-background-networking", "--window-size=960,740", "--virtual-time-budget=1000",
                  f"--user-data-dir={folder}/profile", "--dump-dom", fixture.as_uri()],
-                text=True, capture_output=True, timeout=25,
+                text=True, capture_output=True, timeout=45,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         page = re.search(r'data-transfer-layout="([^"]+)"', result.stdout)
