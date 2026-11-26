@@ -13,9 +13,22 @@ def setup_shared_ui(show_menu=False, menu_options=None):
        Αλλάζει μόνο εμφάνιση. Δεν αλλάζει καθόλου λειτουργικότητα.
        ========================================================= */
 
+    :root[data-staff-theme="dark"] {
+        --staff-surface: #1e293b;
+        --staff-surface-muted: #162135;
+        --staff-line: #334155;
+        --staff-border: #475569;
+        --staff-border-strong: #64748b;
+        --staff-hover: #29384f;
+        --staff-text: #cbd5e1;
+        --staff-text-strong: #f8fafc;
+        --staff-heading: #e2e8f0;
+        --staff-nav-accent: #93c5fd;
+    }
+
     [data-testid="stSidebar"] {
-        background: #f8fafc !important;
-        border-right: 1px solid #e2e8f0 !important;
+        background: var(--staff-surface-muted, #f8fafc) !important;
+        border-right: 1px solid var(--staff-line, #e2e8f0) !important;
         box-shadow: 8px 0 24px rgba(15, 23, 42, 0.08) !important;
     }
 
@@ -30,7 +43,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     [data-testid="stSidebarNav"] {
         padding-top: 0.3rem !important;
         padding-bottom: 0.8rem !important;
-        border-bottom: 1px solid #e2e8f0 !important;
+        border-bottom: 1px solid var(--staff-line, #e2e8f0) !important;
         margin-bottom: 1rem !important;
     }
 
@@ -46,24 +59,24 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     [data-testid="stSidebarNav"] a {
         border-radius: 9px !important;
         padding: 0.50rem 0.60rem !important;
-        color: #334155 !important;
+        color: var(--staff-text, #334155) !important;
         font-weight: 600 !important;
         text-decoration: none !important;
         transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease !important;
     }
 
     [data-testid="stSidebarNav"] a:hover {
-        background: #e2e8f0 !important;
-        color: #0f172a !important;
+        background: var(--staff-hover, #e2e8f0) !important;
+        color: var(--staff-text-strong, #0f172a) !important;
         transform: translateX(2px) !important;
         box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08) !important;
     }
 
     [data-testid="stSidebarNav"] a[aria-current="page"] {
-        background: #e2e8f0 !important;
-        color: #0f172a !important;
+        background: var(--staff-hover, #e2e8f0) !important;
+        color: var(--staff-text-strong, #0f172a) !important;
         font-weight: 800 !important;
-        box-shadow: inset 3px 0 0 #334155, 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+        box-shadow: inset 3px 0 0 var(--staff-nav-accent, #334155), 0 2px 6px rgba(15, 23, 42, 0.08) !important;
     }
 
     /* Management εσωτερικό menu: st.sidebar.radio σαν HTML menu buttons */
@@ -74,8 +87,8 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
 
     [data-testid="stSidebar"] div[role="radiogroup"] label {
-        background: #ffffff !important;
-        border: 1px solid #cbd5e1 !important;
+        background: var(--staff-surface, #ffffff) !important;
+        border: 1px solid var(--staff-border, #cbd5e1) !important;
         border-radius: 9px !important;
         padding: 0.55rem 0.65rem !important;
         margin: 0.05rem 0 !important;
@@ -85,20 +98,20 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
 
     [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background: #f1f5f9 !important;
-        border-color: #94a3b8 !important;
+        background: var(--staff-hover, #f1f5f9) !important;
+        border-color: var(--staff-border-strong, #94a3b8) !important;
         transform: translateX(2px) !important;
         box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
     }
 
     [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-        background: #e2e8f0 !important;
-        border-color: #94a3b8 !important;
-        box-shadow: inset 3px 0 0 #334155, 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+        background: var(--staff-hover, #e2e8f0) !important;
+        border-color: var(--staff-border-strong, #94a3b8) !important;
+        box-shadow: inset 3px 0 0 var(--staff-nav-accent, #334155), 0 2px 6px rgba(15, 23, 42, 0.08) !important;
     }
 
     [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p {
-        color: #0f172a !important;
+        color: var(--staff-text-strong, #0f172a) !important;
         font-weight: 800 !important;
     }
 
@@ -110,28 +123,28 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     [data-testid="stSidebar"] h1,
     [data-testid="stSidebar"] h2,
     [data-testid="stSidebar"] h3 {
-        color: #1e293b !important;
+        color: var(--staff-heading, #1e293b) !important;
         letter-spacing: 0.02em !important;
     }
 
     [data-testid="stSidebar"] hr {
         margin: 1rem 0 !important;
-        border-color: #e2e8f0 !important;
+        border-color: var(--staff-line, #e2e8f0) !important;
     }
 
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] span,
     [data-testid="stSidebar"] label {
-        color: #334155;
+        color: var(--staff-text, #334155);
     }
 
     /* Streamlit buttons μέσα στη sidebar: Undo / Redo / Refresh / Logout */
     [data-testid="stSidebar"] .stButton > button {
         width: 100% !important;
         border-radius: 9px !important;
-        border: 1px solid #cbd5e1 !important;
-        background: #ffffff !important;
-        color: #334155 !important;
+        border: 1px solid var(--staff-border, #cbd5e1) !important;
+        background: var(--staff-surface, #ffffff) !important;
+        color: var(--staff-text, #334155) !important;
         font-weight: 700 !important;
         min-height: 2.35rem !important;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
@@ -139,16 +152,16 @@ def setup_shared_ui(show_menu=False, menu_options=None):
     }
 
     [data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
-        background: #f1f5f9 !important;
-        border-color: #94a3b8 !important;
+        background: var(--staff-hover, #f1f5f9) !important;
+        border-color: var(--staff-border-strong, #94a3b8) !important;
         transform: translateY(-1px) !important;
         box-shadow: 0 4px 10px rgba(15, 23, 42, 0.10) !important;
     }
 
     [data-testid="stSidebar"] .stButton > button:disabled {
         opacity: 0.45 !important;
-        background: #f8fafc !important;
-        color: #94a3b8 !important;
+        background: var(--staff-surface-muted, #f8fafc) !important;
+        color: var(--staff-border-strong, #94a3b8) !important;
         box-shadow: none !important;
     }
 
@@ -195,9 +208,17 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         clockDiv = doc.createElement("div");
         clockDiv.id = "staff_pro_clock";
         doc.body.appendChild(clockDiv);
-        clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: #1e293b; z-index: 999999; background: #ffffff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #cbd5e1; font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
+        clockDiv.style.cssText = "position: fixed; top: 12px; right: 300px; font-size: 18px; font-weight: bold; color: var(--staff-heading, #1e293b); z-index: 999999; background: var(--staff-surface, #ffffff); padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid var(--staff-border, #cbd5e1); font-family: 'Courier New', Courier, monospace; letter-spacing: 2px;";
     }
+    const app = doc.querySelector('[data-testid="stApp"]');
     function updateClock() {
+        // Streamlit updates the app's color scheme when the theme setting changes.
+        if (app) {
+            const scheme = doc.defaultView.getComputedStyle(app).colorScheme;
+            if (doc.documentElement.dataset.staffTheme !== scheme) {
+                doc.documentElement.dataset.staffTheme = scheme;
+            }
+        }
         const now = new Date();
         const dateOptions = { day: 'numeric', month: 'long', year: 'numeric' };
         clockDiv.innerHTML = now.toLocaleDateString('el-GR', dateOptions) + " | " + now.toLocaleTimeString('el-GR', {hour12: false});
@@ -211,7 +232,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         loaderDiv = doc.createElement("div");
         loaderDiv.id = "staff_pro_cleaner";
         doc.body.appendChild(loaderDiv);
-        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: #334155; z-index: 999999; display: none; background: #f8fafc; padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; font-family: sans-serif; letter-spacing: 1px;";
+        loaderDiv.style.cssText = "position: fixed; top: 12px; right: 20px; font-size: 20px; font-weight: bold; color: var(--staff-text, #334155); z-index: 999999; display: none; background: var(--staff-surface-muted, #f8fafc); padding: 6px 14px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid var(--staff-border, #cbd5e1); font-family: sans-serif; letter-spacing: 1px;";
     }
     
     const cleaningIcons = ["🧹", "🪣", "🧼", "🧽"];
