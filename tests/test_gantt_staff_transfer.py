@@ -194,10 +194,10 @@ class DragMarkupTests(unittest.TestCase):
                 self.tags.append((tag, dict(attrs)))
         parsed = Collector()
         parsed.feed(output)
-        handle, = [attrs for _, attrs in parsed.tags
+        handles = [attrs for _, attrs in parsed.tags
                    if attrs.get("class") == "gantt-transfer-worker" and "data-staff-origin" not in attrs]
-        self.assertEqual(handle["data-employee"], "e")
-        self.assertEqual(handle["draggable"], "true")
+        self.assertEqual([(handle["data-employee"], handle["draggable"]) for handle in handles],
+                         [("e", "true"), ("e", "true")])
         self.assertEqual(sum("data-staff-drop-target" in attrs for _, attrs in parsed.tags), 2)
         self.assertEqual(sum("data-staff-unassign-target" in attrs for _, attrs in parsed.tags), 7)
         for heading, employee_id in (("ΔΙΑΘΕΣΙΜΟΙ", "free"), ("ΜΕΤΑ ΤΑ ΠΡΩΙΝΑ", "early"),
@@ -220,14 +220,15 @@ class DragMarkupTests(unittest.TestCase):
         bar, = [attrs for _, attrs in narrow_tags.tags if attrs.get("class") == "mygantt-bar"]
         self.assertEqual(bar["data-gantt-stacked"], "true")
         self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bar["title"])
-        roster = narrow.split("<div class='gantt-transfer-names'", 1)[1].split("</div>", 1)[0]
-        self.assertIn("data-employee='free' title='Άννα ·", roster)
-        self.assertIn("data-employee='early' title='Ελένη ·", roster)
-        self.assertIn(">ΑΝΝΑ</span>", roster)
-        self.assertIn(">ΕΛΕΝΗ</span>", roster)
-        self.assertNotIn("ΑΛΛΟ ΕΡΓΟ", roster)
-        self.assertIn("<div class='gantt-transfer-summary'>", narrow)
-        self.assertNotIn("class='gantt-transfer-names'", build(short_groups, day, 1, mapping, 500))
+        self.assertEqual(bar["data-staff-preview"], "true")
+        project = "ΜΑΚΡΥ ΟΝΟΜΑ ΕΡΓΟΥ ΓΙΑ ΜΙΚΡΗ ΜΠΑΡΑ"
+        self.assertIn(f"<div class='gantt-bar-content'>{project} | 09:00-09:15", narrow)
+        preview = narrow.split("<template class='gantt-transfer-preview-template'>", 1)[1].split("</template>", 1)[0]
+        self.assertIn(f"<strong class='gantt-transfer-preview-project'>{project}</strong>", preview)
+        self.assertIn("09:00-09:15", preview)
+        for employee_id, name in (("free", "Άννα"), ("early", "Ελένη")):
+            self.assertRegex(preview, rf"draggable='true' data-employee='{employee_id}' title='[^']+'>{name}</span>")
+        self.assertNotIn("class='gantt-transfer-preview-template'", build(short_groups, day, 1, mapping, 500))
 
         node = shutil.which("node")
         if not node:
@@ -236,25 +237,46 @@ class DragMarkupTests(unittest.TestCase):
         harness = r'''
 const assert = require('assert');
 const handlers = {};
+const documentHandlers = {};
+const panelHandlers = {};
 const displayClasses = () => {
   const classes = new Set();
   return {add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name)};
 };
-const source = {id:'bar-0'};
+const template = {content:{cloneNode(deep){assert.strictEqual(deep,true);return {type:'roster'};}}};
+const source = {
+  id:'bar-0',isConnected:true,style:{backgroundColor:'#ee0'},
+  querySelector(selector) {assert.strictEqual(selector,'.gantt-transfer-preview-template');return template;},
+  getBoundingClientRect(){return {left:570,top:430,bottom:475};}
+};
 const target = {id:'bar-1', classList:displayClasses()};
 const chip = {dataset:{employee:'e'},classList:displayClasses(),closest(){return source;}};
 let reported;
+let panel;
+const panelChip = {dataset:{employee:'e2'},classList:displayClasses(),closest(){return null;}};
 const link = {click(){reported = this.id;}};
 const surface = {
   dataset:{staffDragToken:'token'},classList:displayClasses(),style:{},offsetLeft:0,scrollWidth:600,scrollLeft:0,scrollTop:0,
-  querySelector(){return null;},getBoundingClientRect(){return {left:0,right:600,top:0,bottom:500};},
+  querySelector(){return null;},contains(el){return el === source;},getBoundingClientRect(){return {left:0,right:600,top:0,bottom:500};},
   addEventListener(type,fn){handlers[type] = fn;},removeEventListener(){}
 };
 global.sessionStorage = {getItem(){return null;},setItem(){}};
 global.window = {addEventListener(){},removeEventListener(){}};
 global.document = {
-  body:{style:{}},getElementById(){return surface;},querySelector(){return link;},
-  addEventListener(){},removeEventListener(){}
+  documentElement:{clientWidth:600,clientHeight:500},
+  body:{style:{},appendChild(el){panel = el;}},
+  getElementById(){return surface;},querySelector(){return link;},
+  createElement(name){
+    assert.strictEqual(name,'div');
+    return {
+      style:{setProperty(){}},classList:displayClasses(),offsetWidth:310,offsetHeight:130,
+      setAttribute(){},appendChild(el){this.content=el;},
+      addEventListener(type,fn){panelHandlers[type] = fn;},
+      contains(el){return el === panelChip;},
+      remove(){panel = null;}
+    };
+  },
+  addEventListener(type,fn){documentHandlers[type] = fn;},removeEventListener(){}
 };
 global.setTimeout = fn => {fn();};
 '''
@@ -304,6 +326,27 @@ handlers.drop(listDest);
 assert.ok(!leftList.classList.contains('gantt-drop-hover'));
 const unassignment = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
 assert.deepStrictEqual([unassignment.source,unassignment.target,unassignment.employee],['bar-0',null,'e']);
+
+const hover = {pointerType:'mouse',target:{closest(selector){
+  return selector === 'a[data-staff-preview]' ? source : null;
+}}};
+documentHandlers.pointerover(hover);
+assert.strictEqual(panel.content.type,'roster');
+assert.strictEqual(panel.style.top,'300px');
+assert.strictEqual(panel.style.left,'284px');
+documentHandlers.pointerover({pointerType:'mouse',target:panelChip});
+assert.ok(panel);
+panelHandlers.dragstart({...e,target:{closest(){return panelChip;}}});
+assert.ok(panel.classList.contains('gantt-preview-dragging'));
+handlers.dragover(dest);
+handlers.drop(dest);
+assert.strictEqual(panel,null);
+const expandedMove = JSON.parse(decodeURIComponent(reported.slice('gantt_staff_drop:'.length)));
+assert.deepStrictEqual([expandedMove.source,expandedMove.target,expandedMove.employee],['bar-0','bar-1','e2']);
+documentHandlers.pointerover(hover);
+panelHandlers.dragstart({...e,target:{closest(){return panelChip;}}});
+panelHandlers.dragend();
+assert.strictEqual(panel,null);
 '''
         run = subprocess.run([node, "-"], input=harness + script + checks, text=True, capture_output=True)
         self.assertEqual(run.returncode, 0, run.stderr)

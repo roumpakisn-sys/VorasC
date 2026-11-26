@@ -85,7 +85,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     if staff_drag_token:
         html += """
         <style>
-            #gantt-master-container .gantt-transfer-worker {
+            #gantt-master-container .gantt-transfer-worker,
+            .gantt-transfer-preview .gantt-transfer-worker {
                 --gantt-context-color: #fda4af;
                 pointer-events: auto;
                 cursor: grab;
@@ -100,7 +101,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 box-shadow: inset 0 0 0 1px #64748b, 0 1px 2px rgb(15 23 42 / 22%);
                 transition: background-color 120ms ease, box-shadow 120ms ease;
             }
-            #gantt-master-container .gantt-transfer-worker::before {
+            #gantt-master-container .gantt-transfer-worker::before,
+            .gantt-transfer-preview .gantt-transfer-worker::before {
                 content: "";
                 display: inline-block;
                 width: 8px;
@@ -110,46 +112,52 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 background: radial-gradient(circle, #bae6fd 1px, transparent 1.25px) 0 0 / 4px 4px;
             }
             #gantt-master-container .gantt-transfer-worker[data-staff-origin] { color: #f8fafc; }
-            #gantt-master-container .gantt-bar-content.gantt-transfer-content {
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-worker { padding-inline: 2px; }
+            #gantt-master-container [data-gantt-stacked] .gantt-transfer-worker::before { display: none; }
+            .gantt-transfer-preview {
+                position: fixed;
+                z-index: 9999;
                 display: flex;
                 flex-direction: column;
-                gap: 1px;
+                gap: 6px;
+                box-sizing: border-box;
+                width: min(26rem, calc(100vw - 12px));
+                max-height: calc(100vh - 12px);
+                overflow: auto;
+                padding: 10px;
+                border: 1px solid var(--gantt-edge, #cbd5e1);
+                border-left: 4px solid var(--gantt-transfer-bar-color, #64748b);
+                border-radius: 8px;
+                background: var(--gantt-menu-bg, #fff);
+                color: var(--gantt-text, #0f172a);
+                box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+                font: 13px/1.35 system-ui, sans-serif;
+                overflow-wrap: anywhere;
+                user-select: none;
+                overscroll-behavior: contain;
             }
-            #gantt-master-container .gantt-transfer-names {
+            .gantt-transfer-preview-project { font-size: 14px; }
+            .gantt-transfer-preview-staff {
                 display: flex;
                 flex-wrap: wrap;
-                justify-content: center;
                 align-content: flex-start;
-                gap: 2px;
-                min-height: 15px;
-                overflow-y: auto;
-                pointer-events: auto;
-                scrollbar-width: thin;
+                gap: 5px;
+                min-height: 22px;
+                overflow: auto;
+                overscroll-behavior: contain;
             }
-            #gantt-master-container .gantt-transfer-names .gantt-transfer-worker {
-                display: block;
-                min-width: 0;
-                overflow: hidden;
-                white-space: nowrap;
-                text-overflow: ellipsis;
-                line-height: 13px;
+            .gantt-transfer-preview .gantt-transfer-worker {
+                padding: 3px 7px;
+                color: #f8fafc;
+                font-weight: 700;
             }
-            #gantt-master-container .gantt-transfer-summary {
-                flex: 0 0 auto;
-                overflow: hidden;
-                white-space: nowrap;
-                text-overflow: ellipsis;
-            }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-content { padding: 0 1px; }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names { scrollbar-width: none; }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names .gantt-transfer-worker {
-                padding-inline: 2px;
-            }
-            #gantt-master-container [data-gantt-stacked] .gantt-transfer-names .gantt-transfer-worker::before {
-                display: none;
-            }
+            .gantt-transfer-preview.gantt-preview-dragging { opacity: 0; }
+            .gantt-transfer-preview.gantt-preview-dragging,
+            .gantt-transfer-preview.gantt-preview-dragging .gantt-transfer-worker { pointer-events: none; }
             #gantt-master-container .gantt-transfer-worker:hover,
-            #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
+            #gantt-master-container .gantt-transfer-worker.gantt-drag-origin,
+            .gantt-transfer-preview .gantt-transfer-worker:hover,
+            .gantt-transfer-preview .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
                 box-shadow: inset 0 0 0 1px #7dd3fc, 0 1px 2px rgb(15 23 42 / 22%);
             }
@@ -179,7 +187,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 pointer-events: none;
             }
             @media (prefers-reduced-motion: reduce) {
-                #gantt-master-container .gantt-transfer-worker { transition: none; }
+                #gantt-master-container .gantt-transfer-worker,
+                .gantt-transfer-preview .gantt-transfer-worker { transition: none; }
             }
         </style>
         """
@@ -573,6 +582,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
             emps_plain = ", ".join(grouped_employee_labels).upper()
             emps_html = ", ".join(_employee_text_html(emp) for emp in grouped_employee_labels)
             handles = []
+            preview_handles = []
             if staff_drag_token and not g.get("is_cancelled"):
                 seen = set()
                 employee_ids = [eid for eid in g.get("EmployeeIds", []) if eid]
@@ -580,10 +590,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                     if eid in seen:
                         continue
                     seen.add(eid)
-                    full_name = employee_details_by_id.get(eid, {}).get("name") or employee_label
-                    handles.append(drag_worker(
-                        eid, _employee_text_html(employee_label, name_only=True), description=full_name,
-                    ))
+                    full_name = employee_details_by_id.get(eid, {}).get("name")
+                    short_label = _employee_text_html(employee_label, name_only=True)
+                    handles.append(drag_worker(eid, short_label, description=full_name))
+                    preview_label = html_utils.escape(full_name) if full_name else short_label
+                    preview_handles.append(drag_worker(eid, preview_label))
             proj_name = g.get("ProjectDisplay", g["Project"]).upper()
             arr_str = f"[Προσ: {g['ArrivalTime']}] " if g["ArrivalTime"] else ""
 
@@ -592,20 +603,21 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 emps_html = "⚠️ " + emps_html
 
             base_text_plain = f"{arr_str}{g['StartTime']}-{g['EndTime']} | {proj_name} | {emps_plain}"
-            summary = (
-                f"{html_utils.escape(arr_str)}{g['StartTime']}-{g['EndTime']} | "
-                f"{html_utils.escape(proj_name)}"
-            )
+            schedule = f"{html_utils.escape(arr_str)}{g['StartTime']}-{g['EndTime']}"
+            project_html = html_utils.escape(proj_name)
+            summary = f"{schedule} | {project_html}"
+            pending_html = ""
 
             pending = g.get("CustomerConfirmation")
             if pending is not None and not g["is_cancelled"]:
                 pending_label = placement_confirmation.PENDING_LABEL
                 follow_up = placement_confirmation.follow_up_label(pending)
                 base_text_plain = " · ".join(part for part in (pending_label, follow_up, base_text_plain) if part)
-                summary = (
+                pending_html = (
                     "<span style='background:#fef3c7;color:#78350f;padding:0 3px;border-radius:3px;'>"
-                    f"{pending_label}</span> {summary}"
+                    f"{pending_label}</span> "
                 )
+                summary = f"{pending_html}{summary}"
             notes_html = ""
             if g["Notes"]:
                 notes_upper = g["Notes"].upper()
@@ -710,24 +722,28 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                         f"<template>{email_options}</template>"
                     )
 
+            preview = ""
+            preview_attr = ""
             if handles:
-                content = (
-                    "<div class='gantt-bar-content gantt-transfer-content'>"
-                    "<div class='gantt-transfer-names' role='group' aria-label='Προσωπικό για μεταφορά' tabindex='0'>"
-                    + "".join(handles)
-                    + f"</div><div class='gantt-transfer-summary'>{summary}{notes_html}</div></div>"
+                base_text = f"{project_html} | {pending_html}{schedule} | {', '.join(handles)}{notes_html}"
+                preview_attr = " data-staff-preview='true'"
+                preview = (
+                    "<template class='gantt-transfer-preview-template'>"
+                    f"<strong class='gantt-transfer-preview-project'>{project_html}</strong>"
+                    f"<div>{pending_html}{schedule}</div>"
+                    f"<div class='gantt-transfer-preview-staff'>{''.join(preview_handles)}</div>"
+                    "</template>"
                 )
-            else:
-                content = f"<div class='gantt-bar-content'>{base_text}</div>"
 
             html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr} "
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr}{preview_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; "
                 f"background-color: {bg_color}; height: {BAR_HEIGHT_PX}px; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding: 0; margin: 0; text-align: center; {focus_style}' title='{tooltip}'>"
-                f"{content}<div class='gantt-bar-actions'>{actions}</div></a>"
+                f"<div class='gantt-bar-content'>{base_text}</div>"
+                f"<div class='gantt-bar-actions'>{actions}</div>{preview}</a>"
             )
 
         html += "</div></div>"
@@ -781,9 +797,84 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var blockBarClickUntil = 0;
       var menu = null;
       var menuTrigger = null;
+      var transferPreview = null;
+      var transferPreviewBar = null;
+      var hoveredTransferBar = null;
+      var transferPreviewTimer;
+
+      function closeTransferPreview() {
+        clearTimeout(transferPreviewTimer);
+        if (transferPreview) transferPreview.remove();
+        transferPreview = null;
+        transferPreviewBar = null;
+        hoveredTransferBar = null;
+      }
+
+      function showTransferPreview(bar) {
+        closeTransferPreview();
+        if (!bar.isConnected) return;
+        const template = bar.querySelector('.gantt-transfer-preview-template');
+        if (!template) return;
+
+        const panel = document.createElement('div');
+        panel.className = 'gantt-transfer-preview';
+        panel.setAttribute('role', 'group');
+        panel.setAttribute('aria-label', 'Προσωπικό για μεταφορά');
+        panel.style.setProperty('--gantt-transfer-bar-color', bar.style.backgroundColor);
+        panel.appendChild(template.content.cloneNode(true));
+        panel.addEventListener('dragstart', onDragStart);
+        panel.addEventListener('dragend', onStaffDragEnd);
+        document.body.appendChild(panel);
+
+        const edge = 6;
+        const anchor = bar.getBoundingClientRect();
+        const viewport = document.documentElement;
+        const spaceBelow = viewport.clientHeight - anchor.bottom - edge;
+        const spaceAbove = anchor.top - edge;
+        const above = panel.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
+        panel.style.maxHeight = Math.max(0, above ? spaceAbove : spaceBelow) + 'px';
+        panel.style.top = (above ? anchor.top - panel.offsetHeight : anchor.bottom) + 'px';
+        panel.style.left = Math.max(edge, Math.min(
+          anchor.left, viewport.clientWidth - panel.offsetWidth - edge
+        )) + 'px';
+
+        transferPreview = panel;
+        transferPreviewBar = bar;
+        hoveredTransferBar = bar;
+      }
+
+      function onTransferPointerOver(e) {
+        if (e.pointerType !== 'mouse' || staffDrag || isDown || menu) return;
+        let bar = null;
+        if (transferPreview && transferPreview.contains(e.target)) {
+          bar = transferPreviewBar;
+        } else if (!e.target.closest('.gantt-bar-actions')) {
+          const candidate = e.target.closest('a[data-staff-preview]');
+          if (candidate && s.contains(candidate)) bar = candidate;
+        }
+        if (bar === hoveredTransferBar) return;
+
+        hoveredTransferBar = bar;
+        clearTimeout(transferPreviewTimer);
+        if (bar !== transferPreviewBar) {
+          transferPreviewTimer = setTimeout(function() {
+            if (bar) showTransferPreview(bar);
+            else closeTransferPreview();
+          }, 160);
+        }
+      }
+
+      function onTransferPointerOut(e) {
+        if (!e.relatedTarget && !staffDrag) closeTransferPreview();
+      }
+
+      function closeBarOverlays() {
+        if (!staffDrag) closeTransferPreview();
+        closeBarMenu();
+      }
 
       function onScroll() {
-        closeBarMenu();
+        closeBarOverlays();
         clearTimeout(onScroll._t);
         onScroll._t = setTimeout(function() {
           sessionStorage.setItem('ganttScrollLeft', String(s.scrollLeft));
@@ -792,6 +883,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function startDrag(pageX) {
+        closeTransferPreview();
         isDown = true;
         moved = false;
         window.gIsDragging = false;
@@ -821,7 +913,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-names')) return;
+        if (e.target.closest('.gantt-bar-actions')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -848,7 +940,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-names')) return;
+        if (e.target.closest('.gantt-bar-actions')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
@@ -877,7 +969,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           e.preventDefault();
           return;
         }
-        var sourceBar = handle.closest('a.mygantt-bar');
+        var sourceBar = transferPreview && transferPreview.contains(handle)
+          ? transferPreviewBar : handle.closest('a.mygantt-bar');
         if (!sourceBar && handle.dataset.staffOrigin !== 'availability') {
           e.preventDefault();
           return;
@@ -891,6 +984,8 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         dragHandle = handle;
         dragHandle.classList.add('gantt-drag-origin');
         s.classList.add('gantt-staff-dragging');
+        clearTimeout(transferPreviewTimer);
+        if (transferPreview) transferPreview.classList.add('gantt-preview-dragging');
         e.stopPropagation();
       }
 
@@ -949,6 +1044,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         if (dragHandle) dragHandle.classList.remove('gantt-drag-origin');
         dragHandle = null;
         s.classList.remove('gantt-staff-dragging');
+        closeTransferPreview();
         clearStaffHover();
         blockBarClickUntil = Date.now() + 250;
       }
@@ -1092,7 +1188,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMenuKeyDown(e) {
-        if (!menu) return;
+        if (!menu) {
+          if (e.key === 'Escape' && !staffDrag) closeTransferPreview();
+          return;
+        }
         if (e.key === 'Escape') {
           e.preventDefault();
           closeBarMenu(true);
@@ -1109,6 +1208,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onClickCapture(e) {
+        if (!staffDrag && (!transferPreview || !transferPreview.contains(e.target))) closeTransferPreview();
         var toggle = e.target.closest('.gantt-popup-toggle');
         if (toggle && s.contains(toggle)) {
           e.preventDefault();
@@ -1171,7 +1271,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       document.addEventListener('click', onClickCapture, true);
       document.addEventListener('keydown', onMenuKeyDown);
       document.addEventListener('focusin', onMenuFocus);
-      window.addEventListener('resize', closeBarMenu);
+      window.addEventListener('resize', closeBarOverlays);
+      if (s.dataset.staffDragToken) {
+        document.addEventListener('pointerover', onTransferPointerOver);
+        document.addEventListener('pointerout', onTransferPointerOut);
+      }
 
       // Follow the app theme in the live iframe. Downloaded HTML keeps its light palette.
       var themeObserver;
@@ -1192,6 +1296,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       window.ganttDragCleanup = function () {
         if (themeObserver) themeObserver.disconnect();
         closeBarMenu();
+        closeTransferPreview();
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
         s.removeEventListener('mousemove', onMouseMoveLocal, true);
@@ -1213,7 +1318,9 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         document.removeEventListener('click', onClickCapture, true);
         document.removeEventListener('keydown', onMenuKeyDown);
         document.removeEventListener('focusin', onMenuFocus);
-        window.removeEventListener('resize', closeBarMenu);
+        window.removeEventListener('resize', closeBarOverlays);
+        document.removeEventListener('pointerover', onTransferPointerOver);
+        document.removeEventListener('pointerout', onTransferPointerOut);
       };
     })();
     """
