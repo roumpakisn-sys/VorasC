@@ -270,7 +270,8 @@ const surface = {
 global.sessionStorage = {getItem(){return null;},setItem(){}};
 global.window = {addEventListener(){},removeEventListener(){}};
 global.document = {
-  body:{style:{}},getElementById(){return surface;},querySelector(){return link;},
+  body:{style:{}},getElementById(id){return id === 'gantt-master-container' ? surface : null;},
+  querySelector(){return link;},
   addEventListener(){},removeEventListener(){}
 };
 global.setTimeout = fn => {fn();};
@@ -347,7 +348,21 @@ window.addEventListener('load', () => {
         roster.scrollTop += worker.getBoundingClientRect().top - rosterBounds.top;
         return within(worker.getBoundingClientRect(), rosterBounds);
     });
+    const button = document.getElementById('gantt-floating-actions');
+    bar.dispatchEvent(new PointerEvent('pointerover', {bubbles: true, pointerType: 'mouse'}));
+    const buttonBounds = button.getBoundingClientRect();
+    const externalActions = !button.hidden && !bar.contains(button) &&
+        (buttonBounds.left >= bounds.right || buttonBounds.right <= bounds.left ||
+         buttonBounds.bottom <= bounds.top || buttonBounds.top >= bounds.bottom);
+    button.click();
+    const menu = document.querySelector('.gantt-bar-menu');
+    const actionsAvailable = button.getAttribute('aria-expanded') === 'true' && !!menu &&
+        menu.querySelectorAll('button').length === 3;
+    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
     document.body.dataset.transferLayout = JSON.stringify({
+        externalActions,
+        actionsAvailable,
+        menuClosed: !document.querySelector('.gantt-bar-menu'),
         barWidth: Math.round(bounds.width),
         barHeight: Math.round(bounds.height),
         project: within(project.getBoundingClientRect(), bounds) && bar.title.includes(project.textContent),
@@ -375,6 +390,7 @@ window.addEventListener('load', () => {
         self.assertEqual(json.loads(html.unescape(page[1])), {
             "barWidth": 15, "barHeight": 44, "project": True, "workers": True,
             "rosterScrolls": True, "nextFits": True, "sameLane": True,
+            "externalActions": True, "actionsAvailable": True, "menuClosed": True,
         })
 
 

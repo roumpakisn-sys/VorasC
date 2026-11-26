@@ -30,8 +30,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
     LANE_STEP_PX = 46
     ROW_PAD_TOP_PX = 6
     ROW_PAD_BOTTOM_PX = 6
-    COMPACT_ACTIONS_WIDTH = 160
-    STACKED_ACTIONS_WIDTH = 54
+    STACKED_BAR_WIDTH = 54
 
     emp_short_names = {}
     employee_details_by_id = {}
@@ -184,15 +183,11 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 height: 9px;
                 vertical-align: baseline;
             }
-            #gantt-master-container[data-staff-drag-token]:not([data-staff-drag-token=""]) .mygantt-bar:hover {
-                transform: none;
-            }
             #gantt-master-container .gantt-transfer-worker:hover,
             #gantt-master-container .gantt-transfer-worker.gantt-drag-origin {
                 background: #164e63;
                 box-shadow: inset 0 0 0 1px #7dd3fc, 0 1px 2px rgb(15 23 42 / 22%);
             }
-            #gantt-master-container.gantt-staff-dragging .mygantt-bar:hover { transform: none; }
             #gantt-master-container .mygantt-bar.gantt-drop-hover {
                 outline: 2px solid #2563eb !important;
                 outline-offset: 2px !important;
@@ -252,7 +247,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
       #gantt-master-container::-webkit-scrollbar-thumb:hover { background:#64748b; }
       .mygantt-bar:hover {
-          transform:scale(1.02); z-index:30 !important;
+          z-index:30 !important;
           box-shadow:0 6px 12px rgba(0,0,0,0.3) !important; outline:2px solid #1e293b !important;
       }
       .gantt-bar-content {
@@ -261,26 +256,16 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           pointer-events:none; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
           overflow-wrap:anywhere;
       }
-      .gantt-bar-actions {
-          display:flex; flex:0 0 auto; align-self:flex-start; gap:3px; padding:2px;
+      .gantt-floating-actions {
+          position:fixed; z-index:9999; display:grid; place-items:center;
+          box-sizing:border-box; width:24px; height:24px; padding:0;
+          border:1px solid #64748b; border-radius:6px; background:#1e293b;
+          color:#fff; font:700 18px/1 system-ui,sans-serif; cursor:pointer;
+          box-shadow:0 2px 6px rgba(15,23,42,0.24);
       }
-      .gantt-bar-actions button {
-          display:grid; place-items:center; box-sizing:border-box; width:18px; height:18px;
-          border:1px solid rgba(255,255,255,0.75); border-radius:5px; background:rgba(15,23,42,0.85);
-          color:#fff; font-size:11px; line-height:1; padding:0; cursor:pointer;
-      }
-      .gantt-bar-actions button:hover, .gantt-bar-actions button[aria-expanded='true'] {
-          background:#334155;
-      }
-      .gantt-bar-actions .gantt-popup-toggle { font-size:14px; }
-      .mygantt-bar[data-gantt-stacked] { flex-direction:column; }
-      .mygantt-bar[data-gantt-stacked] .gantt-bar-content {
-          flex:1 1 auto; align-self:stretch; min-height:0; -webkit-line-clamp:2;
-      }
-      .mygantt-bar[data-gantt-stacked] .gantt-bar-actions {
-          align-self:flex-end; max-width:100%; padding:0;
-      }
-      .mygantt-bar[data-gantt-stacked] .gantt-popup-toggle { height:14px; max-width:100%; }
+      .gantt-floating-actions[hidden] { display:none; }
+      .gantt-floating-actions:hover, .gantt-floating-actions[aria-expanded='true'] { background:#334155; }
+      .gantt-floating-actions:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
       .gantt-bar-menu {
           position:fixed; z-index:10000; box-sizing:border-box; width:min(18rem, calc(100vw - 12px));
           max-height:calc(100vh - 12px); overflow:auto; padding:5px;
@@ -709,33 +694,18 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
             copy_actions = (
                 ("crew", f"data-crew-text='{crew_text_attr}' data-crew-html='{crew_html_attr}'",
-                 "Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων", "👥"),
-                ("full", f"data-full-content='{full_bar_copy_attr}'", "Αντιγραφή περιεχομένου μπάρας", "⧉"),
-                ("project", f"data-project='{project_copy_attr}'", "Αντιγραφή ονόματος έργου", "📋"),
+                 "Αντιγραφή ονομάτων και Α.Δ.Τ. εργαζομένων"),
+                ("full", f"data-full-content='{full_bar_copy_attr}'", "Αντιγραφή περιεχομένου μπάρας"),
+                ("project", f"data-project='{project_copy_attr}'", "Αντιγραφή ονόματος έργου"),
             )
             width_px = width_pct * timeline_width_px / 100
-            compact = width_px < COMPACT_ACTIONS_WIDTH
-            stacked_attr = " data-gantt-stacked='true'" if width_px < STACKED_ACTIONS_WIDTH else ""
+            stacked_attr = " data-gantt-stacked='true'" if width_px < STACKED_BAR_WIDTH else ""
             buttons = "".join(
-                f"<button type='button' class='gantt-copy-{kind}-btn' {data} title='{label}' aria-label='{label}'>"
-                f"{label if compact else icon}</button>"
-                for kind, data, label, icon in copy_actions
+                f"<button type='button' class='gantt-copy-{kind}-btn' {data}>{label}</button>"
+                for kind, data, label in copy_actions
             )
             email_options = gantt_email.menu_html(g, employee_details_by_id) if email_menu else ""
-            if compact:
-                actions = (
-                    "<button type='button' class='gantt-popup-toggle' aria-expanded='false' "
-                    "title='Ενέργειες μπάρας' aria-label='Ενέργειες μπάρας'>▾</button>"
-                    f"<template>{buttons}{email_options}</template>"
-                )
-            else:
-                actions = buttons
-                if email_options:
-                    actions += (
-                        "<button type='button' class='gantt-popup-toggle gantt-email-toggle' aria-expanded='false' "
-                        "title='Αντιγραφή κειμένου email' aria-label='Αντιγραφή κειμένου email'>▾</button>"
-                        f"<template>{email_options}</template>"
-                    )
+            actions = f"<template class='gantt-action-options'>{buttons}{email_options}</template>"
 
             transfer_attr = ""
             if handles:
@@ -749,19 +719,22 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
                 )
 
             html += (
-                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar'{focus_attr}{drop_attr}{stacked_attr}{transfer_attr} "
+                f"<a href='javascript:void(0);' id='{safe_id}' draggable='false' class='mygantt-bar' aria-keyshortcuts='Shift+F10'{focus_attr}{drop_attr}{stacked_attr}{transfer_attr} "
                 f"style='position: absolute; left: {left_pct}%; width: {width_pct}%; top: {top_px}px; height: {BAR_HEIGHT_PX}px; "
                 f"background-color: {bg_color}; border: {bar_border}; border-radius: 6px; "
                 f"box-shadow: {bar_shadow}; outline: {bar_outline}; outline-offset: {bar_outline_offset}; display: flex; align-items: center; justify-content: center; "
                 f"font-size: 11px; font-weight: bold; color: black; text-decoration: none; cursor: pointer; transition: all 0.1s; "
                 f"box-sizing: border-box; overflow: hidden; z-index: 10; padding-block: 0; margin-block: 0; text-align: center; {focus_style}' title='{tooltip}'>"
                 f"<div class='gantt-bar-content'>{base_text}</div>"
-                f"<div class='gantt-bar-actions'>{actions}</div></a>"
+                f"{actions}</a>"
             )
 
         html += "</div></div>"
 
-    html += "</div>"
+    html += (
+        "</div><button type='button' id='gantt-floating-actions' class='gantt-floating-actions' "
+        "aria-label='Ενέργειες μπάρας' aria-expanded='false' title='Ενέργειες μπάρας' tabindex='-1' hidden>⋯</button>"
+    )
 
     if staff_drag_token:
         html += "<a href='javascript:void(0);' id='gantt-staff-drop-event' data-staff-drop-event style='display:none'></a>"
@@ -809,10 +782,12 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       var hoverTarget = null;
       var blockBarClickUntil = 0;
       var menu = null;
-      var menuTrigger = null;
+      var actionButton = document.getElementById('gantt-floating-actions');
+      var actionBar = null;
+      var actionTimer;
 
       function onScroll() {
-        closeBarMenu();
+        hideBarActions();
         clearTimeout(onScroll._t);
         onScroll._t = setTimeout(function() {
           sessionStorage.setItem('ganttScrollLeft', String(s.scrollLeft));
@@ -850,7 +825,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMouseDown(e) {
-        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-roster')) return;
+        if (e.target.closest('.gantt-transfer-roster')) return;
         if (e.target.closest('.gantt-transfer-worker')) return;
         if (e.button !== 0) return;
         startDrag(e.pageX);
@@ -877,7 +852,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onTouchStart(e) {
-        if (e.target.closest('.gantt-bar-actions, .gantt-transfer-roster')) return;
+        if (e.target.closest('.gantt-transfer-roster')) return;
         if (!e.touches || !e.touches[0]) return;
         isDown = true;
         moved = false;
@@ -920,6 +895,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         dragHandle = handle;
         dragHandle.classList.add('gantt-drag-origin');
         s.classList.add('gantt-staff-dragging');
+        hideBarActions();
         e.stopPropagation();
       }
 
@@ -994,6 +970,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
           var textarea = document.createElement('textarea');
           textarea.value = text;
           textarea.setAttribute('readonly', '');
+          textarea.dataset.ganttClipboard = '';
           textarea.style.position = 'fixed';
           textarea.style.left = '-9999px';
           textarea.style.top = '-9999px';
@@ -1040,77 +1017,140 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         return copyTextFallback(text, htmlText).catch(function() { return copyTextToClipboard(text); });
       }
 
-      function flashCopyButton(btn, ok) {
-        if (!btn) return;
-        clearTimeout(btn.copyFeedbackTimeout);
-        var original = btn.copyOriginalLabel || btn.textContent;
-        btn.copyOriginalLabel = original;
-        btn.textContent = ok ? '✓' : '!';
-        btn.copyFeedbackTimeout = setTimeout(function() { btn.textContent = original; }, 900);
-      }
+      function copyBarAction(button) {
+        var bar = actionBar;
+        var text = button.getAttribute('data-email-copy') || button.getAttribute('data-crew-text') ||
+          button.getAttribute('data-full-content') || button.getAttribute('data-project');
+        if (!text) return;
+        var formatted = button.getAttribute('data-email-html') || button.getAttribute('data-crew-html');
+        var copy = formatted ? copyFormattedToClipboard(text, formatted) : copyTextToClipboard(text);
 
-      function handleProjectCopy(btn, feedbackButton) {
-        var indicator = feedbackButton || btn;
-        if (btn.classList.contains('gantt-copy-crew-btn')) {
-          var crewText = btn.getAttribute('data-crew-text') || '';
-          var crewHtml = btn.getAttribute('data-crew-html') || '';
-          if (!crewText) return;
-          copyFormattedToClipboard(crewText, crewHtml).then(function() {
-            flashCopyButton(indicator, true);
-          }).catch(function() {
-            flashCopyButton(indicator, false);
-          });
-          return;
+        function showResult(ok) {
+          if (bar !== actionBar) return;
+          clearTimeout(actionButton.copyFeedbackTimeout);
+          actionButton.textContent = ok ? '✓' : '!';
+          actionButton.copyFeedbackTimeout = setTimeout(function() { actionButton.textContent = '⋯'; }, 900);
         }
-
-        var textToCopy = '';
-        if (btn.classList.contains('gantt-copy-full-btn')) {
-          textToCopy = btn.getAttribute('data-full-content') || '';
-        } else {
-          textToCopy = btn.getAttribute('data-project') || '';
-        }
-
-        if (!textToCopy) return;
-
-        copyTextToClipboard(textToCopy).then(function() {
-          flashCopyButton(indicator, true);
-        }).catch(function() {
-          flashCopyButton(indicator, false);
-        });
-      }
-
-      function isCopyProjectButtonTarget(e) {
-        return e && e.target && e.target.closest && e.target.closest('.gantt-copy-project-btn, .gantt-copy-full-btn, .gantt-copy-crew-btn');
+        copy.then(function() { showResult(true); }).catch(function() { showResult(false); });
       }
 
       function closeBarMenu(restoreFocus) {
         if (!menu) return;
-        var trigger = menuTrigger;
         menu.remove();
         menu = null;
-        menuTrigger = null;
-        trigger.setAttribute('aria-expanded', 'false');
-        if (restoreFocus === true && trigger.isConnected) trigger.focus({preventScroll: true});
+        actionButton.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && actionBar && actionBar.isConnected) actionBar.focus({preventScroll: true});
       }
 
-      function toggleBarMenu(trigger) {
-        var wasOpen = menuTrigger === trigger;
+      function hideBarActions() {
+        clearTimeout(actionTimer);
         closeBarMenu();
-        if (wasOpen) return;
+        actionBar = null;
+        if (actionButton) {
+          clearTimeout(actionButton.copyFeedbackTimeout);
+          actionButton.textContent = '⋯';
+          actionButton.hidden = true;
+        }
+      }
 
-        var template = trigger.nextElementSibling;
+      function findActionBar(target) {
+        var bar = target && target.closest('a.mygantt-bar');
+        return bar && s.contains(bar) ? bar : null;
+      }
+
+      function showBarActions(bar) {
+        clearTimeout(actionTimer);
+        if (!actionButton) return false;
+        if (actionBar === bar && !actionButton.hidden) return true;
+        closeBarMenu();
+
+        var frame = s.getBoundingClientRect();
+        var rect = bar.getBoundingClientRect();
+        var header = s.querySelector('.gantt-timeline-header');
+        var labels = header && header.previousElementSibling;
+        var viewport = document.documentElement;
+        var left = Math.max(0, frame.left + s.clientLeft, labels ? labels.getBoundingClientRect().right : 0);
+        var top = Math.max(0, frame.top + s.clientTop, header ? header.getBoundingClientRect().bottom : 0);
+        var right = Math.min(viewport.clientWidth, frame.left + s.clientLeft + s.clientWidth);
+        var bottom = Math.min(viewport.clientHeight, frame.top + s.clientTop + s.clientHeight);
+        var barLeft = Math.max(rect.left, left);
+        var barRight = Math.min(rect.right, right);
+        var barTop = Math.max(rect.top, top);
+        var barBottom = Math.min(rect.bottom, bottom);
+        if (barRight <= barLeft || barBottom <= barTop) {
+          hideBarActions();
+          return false;
+        }
+
+        actionButton.hidden = false;
+        var width = actionButton.offsetWidth;
+        var height = actionButton.offsetHeight;
+        var gap = 3;
+        var x;
+        var y = Math.min(barTop, bottom - height);
+        if (barRight + gap + width <= right) {
+          x = barRight + gap;
+        } else if (barLeft - gap - width >= left) {
+          x = barLeft - gap - width;
+        } else {
+          x = Math.max(left, barRight - width);
+          y = barTop - gap - height;
+          if (y < top) y = barBottom + gap;
+          if (y + height > bottom) {
+            hideBarActions();
+            return false;
+          }
+        }
+
+        clearTimeout(actionButton.copyFeedbackTimeout);
+        actionButton.textContent = '⋯';
+        actionButton.style.left = x + 'px';
+        actionButton.style.top = y + 'px';
+        actionBar = bar;
+        return true;
+      }
+
+      function onActionsPointerOver(e) {
+        if (e.pointerType === 'touch' || isDown || staffDrag || menu) return;
+        clearTimeout(actionTimer);
+        if (e.target === actionButton) return;
+        var bar = findActionBar(e.target);
+        if (bar) {
+          if (!actionBar) showBarActions(bar);
+          else if (bar !== actionBar) actionTimer = setTimeout(function() { showBarActions(bar); }, 110);
+        } else if (actionBar) {
+          actionTimer = setTimeout(hideBarActions, 180);
+        }
+      }
+
+      function onActionsPointerOut(e) {
+        if (!e.relatedTarget && !menu) hideBarActions();
+      }
+
+      function onBarContextMenu(e) {
+        var bar = findActionBar(e.target);
+        if (!bar || staffDrag || !showBarActions(bar)) return;
+        e.preventDefault();
+        toggleBarMenu();
+      }
+
+      function toggleBarMenu() {
+        var wasOpen = !!menu;
+        closeBarMenu();
+        if (wasOpen || !actionBar) return;
+
+        var template = actionBar.querySelector('.gantt-action-options');
         if (!template || !template.content.querySelector('button')) return;
         menu = document.createElement('div');
         menu.className = 'gantt-bar-menu';
         menu.setAttribute('role', 'group');
-        menu.setAttribute('aria-label', trigger.getAttribute('aria-label'));
+        menu.setAttribute('aria-label', actionButton.getAttribute('aria-label'));
         menu.appendChild(template.content.cloneNode(true));
         // ClickDetector replaces its last body child on each render.
         s.parentElement.appendChild(menu);
-        menuTrigger = trigger;
-        trigger.setAttribute('aria-expanded', 'true');
+        actionButton.setAttribute('aria-expanded', 'true');
 
-        var anchor = trigger.getBoundingClientRect();
+        var anchor = actionButton.getBoundingClientRect();
         var width = document.documentElement.clientWidth;
         var height = document.documentElement.clientHeight;
         var below = anchor.bottom + 4;
@@ -1122,7 +1162,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMenuKeyDown(e) {
-        if (!menu) return;
+        if (!menu) {
+          if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) onBarContextMenu(e);
+          return;
+        }
         if (e.key === 'Escape') {
           e.preventDefault();
           closeBarMenu(true);
@@ -1135,45 +1178,37 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       }
 
       function onMenuFocus(e) {
-        if (menu && e.target !== menuTrigger && !menu.contains(e.target)) closeBarMenu();
+        if (e.target === actionButton || e.target.matches('[data-gantt-clipboard]') || (menu && menu.contains(e.target))) return;
+        var bar = findActionBar(e.target);
+        if (bar && !staffDrag) {
+          closeBarMenu();
+          showBarActions(bar);
+        } else {
+          hideBarActions();
+        }
       }
 
       function onClickCapture(e) {
-        var toggle = e.target.closest('.gantt-popup-toggle');
-        if (toggle && s.contains(toggle)) {
+        if (e.target === actionButton) {
           e.preventDefault();
           e.stopPropagation();
-          toggleBarMenu(toggle);
+          toggleBarMenu();
           return;
         }
 
-        var copyBtn = isCopyProjectButtonTarget(e);
         if (menu && menu.contains(e.target)) {
-          var email = e.target.closest('[data-email-copy]');
-          if (copyBtn || email) {
+          var option = e.target.closest('button');
+          if (option) {
             e.preventDefault();
             e.stopPropagation();
-            var trigger = menuTrigger;
             closeBarMenu(true);
-            if (email) {
-              copyFormattedToClipboard(email.getAttribute('data-email-copy'), email.getAttribute('data-email-html'))
-                .then(function() { flashCopyButton(trigger, true); })
-                .catch(function() { flashCopyButton(trigger, false); });
-            } else {
-              handleProjectCopy(copyBtn, trigger);
-            }
+            copyBarAction(option);
           }
           return;
         }
         closeBarMenu();
-        if (copyBtn && s.contains(copyBtn)) {
-          e.preventDefault();
-          e.stopPropagation();
-          handleProjectCopy(copyBtn);
-          return;
-        }
 
-        var link = e.target.closest('a.mygantt-bar');
+        var link = findActionBar(e.target);
         if (link && (window.gIsDragging || moved || Date.now() < blockBarClickUntil)) {
           e.preventDefault();
           e.stopPropagation();
@@ -1201,7 +1236,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
       document.addEventListener('click', onClickCapture, true);
       document.addEventListener('keydown', onMenuKeyDown);
       document.addEventListener('focusin', onMenuFocus);
-      window.addEventListener('resize', closeBarMenu);
+      document.addEventListener('pointerover', onActionsPointerOver);
+      document.addEventListener('pointerout', onActionsPointerOut);
+      s.addEventListener('contextmenu', onBarContextMenu);
+      window.addEventListener('resize', hideBarActions);
 
       // Follow the app theme in the live iframe. Downloaded HTML keeps its light palette.
       var themeObserver;
@@ -1221,7 +1259,7 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
 
       window.ganttDragCleanup = function () {
         if (themeObserver) themeObserver.disconnect();
-        closeBarMenu();
+        hideBarActions();
         s.removeEventListener('scroll', onScroll);
         s.removeEventListener('mousedown', onMouseDown, true);
         s.removeEventListener('mousemove', onMouseMoveLocal, true);
@@ -1243,7 +1281,10 @@ def build_html_gantt(wk_groups, start_of_week, zoom_factor, key_to_safe_id, gant
         document.removeEventListener('click', onClickCapture, true);
         document.removeEventListener('keydown', onMenuKeyDown);
         document.removeEventListener('focusin', onMenuFocus);
-        window.removeEventListener('resize', closeBarMenu);
+        document.removeEventListener('pointerover', onActionsPointerOver);
+        document.removeEventListener('pointerout', onActionsPointerOut);
+        s.removeEventListener('contextmenu', onBarContextMenu);
+        window.removeEventListener('resize', hideBarActions);
       };
     })();
     """
