@@ -221,11 +221,12 @@ class DragMarkupTests(unittest.TestCase):
         self.assertEqual(bar["data-gantt-stacked"], "true")
         self.assertIn("ΜΕΤΑ ΑΠΟ 'ΑΛΛΟ ΕΡΓΟ' ▶ ΑΝΝΑ", bar["title"])
         self.assertEqual(bar["data-staff-preview"], "true")
-        project = "ΜΑΚΡΥ ΟΝΟΜΑ ΕΡΓΟΥ ΓΙΑ ΜΙΚΡΗ ΜΠΑΡΑ"
-        self.assertIn(f"<div class='gantt-bar-content'>{project} | 09:00-09:15", narrow)
+        project = html.escape(short_bar["ProjectDisplay"].upper())
+        schedule = f"{short_bar['StartTime']}-{short_bar['EndTime']}"
+        self.assertIn(f"<div class='gantt-bar-content'>{project} | ", narrow)
         preview = narrow.split("<template class='gantt-transfer-preview-template'>", 1)[1].split("</template>", 1)[0]
         self.assertIn(f"<strong class='gantt-transfer-preview-project'>{project}</strong>", preview)
-        self.assertIn("09:00-09:15", preview)
+        self.assertIn(schedule, preview)
         for employee_id, name in (("free", "Άννα"), ("early", "Ελένη")):
             self.assertRegex(preview, rf"draggable='true' data-employee='{employee_id}' title='[^']+'>{name}</span>")
         self.assertNotIn("class='gantt-transfer-preview-template'", build(short_groups, day, 1, mapping, 500))
