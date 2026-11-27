@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
 
 import pandas as pd
@@ -6,6 +6,7 @@ import streamlit as st
 
 import gantt_engine
 from gantt_helpers import get_local_today
+import stadium_fixtures as fixtures
 import stadium_tracking as tracking
 import utils
 
@@ -39,7 +40,7 @@ try:
         "work_date", month_start, next_month,
     )
     tasks = tracking.period_rows(client, "stadium_tasks", ("work_date", "id"), "work_date", month_start, next_month)
-    matches = tracking.period_rows(
+    saved_matches = tracking.period_rows(
         client, "stadium_matches", ("match_date", "competition"), "match_date", month_start, next_month,
     )
 except Exception as exc:
@@ -55,6 +56,16 @@ if message := state.pop("stadium_saved", ""):
 summary_tab, attendance_tab, tasks_tab, matches_tab = st.tabs(
     ["Σύνοψη", "Παρουσίες", "Εργασίες", "Αγώνες"]
 )
+
+
+@st.cache_resource(show_spinner=False)
+def fixture_cache():
+    return fixtures.ScheduleCache()
+
+
+refresh = matches_tab.button("Ανανέωση από ΠΑΕ ΑΡΗΣ")
+schedules, sources_failed = fixture_cache().get(refresh=refresh)
+matches = fixtures.match_rows(saved_matches, schedules, month_start, next_month)
 
 
 def _duration(minutes):
@@ -252,34 +263,47 @@ def save_matches(rows):
     st.rerun()
 
 
+def match_table(rows):
+    st.dataframe(pd.DataFrame([
+        (date.fromisoformat(row["match_date"]).strftime("%d/%m/%Y"), row.get("kickoff") or "—",
+         row.get("opponent") or "—", row["competition"]) for row in rows
+    ], columns=["Ημερομηνία αγώνα", "Ώρα", "Αντίπαλος", "Διοργάνωση"]), hide_index=True, width="stretch")
+
+
 def render_matches():
+    st.caption("Κλεάνθης Βικελίδης · Επίσημο πρόγραμμα ΠΑΕ ΑΡΗΣ")
+    if sources_failed:
+        st.warning(
+            f"Προσωρινή αδυναμία ενημέρωσης ({', '.join(sources_failed)}). "
+            "Εμφανίζονται οι τελευταίες διαθέσιμες ημερομηνίες."
+        )
+    today = get_local_today()
+    upcoming = fixtures.match_rows(saved_matches, schedules, today, date.max)
+    st.subheader("Επόμενοι αγώνες")
+    if upcoming:
+        match_table(upcoming)
+    else:
+        st.info("Δεν υπάρχει διαθέσιμη ημερομηνία επόμενου αγώνα στο γήπεδο.")
+    pending = sum(f.date is None for schedule in schedules.values() for f in schedule.fixtures)
+    if pending:
+        st.caption(f"Αγώνες στο γήπεδο με ημερομηνία προς ανακοίνωση: {pending}")
+
+    st.subheader(f"Αγώνες μήνα · {day:%m/%Y}")
     if matches:
-        st.dataframe(pd.DataFrame([
-            (utils.safe_date_parse(row["match_date"]).strftime("%d/%m/%Y"), row["competition"])
-            for row in matches
-        ], columns=["Ημερομηνία αγώνα", "Διοργάνωση"]), hide_index=True, width="stretch")
-    with st.form("stadium_match"):
-        competition = st.selectbox("Διοργάνωση για την επιλεγμένη ημερομηνία", tracking.COMPETITIONS)
-        if st.form_submit_button("Καταχώριση αγώνα"):
-            save_matches([{"match_date": day.isoformat(), "competition": competition}])
-    uploaded = st.file_uploader("Προσθήκη αγώνων από Πρωτάθλημα και Κύπελλο (Excel)", type="xlsx")
-    if uploaded:
-        try:
-            imported = tracking.matches_from_excel(uploaded)
-        except Exception:
-            st.error("Το αρχείο Excel δεν διαβάστηκε.")
-            return
-        if imported:
-            st.dataframe(pd.DataFrame([
-                (f"{match_day:%d/%m/%Y}", competition) for match_day, competition in imported
-            ], columns=["Ημερομηνία αγώνα", "Διοργάνωση"]), hide_index=True, width="stretch")
-            if st.button("Προσθήκη ημερομηνιών αγώνων"):
-                save_matches([
-                    {"match_date": match_day.isoformat(), "competition": competition}
-                    for match_day, competition in imported
-                ])
-        else:
-            st.info("Δεν βρέθηκαν αγώνες στο Κλεάνθης Βικελίδης στα δύο φύλλα.")
+        match_table(matches)
+    else:
+        st.info("Δεν υπάρχουν καταχωρισμένοι αγώνες γι’ αυτόν τον μήνα.")
+
+    fallback = [
+        kind for kind in tracking.COMPETITIONS
+        if kind not in schedules or schedules[kind].season != fixtures.season_for(day)
+    ]
+    if fallback:
+        with st.expander("Χειροκίνητη καταχώριση ημερομηνίας εφεδρείας"):
+            with st.form("stadium_match"):
+                competition = st.selectbox("Διοργάνωση για την επιλεγμένη ημερομηνία", fallback)
+                if st.form_submit_button("Καταχώριση αγώνα"):
+                    save_matches([{"match_date": day.isoformat(), "competition": competition}])
 
 
 with summary_tab:
