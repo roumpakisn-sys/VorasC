@@ -39,6 +39,7 @@ class PostgresTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         cls.db.execute((root / 'sql/employee_availability_rules.sql').read_text())
         cls.db.execute((root / 'sql/atomic_assignment_changes.sql').read_text())
+        cls.db.execute((root / 'sql/stadium_tracking.sql').read_text())
         # Migration must be safe to apply again.
         cls.db.execute((root / 'sql/atomic_assignment_changes.sql').read_text())
 
@@ -48,7 +49,7 @@ class PostgresTests(unittest.TestCase):
 
     def setUp(self):
         self.db.execute('drop trigger if exists injected_failure on assignments')
-        self.db.execute('truncate assignments, projects, employees, leaves, employee_availability_rules, deleted_records, assignment_write_receipts cascade')
+        self.db.execute('truncate assignments, projects, employees, leaves, employee_availability_rules, deleted_records, assignment_write_receipts, stadium_attendance cascade')
         self.db.execute("insert into projects values ('p', 'Project', '#aaa')")
         self.db.execute("insert into employees(id, name) values ('e', 'Employee'), ('e2', 'Second')")
         self.db.execute('''insert into assignments(id,"employeeId","projectId",date,"startTime","endTime",notes)
@@ -74,6 +75,36 @@ class PostgresTests(unittest.TestCase):
         return conn.execute('select save_assignment_changes(%s::uuid,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)',
                             (request or str(uuid.uuid4()), json.dumps(before), json.dumps(after),
                              json.dumps(project) if project else None, json.dumps(context) if context else None)).fetchone()[0]
+
+    def test_stadium_attendance_and_assignment_hours_commit_together(self):
+        from datetime import date, time
+        import placement_hours
+        import stadium_tracking as tracking
+
+        originals = self.expected()
+        entries = [
+            tracking.attendance_payload(
+                dict(row, date=date.fromisoformat(row['date'])), 'Εργαζόμενος',
+                time(23, 30), time(2), 30, 'Χώρος', '', {},
+            )
+            for row in originals
+        ]
+        query = 'select public.record_stadium_attendance(%s::jsonb)'
+        stale = dict(entries[1], expected=dict(entries[1]['expected'], notes='stale'))
+        with self.assertRaisesRegex(self.pg.Error, 'Stale or cancelled assignment'):
+            self.db.execute(query, (json.dumps([entries[0], stale]),))
+        self.assertEqual(self.expected(), originals)
+        self.assertEqual(self.db.execute('select count(*) from stadium_attendance').fetchone()[0], 0)
+
+        self.assertEqual(self.db.execute(query, (json.dumps(entries),)).fetchone()[0], 2)
+        saved = self.db.execute(
+            'select assignment_id, worked_minutes from stadium_attendance order by assignment_id'
+        ).fetchall()
+        self.assertEqual(saved, [('a', 120), ('b', 120)])
+        self.assertTrue(all(placement_hours.counted_hours(row) == 2 for row in self.expected()))
+        with self.assertRaisesRegex(self.pg.Error, 'Stale or cancelled assignment'):
+            self.db.execute(query, (json.dumps(entries),))
+        self.assertEqual(self.db.execute('select count(*) from stadium_attendance').fetchone()[0], 2)
 
     def test_group_update_preserves_ids_and_unedited_columns(self):
         before, after = self.expected(), self.proposed()
