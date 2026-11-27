@@ -1,6 +1,7 @@
 """Attendance, cleaning tasks and match-day summaries for the stadium."""
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
+from uuid import NAMESPACE_URL, uuid5
 import re
 import unicodedata
 
@@ -9,6 +10,7 @@ import placement_hours
 
 
 STADIUM_WORDS = frozenset({"ΓΗΠΕΔΟ", "ΑΡΗΣ", "ΑΓΩΝΑΣ"})
+PRE_MATCH_PROJECT = "Πριν τον αγώνα"
 COMPETITIONS = ("Πρωτάθλημα", "Κύπελλο")
 MATCH_NO_SHIFT = "Χωρίς βάρδια"
 MATCH_NO_STAFF = "Χωρίς προσωπικό"
@@ -44,13 +46,63 @@ def stadium_bars(groups, selected_day, *, include_unstaffed=False):
         if not is_yellow_bar(group):
             continue
         title = _normalized_label(f"{group['Project']} {group.get('ProjectDisplay') or ''}")
-        if STADIUM_WORDS.intersection(re.findall(r"[^\W_]+", title)):
+        if (STADIUM_WORDS.intersection(re.findall(r"[^\W_]+", title))
+                or _normalized_label(group["Project"]) == _normalized_label(PRE_MATCH_PROJECT)):
             bars.append(group)
 
     return sorted(bars, key=lambda group: (
         "ΑΡΗΣ ΓΗΠΕΔΟ" not in _normalized_label(group["Project"]),
         group["StartTime"], group["EndTime"], group["Project"],
     ))
+
+
+def match_shift_ids(match_day, generation):
+    """Concurrent creation for the same day uses the same pair of IDs."""
+    return [str(uuid5(NAMESPACE_URL, f"vorasc:stadium:shift:{match_day}:{generation}:{kind}"))
+            for kind in ("match", "pre-match")]
+
+
+def build_match_shifts(match_day, kickoff, opponent, projects):
+    """Build two unstaffed yellow placements and any missing catalog entries."""
+    opponent = " ".join((opponent or "").split())
+    if not opponent:
+        raise ValueError("Συμπλήρωσε την αντίπαλη ομάδα.")
+    try:
+        start_time = datetime.strptime(kickoff or "", "%H:%M").time()
+    except ValueError as exc:
+        raise ValueError("Συμπλήρωσε την ώρα έναρξης του αγώνα.") from exc
+
+    match_time = datetime.combine(match_day, start_time)
+    start = match_time - timedelta(hours=2)
+    end = match_time + timedelta(hours=2)
+    if start.date() != match_day:
+        raise ValueError("Η βάρδια του αγώνα θα ξεκινούσε την προηγούμενη ημερομηνία.")
+
+    specs = (
+        (f"ΑΡΗΣ – {opponent}", start.strftime("%H:%M"), end.strftime("%H:%M")),
+        (PRE_MATCH_PROJECT, "09:00", "17:00"),
+    )
+    color = config.BASIC_COLORS["Κίτρινο"]
+    shifts, new_projects = [], []
+    project_ids = {str(project["id"]) for project in projects}
+    for title, start_time, end_time in specs:
+        label = _normalized_label(title)
+        existing = next((project for project in projects if _normalized_label(project["name"]) == label), None)
+        if existing:
+            project_id = existing["id"]
+            new_projects.append(None)
+        else:
+            project_id = str(uuid5(NAMESPACE_URL, f"vorasc:stadium:project:{label}"))
+            while project_id in project_ids:
+                project_id = str(uuid5(NAMESPACE_URL, project_id))
+            new_projects.append({"id": project_id, "name": title, "color": color})
+        shifts.append({
+            "employeeId": "", "projectId": project_id, "date": match_day,
+            "arrivalTime": "", "startTime": start_time, "endTime": end_time,
+            "colorName": "Κίτρινο", "colorHex": color, "notes": "",
+            "is_cancelled": False, "cancel_reason": "", "recurring_id": None, "is_general": False,
+        })
+    return shifts, new_projects
 
 
 def worked_minutes(arrival, departure, break_minutes):

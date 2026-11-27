@@ -51,6 +51,34 @@ class StadiumTrackingTests(unittest.TestCase):
         self.assertEqual(tracking.match_readiness([morning, evening], roster, recorded),
                          (tracking.MATCH_COMPLETE, morning))
 
+
+    def test_match_creates_two_yellow_unstaffed_shifts_and_reuses_the_day_project(self):
+        day = date(2026, 11, 29)
+        pre_match = {"id": "before", "name": "ΠΡΙΝ ΤΟΝ ΑΓΩΝΑ"}
+        shifts, (match_project, pre_match_project) = tracking.build_match_shifts(
+            day, "19:30", "  Αστέρας  ", [pre_match],
+        )
+        self.assertEqual(match_project["name"], "ΑΡΗΣ – Αστέρας")
+        self.assertIsNone(pre_match_project)
+        self.assertEqual(shifts[1]["projectId"], "before")
+        self.assertEqual([(r["startTime"], r["endTime"]) for r in shifts], [
+            ("17:30", "21:30"), ("09:00", "17:00"),
+        ])
+        self.assertTrue(all(r["date"] == day and r["colorName"] == "Κίτρινο" and not r["employeeId"]
+                            for r in shifts))
+        group = dict(Date=day, Project=pre_match["name"], StartTime="09:00", EndTime="17:00",
+                     is_cancelled=False, HasAssignedEmployee=False, ColorHex=shifts[1]["colorHex"])
+        self.assertEqual(tracking.stadium_bars({"before": group}, day, include_unstaffed=True), [group])
+
+    def test_match_shift_keeps_its_start_date_when_the_end_is_after_midnight(self):
+        day = date(2026, 11, 29)
+        shifts, _ = tracking.build_match_shifts(day, "22:30", "Αστέρας", [])
+        self.assertEqual((shifts[0]["date"], shifts[0]["startTime"], shifts[0]["endTime"]),
+                         (day, "20:30", "00:30"))
+        with self.assertRaises(ValueError):
+            tracking.build_match_shifts(day, "", "Αστέρας", [])
+        self.assertNotEqual(tracking.match_shift_ids(day, 0), tracking.match_shift_ids(day, 1))
+
     def test_attendance_defaults_to_bar_unless_actual_times_were_saved(self):
         assignment = dict(startTime="23:30", endTime="02:00")
         self.assertEqual(tracking.attendance_time_defaults(assignment, {}), (time(23, 30), time(2)))

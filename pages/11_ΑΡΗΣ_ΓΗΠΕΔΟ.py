@@ -228,6 +228,65 @@ def save_matches(rows):
     st.rerun()
 
 
+def available_match_shift_ids(match_day):
+    occupied = {str(row["id"]) for row in state.assignments}
+    generation = 0
+    while True:
+        ids = tracking.match_shift_ids(match_day, generation)
+        if occupied.isdisjoint(ids):
+            deleted = client.table("deleted_records").select("record_id").eq(
+                "table_name", "assignments",
+            ).in_("record_id", ids).limit(1).execute().data
+            if not deleted:
+                return ids
+        generation += 1
+
+
+def create_match_shifts(match_day, kickoff, opponent):
+    try:
+        shifts, (match_project, pre_match_project) = tracking.build_match_shifts(
+            match_day, kickoff, opponent, state.projects,
+        )
+    except ValueError as exc:
+        st.warning(str(exc))
+        return
+
+    scheduled = state.assignments_by_date.get(match_day, [])
+    if bars_for_day(match_day, scheduled, include_unstaffed=True):
+        st.warning("Υπάρχει ήδη βάρδια για την ημέρα του αγώνα.")
+        return
+
+    try:
+        for shift, assignment_id in zip(shifts, available_match_shift_ids(match_day)):
+            shift["id"] = assignment_id
+        if pre_match_project:
+            # The reusable pre-match project is shared by all match dates.
+            client.table("projects").upsert(
+                pre_match_project, on_conflict="id", ignore_duplicates=True,
+            ).execute()
+            state.projects.append(pre_match_project)
+    except Exception:
+        st.error("Δεν ολοκληρώθηκε η προετοιμασία των βαρδιών. Δοκίμασε ξανά.")
+        return
+
+    if utils.save_assignment_batch([], shifts, project=match_project) is not None:
+        state.stadium_saved = "Δημιουργήθηκαν δύο βάρδιες για τον αγώνα."
+        st.rerun()
+
+
+@st.dialog("Στοιχεία αγώνα")
+def complete_match_details(match_day, match):
+    st.caption(f"{match_day:%d/%m/%Y}")
+    with st.form("stadium_match_shift_details"):
+        opponent = match.get("opponent") or st.text_input("Αντίπαλη ομάδα")
+        kickoff = match.get("kickoff")
+        if not kickoff:
+            match_time = st.time_input("Ώρα έναρξης αγώνα", value=None, step=60)
+            kickoff = match_time.strftime("%H:%M") if match_time is not None else ""
+        if st.form_submit_button("Δημιούργησε βάρδια", type="primary"):
+            create_match_shifts(match_day, kickoff, opponent)
+
+
 @st.dialog("Παρουσίες αγώνα", width="large")
 def open_match_attendance(match_day, day_records, bar_key):
     st.caption(f"{match_day:%d/%m/%Y}")
@@ -260,6 +319,13 @@ def match_table(rows, readiness, attendance_by_day, section):
                 assignment_id = str(bar["AssignmentIds"][0]) if bar else None
                 state.stadium_gantt_target = (match_day, assignment_id)
                 st.switch_page("pages/1_Gantt_Dashboard.py")
+        if status == tracking.MATCH_NO_SHIFT and columns[-1].button(
+            "Δημιούργησε βάρδια", key=f"{button_key}_create", width="stretch", type="primary",
+        ):
+            if row.get("kickoff") and row.get("opponent"):
+                create_match_shifts(match_day, row["kickoff"], row["opponent"])
+            else:
+                complete_match_details(match_day, row)
 
 
 def render_matches():
