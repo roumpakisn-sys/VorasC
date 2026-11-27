@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from hashlib import sha256
 
 import pandas as pd
@@ -53,9 +53,7 @@ except Exception as exc:
 if message := state.pop("stadium_saved", ""):
     st.success(message)
 
-summary_tab, attendance_tab, tasks_tab, matches_tab = st.tabs(
-    ["Σύνοψη", "Παρουσίες", "Εργασίες", "Αγώνες"]
-)
+summary_tab, attendance_tab, matches_tab = st.tabs(["Σύνοψη", "Παρουσίες", "Αγώνες"])
 
 
 @st.cache_resource(show_spinner=False)
@@ -207,53 +205,6 @@ def render_attendance_form(roster):
             save_attendance(entries)
 
 
-def render_tasks():
-    today_tasks = {row["id"]: row for row in _on_date(tasks)}
-    selected = st.selectbox(
-        "Καταχώριση ή επεξεργασία εργασίας", [None, *today_tasks],
-        format_func=lambda key: (
-            "Νέα εργασία" if key is None else f"{today_tasks[key]['area']} · {today_tasks[key]['category']}"
-        ),
-    )
-    current = today_tasks.get(selected, {})
-    with st.form(f"stadium_task_{day}_{selected}_{current.get('updated_at', '')}"):
-        area = st.text_input("Χώρος / τμήμα", current.get("area", ""))
-        category = st.selectbox("Εργασία", tracking.CATEGORIES,
-                                index=tracking.CATEGORIES.index(current.get("category", tracking.CATEGORIES[0])))
-        description = st.text_area("Περιγραφή εργασιών", current.get("description", ""))
-        team = st.text_input("Συνεργείο / υπεύθυνος", current.get("team", ""))
-        status = st.selectbox("Κατάσταση", tracking.STATUSES,
-                              index=tracking.STATUSES.index(current.get("status", tracking.STATUSES[0])))
-        notes = st.text_input("Παρατηρήσεις / εκκρεμότητες", current.get("notes", ""))
-        if st.form_submit_button("Αποθήκευση εργασίας", type="primary"):
-            if not area.strip() or not description.strip():
-                st.warning("Συμπλήρωσε τον χώρο και την περιγραφή της εργασίας.")
-            else:
-                record = dict(work_date=day.isoformat(), area=area.strip(), category=category,
-                              description=description.strip(), team=team.strip(), status=status, notes=notes.strip())
-                try:
-                    query = client.table("stadium_tasks")
-                    if selected:
-                        record["updated_at"] = datetime.now(timezone.utc).isoformat()
-                        result = query.update(record).eq("id", selected).eq("updated_at", current["updated_at"])
-                    else:
-                        result = query.insert(record)
-                    if not result.execute().data:
-                        st.error("Η βάση δεν επιβεβαίωσε την αποθήκευση της εργασίας.")
-                        return
-                except Exception:
-                    st.error("Δεν επιβεβαιώθηκε η αποθήκευση της εργασίας.")
-                    return
-                state.stadium_saved = "Η εργασία αποθηκεύτηκε."
-                st.rerun()
-    if today_tasks:
-        st.dataframe(pd.DataFrame([
-            (row["area"], row["category"], row["description"], row["team"], row["status"], row["notes"])
-            for row in today_tasks.values()
-        ], columns=["Χώρος", "Εργασία", "Περιγραφή", "Συνεργείο", "Κατάσταση", "Παρατηρήσεις"]),
-            hide_index=True, width="stretch")
-
-
 def save_matches(rows):
     try:
         client.table("stadium_matches").upsert(
@@ -313,7 +264,5 @@ with summary_tab:
     render_summary()
 with attendance_tab:
     render_attendance()
-with tasks_tab:
-    render_tasks()
 with matches_tab:
     render_matches()
