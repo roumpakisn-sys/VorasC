@@ -967,7 +967,8 @@ if not presentation_mode:
                             str_end = new_t_end.strftime("%H:%M")
                             edit_target_dates = [edit_date]
 
-                            if str_start >= str_end:
+                            was_overnight = target_group["EndTime"] < target_group["StartTime"]
+                            if str_start == str_end or (str_start > str_end and not was_overnight):
                                 st.error("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης.")
                                 st.stop()
                             # Resolve project before calculating anything; don't create it until
