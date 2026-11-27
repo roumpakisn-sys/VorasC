@@ -1,5 +1,7 @@
+from base64 import b64encode
 from datetime import date, timedelta
 from hashlib import sha256
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -25,7 +27,41 @@ for key in ("employees", "projects", "assignments", "leaves", "recurring_pattern
     state.setdefault(key, [])
 utils.init_data_and_sync()
 utils.setup_shared_ui()
-st.title("ΑΡΗΣ ΓΗΠΕΔΟ")
+
+stadium_photo = Path(__file__).resolve().parents[1] / "assets" / "aris-stadium-background.webp"
+stadium_photo_data = b64encode(stadium_photo.read_bytes()).decode("ascii")
+st.html("""
+    <style>
+    [data-testid="stMain"]:has(.st-key-aris_stadium_title) {
+        isolation: isolate;
+        --aris-background-tint: 255 255 255;
+    }
+
+    :root[data-staff-theme="dark"] [data-testid="stMain"]:has(.st-key-aris_stadium_title) {
+        --aris-background-tint: 15 23 42;
+    }
+
+    [data-testid="stMain"]:has(.st-key-aris_stadium_title)::before {
+        content: "";
+        position: fixed;
+        inset: -12px;
+        z-index: -1;
+        pointer-events: none;
+        background-image:
+            linear-gradient(105deg, rgb(var(--aris-background-tint) / 0.90),
+                            rgb(var(--aris-background-tint) / 0.81) 55%,
+                            rgb(var(--aris-background-tint) / 0.70)),
+            url("data:image/webp;base64,__ARIS_STADIUM_PHOTO__");
+        background-position: center, center 60%;
+        background-size: cover;
+        background-repeat: no-repeat;
+        filter: blur(6px);
+    }
+    </style>
+""".replace("__ARIS_STADIUM_PHOTO__", stadium_photo_data))
+
+with st.container(key="aris_stadium_title"):
+    st.title("ΑΡΗΣ ΓΗΠΕΔΟ")
 
 client = utils.supabase
 if client is None:
