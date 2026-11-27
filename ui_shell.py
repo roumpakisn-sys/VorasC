@@ -9,6 +9,43 @@ from pathlib import Path
 _ARIS_BADGE = b64encode((Path(__file__).parent / "assets" / "aris_badge.png").read_bytes()).decode("ascii")
 _TRUEWORK_LOGO = b64encode((Path(__file__).parent / "assets" / "truework_logo.webp").read_bytes()).decode("ascii")
 
+def render_page_title_with_background(title, asset, *, key, position):
+    path = Path(__file__).parent / "assets" / asset
+    photo = b64encode(path.read_bytes()).decode("ascii")
+    main = f'[data-testid="stMain"]:has(.st-key-{key})'
+    st.html(f"""
+        <style>
+        {main} {{
+            isolation: isolate;
+            --page-background-tint: 255 255 255;
+        }}
+
+        :root[data-staff-theme="dark"] {main} {{
+            --page-background-tint: 15 23 42;
+        }}
+
+        {main}::before {{
+            content: "";
+            position: fixed;
+            inset: -12px;
+            z-index: -1;
+            pointer-events: none;
+            background-image:
+                linear-gradient(105deg, rgb(var(--page-background-tint) / 0.90),
+                                rgb(var(--page-background-tint) / 0.81) 55%,
+                                rgb(var(--page-background-tint) / 0.70)),
+                url("data:image/webp;base64,{photo}");
+            background-position: center, {position};
+            background-size: cover;
+            background-repeat: no-repeat;
+            filter: blur(6px);
+        }}
+        </style>
+    """)
+    with st.container(key=key):
+        st.title(title)
+
+
 def setup_shared_ui(show_menu=False, menu_options=None):
     import utils
     st.markdown("""

@@ -8,6 +8,7 @@ import stadium_tracking
 import truework_report as report
 import utils
 from gantt_helpers import get_local_today
+from ui_shell import render_page_title_with_background
 
 
 st.set_page_config(page_title="TRUEWORK", layout="wide")
@@ -23,7 +24,9 @@ for key in ("employees", "projects", "assignments", "leaves", "recurring_pattern
     state.setdefault(key, [])
 utils.init_data_and_sync()
 utils.setup_shared_ui()
-st.title("TRUEWORK")
+render_page_title_with_background(
+    "TRUEWORK", "truework-background.webp", key="truework_title", position="72% center",
+)
 
 months = (
     "Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος",
