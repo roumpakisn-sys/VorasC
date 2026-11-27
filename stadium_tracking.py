@@ -10,6 +10,10 @@ import placement_hours
 
 STADIUM_WORDS = frozenset({"ΓΗΠΕΔΟ", "ΑΡΗΣ", "ΑΓΩΝΑΣ"})
 COMPETITIONS = ("Πρωτάθλημα", "Κύπελλο")
+MATCH_NO_SHIFT = "Χωρίς βάρδια"
+MATCH_NO_STAFF = "Χωρίς προσωπικό"
+MATCH_PENDING = "Εκκρεμούν παρουσίες"
+MATCH_COMPLETE = "Ολοκληρώθηκε"
 STATUSES = ("Εκκρεμεί", "Σε εξέλιξη", "Ολοκληρώθηκε")
 CATEGORIES = (
     "Δάπεδα", "WC", "Υαλοπίνακες", "Γραφεία / επιφάνειες", "Κερκίδες",
@@ -29,11 +33,13 @@ def is_yellow_bar(group):
     return color == config.BASIC_COLORS["Κίτρινο"].lstrip("#").casefold()
 
 
-def stadium_bars(groups, selected_day):
-    """Offer active, staffed yellow bars whose title refers to the stadium or a match."""
+def stadium_bars(groups, selected_day, *, include_unstaffed=False):
+    """Find active yellow bars whose title refers to the stadium or a match."""
     bars = []
     for group in groups.values():
-        if group["Date"] != selected_day or group["is_cancelled"] or not group["HasAssignedEmployee"]:
+        if group["Date"] != selected_day or group["is_cancelled"]:
+            continue
+        if not include_unstaffed and not group["HasAssignedEmployee"]:
             continue
         if not is_yellow_bar(group):
             continue
@@ -84,6 +90,29 @@ def attendance_payload(assignment, employee_name, clock_in, clock_out, pause, ar
 
 def attendance_key(row):
     return row["assignment_id"], row["project_id"], row["employee_id"], str(row["work_date"])
+
+
+def assignment_attendance_key(assignment):
+    return assignment["id"], assignment["projectId"], assignment["employeeId"], assignment["date"].isoformat()
+
+
+def match_readiness(bars, scheduled, recorded):
+    """Return the match-day status and its first bar that needs attention."""
+    if not bars:
+        return MATCH_NO_SHIFT, None
+
+    for bar in bars:
+        if not bar["HasAssignedEmployee"]:
+            return MATCH_NO_STAFF, bar
+
+    expected = {
+        row["id"]: assignment_attendance_key(row) for row in scheduled
+        if row.get("employeeId") and not row.get("is_cancelled")
+    }
+    for bar in bars:
+        if any(expected[key] not in recorded for key in bar["AssignmentIds"] if key in expected):
+            return MATCH_PENDING, bar
+    return MATCH_COMPLETE, bars[0]
 
 
 def period_rows(client, table, order_fields, date_field, start, end):
