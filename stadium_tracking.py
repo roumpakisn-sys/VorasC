@@ -1,6 +1,6 @@
 """Attendance, cleaning tasks and match-day summaries for the stadium."""
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import re
 import unicodedata
 
@@ -58,16 +58,25 @@ def worked_minutes(arrival, departure, break_minutes):
     return duration - break_minutes
 
 
-def attendance_payload(assignment, employee_name, clock_in, clock_out, pause, area, notes, previous):
-    minutes = worked_minutes(clock_in, clock_out, pause)
+def attendance_time_defaults(assignment, previous):
+    if previous and previous.get("did_work", True):
+        start, end = previous["arrival"], previous["departure"]
+    else:
+        start, end = assignment["startTime"], assignment["endTime"]
+    return tuple(datetime.strptime(str(value)[:5], "%H:%M").time() for value in (start, end))
+
+
+def attendance_payload(assignment, employee_name, clock_in, clock_out, pause, area, notes, previous, *, did_work=True):
+    minutes = worked_minutes(clock_in, clock_out, pause) if did_work else 0
     return {
         "expected": {**assignment, "date": assignment["date"].isoformat()},
         "assignment_notes": placement_hours.combine_notes(assignment.get("notes"), minutes / 60),
         "expected_attendance_at": previous.get("updated_at"),
         "employee_name": employee_name,
-        "arrival": clock_in.strftime("%H:%M"),
-        "departure": clock_out.strftime("%H:%M"),
-        "break_minutes": pause,
+        "did_work": did_work,
+        "arrival": clock_in.strftime("%H:%M") if did_work else None,
+        "departure": clock_out.strftime("%H:%M") if did_work else None,
+        "break_minutes": pause if did_work else 0,
         "area": area.strip(),
         "notes": notes.strip(),
     }
