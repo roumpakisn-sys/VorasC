@@ -80,7 +80,7 @@ def build_match_shifts(match_day, kickoff, opponent, projects):
 
     specs = (
         (f"ΑΡΗΣ – {opponent}", start.strftime("%H:%M"), end.strftime("%H:%M")),
-        (PRE_MATCH_PROJECT, "09:00", "17:00"),
+        (PRE_MATCH_PROJECT, "08:00", "13:00"),
     )
     color = config.BASIC_COLORS["Κίτρινο"]
     shifts, new_projects = [], []

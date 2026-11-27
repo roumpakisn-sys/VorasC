@@ -62,11 +62,11 @@ class StadiumTrackingTests(unittest.TestCase):
         self.assertIsNone(pre_match_project)
         self.assertEqual(shifts[1]["projectId"], "before")
         self.assertEqual([(r["startTime"], r["endTime"]) for r in shifts], [
-            ("17:30", "21:30"), ("09:00", "17:00"),
+            ("17:30", "21:30"), ("08:00", "13:00"),
         ])
         self.assertTrue(all(r["date"] == day and r["colorName"] == "Κίτρινο" and not r["employeeId"]
                             for r in shifts))
-        group = dict(Date=day, Project=pre_match["name"], StartTime="09:00", EndTime="17:00",
+        group = dict(Date=day, Project=pre_match["name"], StartTime="08:00", EndTime="13:00",
                      is_cancelled=False, HasAssignedEmployee=False, ColorHex=shifts[1]["colorHex"])
         self.assertEqual(tracking.stadium_bars({"before": group}, day, include_unstaffed=True), [group])
 
