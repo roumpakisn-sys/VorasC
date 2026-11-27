@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 _ARIS_BADGE = b64encode((Path(__file__).parent / "assets" / "aris_badge.png").read_bytes()).decode("ascii")
+_TRUEWORK_LOGO = b64encode((Path(__file__).parent / "assets" / "truework_logo.webp").read_bytes()).decode("ascii")
 
 def setup_shared_ui(show_menu=False, menu_options=None):
     import utils
@@ -102,6 +103,33 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         flex: none;
         margin-inline-start: auto;
         background: url("data:image/png;base64,__ARIS_BADGE_PNG__") center / contain no-repeat;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href$="/TRUEWORK" i], [href="TRUEWORK" i]) {
+        --staff-text: #ffffff;
+        --staff-text-strong: #ffffff;
+        --staff-nav-accent: #2643fd;
+        --staff-hover: #020333;
+        background: #020333 !important;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href$="/TRUEWORK" i], [href="TRUEWORK" i]) span {
+        font-weight: 800;
+        letter-spacing: 0.025em;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href$="/TRUEWORK" i], [href="TRUEWORK" i]):focus-visible {
+        outline: 2px solid #7280ff;
+        outline-offset: 2px;
+    }
+
+    /* Crop the supplied wordmark to its symbol at sidebar size. */
+    [data-testid="stSidebarNav"] a:is([href$="/TRUEWORK" i], [href="TRUEWORK" i])::before {
+        content: "";
+        width: 1.45rem;
+        height: 1.15rem;
+        flex: none;
+        background: url("data:image/webp;base64,__TRUEWORK_LOGO_WEBP__") 9% center / 500% auto no-repeat;
     }
 
     /* Management εσωτερικό menu: st.sidebar.radio σαν HTML menu buttons */
@@ -215,7 +243,10 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         display: none !important;
     }
     </style>
-    """.replace("__ARIS_BADGE_PNG__", _ARIS_BADGE), unsafe_allow_html=True)
+    """.replace("__ARIS_BADGE_PNG__", _ARIS_BADGE)
+        .replace("__TRUEWORK_LOGO_WEBP__", _TRUEWORK_LOGO),
+        unsafe_allow_html=True,
+    )
     
     # --- SMART POLLING SETUP ΠΡΟΣΩΡΙΝΑ ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ ---
     # Υπήρχαν συνεχόμενα reruns στη σελίδα Gantt.
