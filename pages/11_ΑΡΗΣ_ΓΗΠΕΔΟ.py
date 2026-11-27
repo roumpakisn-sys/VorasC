@@ -125,7 +125,6 @@ def render_attendance():
             "Μπάρα από το Gantt", bars, index=None, placeholder="Επίλεξε έργο και ωράριο",
             format_func=lambda key: (
                 f"{bars[key]['StartTime']}–{bars[key]['EndTime']} · {bars[key]['ProjectDisplay']} · "
-                f"{'Κίτρινο · ' if tracking.is_yellow_bar(bars[key]) else ''}"
                 f"{', '.join(state.emp_map.get(e, {}).get('name', 'Άγνωστος') for e in bars[key]['EmployeeIds'] if e)}"
             ),
         )
@@ -133,7 +132,7 @@ def render_attendance():
             roster = [by_id[key] for key in bars[selected]["AssignmentIds"] if key in by_id]
             render_attendance_form(roster)
     else:
-        st.info("Δεν βρέθηκαν ενεργές μπάρες με προσωπικό για αυτή την ημέρα στο Gantt, με τίτλο ΑΡΗΣ ΓΗΠΕΔΟ ή κίτρινο χρώμα.")
+        st.info("Δεν βρέθηκαν για αυτή την ημέρα κίτρινες μπάρες με προσωπικό και τίτλο που περιέχει ΓΗΠΕΔΟ, ΑΡΗΣ ή ΑΓΩΝΑΣ.")
 
     saved = _on_date(attendance)
     if saved:
