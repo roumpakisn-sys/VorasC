@@ -8,6 +8,7 @@ import config
 import placement_hours
 
 
+STADIUM_WORDS = frozenset({"ΓΗΠΕΔΟ", "ΑΡΗΣ", "ΑΓΩΝΑΣ"})
 COMPETITIONS = ("Πρωτάθλημα", "Κύπελλο")
 STATUSES = ("Εκκρεμεί", "Σε εξέλιξη", "Ολοκληρώθηκε")
 CATEGORIES = (
@@ -29,20 +30,21 @@ def is_yellow_bar(group):
 
 
 def stadium_bars(groups, selected_day):
-    """Offer staffed stadium and yellow bars on the day, prioritizing stadium titles."""
-    named, yellow = [], []
+    """Offer active, staffed yellow bars whose title refers to the stadium or a match."""
+    bars = []
     for group in groups.values():
         if group["Date"] != selected_day or group["is_cancelled"] or not group["HasAssignedEmployee"]:
             continue
-        if "ΑΡΗΣ ΓΗΠΕΔΟ" in _normalized_label(group["Project"]):
-            named.append(group)
-        elif is_yellow_bar(group):
-            yellow.append(group)
+        if not is_yellow_bar(group):
+            continue
+        title = _normalized_label(f"{group['Project']} {group.get('ProjectDisplay') or ''}")
+        if STADIUM_WORDS.intersection(re.findall(r"[^\W_]+", title)):
+            bars.append(group)
 
-    def by_time(group):
-        return group["StartTime"], group["EndTime"], group["Project"]
-
-    return sorted(named, key=by_time) + sorted(yellow, key=by_time)
+    return sorted(bars, key=lambda group: (
+        "ΑΡΗΣ ΓΗΠΕΔΟ" not in _normalized_label(group["Project"]),
+        group["StartTime"], group["EndTime"], group["Project"],
+    ))
 
 
 def worked_minutes(arrival, departure, break_minutes):

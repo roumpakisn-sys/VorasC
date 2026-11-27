@@ -5,23 +5,26 @@ import stadium_tracking as tracking
 
 
 class StadiumTrackingTests(unittest.TestCase):
-    def test_stadium_titles_and_yellow_bars_match_on_selected_day(self):
+    def test_only_yellow_bars_with_stadium_words_match_on_selected_day(self):
         day = date(2026, 11, 29)
         base = dict(Date=day, Project="ΑΡΗΣ ΓΗΠΕΔΟ", StartTime="08:00", EndTime="12:00",
-                    is_cancelled=False, HasAssignedEmployee=True, AssignmentIds=["a", "b"])
-        yellow = dict(base, Project="Καθαρισμός κερκίδων", ColorHex=" #F1C232 ",
-                      ColorName="Προεπιλογή", StartTime="07:00", AssignmentIds=["y"])
+                    is_cancelled=False, HasAssignedEmployee=True, AssignmentIds=["a", "b"],
+                    ColorHex=" #F1C232 ", ColorName="Προεπιλογή")
         groups = {
-            "early": base,
-            "match": dict(base, Project="Άρης Γήπεδο Αγώνας", StartTime="19:00", AssignmentIds=["m"]),
-            "different_yellow": yellow,
-            "empty_yellow": dict(yellow, HasAssignedEmployee=False),
-            "cancelled_yellow": dict(yellow, is_cancelled=True),
-            "different_blue": dict(yellow, ColorHex="#4a86e8"),
-            "earlier_yellow": dict(yellow, Date=date(2026, 11, 28)),
+            "named": base,
+            "stadium": dict(base, Project="Γήπεδο_Κερκίδες", StartTime="07:00", AssignmentIds=["g"]),
+            "aris": dict(base, Project="Άρης · Καθαρισμός", StartTime="14:00", AssignmentIds=["r"]),
+            "match": dict(base, Project="Καθαρισμός κερκίδων", ProjectDisplay="Καθαρισμός κερκίδων (Αγώνας)",
+                          StartTime="19:00", AssignmentIds=["m"]),
+            "unrelated_yellow": dict(base, Project="Καθαρισμός γραφείων"),
+            "partial_word": dict(base, Project="ΧΑΡΗΣ"),
+            "empty_yellow": dict(base, HasAssignedEmployee=False),
+            "cancelled_yellow": dict(base, is_cancelled=True),
+            "stadium_blue": dict(base, ColorHex="#4a86e8"),
+            "earlier_yellow": dict(base, Date=date(2026, 11, 28)),
         }
         bars = tracking.stadium_bars(groups, day)
-        self.assertEqual([b["AssignmentIds"] for b in bars], [["a", "b"], ["m"], ["y"]])
+        self.assertEqual([b["AssignmentIds"] for b in bars], [["a", "b"], ["g"], ["r"], ["m"]])
 
     def test_night_shift_and_actual_hours_keep_the_assignment_id(self):
         assignment = dict(id="a", date=date(2026, 11, 29), notes="Σημείωση [Πραγματικές ώρες: 2]")
