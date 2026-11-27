@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 import re
 import unicodedata
 
+import config
 import placement_hours
 
 
@@ -21,14 +22,27 @@ def _normalized_label(value):
     return " ".join("".join(c for c in letters if not unicodedata.combining(c)).upper().split())
 
 
+def is_yellow_bar(group):
+    """Compare the rendered Gantt color with its existing yellow palette entry."""
+    color = (group.get("ColorHex") or "").strip().lstrip("#").casefold()
+    return color == config.BASIC_COLORS["Κίτρινο"].lstrip("#").casefold()
+
+
 def stadium_bars(groups, selected_day):
-    """Filter the actual Gantt groups, including variations of the stadium project name."""
-    bars = [
-        group for group in groups.values()
-        if group["Date"] == selected_day and not group["is_cancelled"]
-        and group["HasAssignedEmployee"] and "ΑΡΗΣ ΓΗΠΕΔΟ" in _normalized_label(group["Project"])
-    ]
-    return sorted(bars, key=lambda group: (group["StartTime"], group["EndTime"], group["Project"]))
+    """Offer staffed stadium and yellow bars on the day, prioritizing stadium titles."""
+    named, yellow = [], []
+    for group in groups.values():
+        if group["Date"] != selected_day or group["is_cancelled"] or not group["HasAssignedEmployee"]:
+            continue
+        if "ΑΡΗΣ ΓΗΠΕΔΟ" in _normalized_label(group["Project"]):
+            named.append(group)
+        elif is_yellow_bar(group):
+            yellow.append(group)
+
+    def by_time(group):
+        return group["StartTime"], group["EndTime"], group["Project"]
+
+    return sorted(named, key=by_time) + sorted(yellow, key=by_time)
 
 
 def worked_minutes(arrival, departure, break_minutes):
