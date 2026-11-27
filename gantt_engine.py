@@ -65,6 +65,7 @@ def generate_gantt_chart(
     Η σελίδα χρησιμοποιεί κυρίως τα wk_groups και export_data.
     Το πρώτο επιστρεφόμενο αντικείμενο κρατιέται για συμβατότητα με την παλιά Plotly έκδοση.
     """
+    from gantt_helpers import assignment_color
     import placement_confirmation
     import placement_hours
     import periodic_visits
@@ -105,7 +106,7 @@ def generate_gantt_chart(
             proj = get_project_info(project_id, proj_map)
             project_name = proj.get("name", "Άγνωστο") if proj else "Άγνωστο"
 
-            c_hex = a.get("colorHex") or (proj.get("color") if proj else "#999999") or "#999999"
+            c_hex = assignment_color(a, proj)
             c_name = a.get("colorName", "Προεπιλογή")
             notes = a.get("notes", "") or ""
             _, support_roles = placement_roles.split_notes(notes)

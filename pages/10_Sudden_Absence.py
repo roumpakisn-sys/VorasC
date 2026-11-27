@@ -15,6 +15,7 @@ import streamlit as st
 st.set_page_config(page_title="Ξαφνική Απουσία | STAFF.PRO", page_icon="🚨", layout="wide")
 import utils
 from availability_rules import fetch_rules
+from gantt_helpers import record_assignment_absence
 from replacement_engine import as_date, is_cancelled, rank_candidates, candidate_assessment
 
 if not st.session_state.get("authenticated", False):
@@ -79,6 +80,11 @@ def stable_same(fresh, original):
             return False
     return True
 
+def unchanged_notes(query, row):
+    notes = row.get("notes")
+    return query.is_("notes", "null") if notes is None else query.eq("notes", notes)
+
+
 def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_leave):
     if not utils.supabase:
         st.error("Απαιτείται σύνδεση Supabase.")
@@ -120,6 +126,7 @@ def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_le
             new_id = str(choices.get(rid) or "")
             after = dict(current_by_id[rid])
             after["employeeId"] = new_id
+            after["notes"] = record_assignment_absence(after.get("notes"), employees[emp_id].get("name"))
             if new_id:
                 chosen = employees.get(new_id)
                 if not chosen or new_id == emp_id:
@@ -151,7 +158,7 @@ def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_le
             for previous, modified in changes:
                 query = (
                     utils.supabase.table("assignments")
-                    .update({"employeeId": modified["employeeId"]})
+                    .update({"employeeId": modified["employeeId"], "notes": modified["notes"]})
                     .eq("id", previous["id"])
                     .eq("employeeId", emp_id)
                     .eq("date", str(previous["date"])[:10])
@@ -159,8 +166,10 @@ def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_le
                     .eq("endTime", previous["endTime"])
                     .eq("projectId", previous["projectId"])
                 )
-                updated = list(query.execute().data or [])
-                if len(updated) != 1 or str(updated[0].get("employeeId") or "") != modified["employeeId"]:
+                updated = list(unchanged_notes(query, previous).execute().data or [])
+                if len(updated) != 1 or any(
+                    (updated[0].get(field) or "") != modified[field] for field in ("employeeId", "notes")
+                ):
                     raise RuntimeError("Η βάρδια τροποποιήθηκε από άλλον χρήστη ή δεν αποθηκεύτηκε.")
                 applied.append((previous, modified))
             if leave_record:
@@ -171,12 +180,13 @@ def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_le
             rollback_errors = []
             for before, after in reversed(applied):
                 try:
-                    res = (
+                    query = (
                         utils.supabase.table("assignments")
-                        .update({"employeeId": before["employeeId"]})
+                        .update({"employeeId": before["employeeId"], "notes": before.get("notes")})
                         .eq("id", before["id"])
-                        .eq("employeeId", after["employeeId"]).execute()
+                        .eq("employeeId", after["employeeId"])
                     )
+                    res = unchanged_notes(query, after).execute()
                     if len(res.data or []) != 1:
                         rollback_errors.append(str(before["id"]))
                 except Exception:
@@ -194,6 +204,7 @@ def apply_absence(emp_id, dates, affected, choices, max_hours, buffer, create_le
             if local is not None:
                 old_local = dict(local)
                 local["employeeId"] = after["employeeId"]
+                local["notes"] = after["notes"]
                 before_rows.append(old_local)
                 after_rows.append(dict(local))
             else:
