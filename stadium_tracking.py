@@ -1,6 +1,6 @@
 """Attendance, cleaning tasks and match-day summaries for the stadium."""
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 import re
 import unicodedata
 
@@ -130,38 +130,3 @@ def summary(attendance, tasks, matches, selected_day):
         "selected": sorted((names[worker], minutes) for worker, minutes in by_day[selected_day].items()),
     }
 
-
-def match_date(value):
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    match = re.match(r"^\s*(\d{1,2}/\d{1,2}/\d{4})(?:\s|$)", str(value or ""))
-    if match:
-        try:
-            return datetime.strptime(match.group(1), "%d/%m/%Y").date()
-        except ValueError:
-            return None
-    return None
-
-
-def matches_from_excel(file):
-    from openpyxl import load_workbook
-
-    workbook = load_workbook(file, read_only=True, data_only=True)
-    try:
-        result = set()
-        for competition in COMPETITIONS:
-            if competition not in workbook.sheetnames:
-                continue
-            for first, second, _, venue in workbook[competition].iter_rows(
-                min_row=2, max_col=4, values_only=True,
-            ):
-                if "ΚΛΕΑΝΘΗΣ ΒΙΚΕΛΙΔΗΣ" not in _normalized_label(venue):
-                    continue
-                day = match_date(first) or match_date(second)
-                if day:
-                    result.add((day, competition))
-        return sorted(result)
-    finally:
-        workbook.close()

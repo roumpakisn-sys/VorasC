@@ -47,4 +47,3 @@ class StadiumTrackingTests(unittest.TestCase):
         self.assertEqual(summary["selected"], [("Εργαζόμενος", 210)])
         self.assertEqual(summary["workers"], [("Εργαζόμενος", 1, 210)])
         self.assertIn((day, True, 1, 210, 1), summary["daily"])
-        self.assertEqual(tracking.match_date("29/11/2026 7:00:00 μμ"), day)
