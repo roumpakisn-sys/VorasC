@@ -4,7 +4,6 @@ import textwrap
 import re
 import placement_roles
 import placement_details
-from gantt_helpers import assignment_color
 
 
 def get_local_today():
@@ -66,6 +65,7 @@ def generate_gantt_chart(
     Η σελίδα χρησιμοποιεί κυρίως τα wk_groups και export_data.
     Το πρώτο επιστρεφόμενο αντικείμενο κρατιέται για συμβατότητα με την παλιά Plotly έκδοση.
     """
+    from gantt_helpers import assignment_color
     import placement_confirmation
     import placement_hours
     import periodic_visits
