@@ -2,7 +2,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
 import json
+from base64 import b64encode
+from pathlib import Path
 
+
+_ARIS_BADGE = b64encode((Path(__file__).parent / "assets" / "aris_badge.png").read_bytes()).decode("ascii")
 
 def setup_shared_ui(show_menu=False, menu_options=None):
     import utils
@@ -77,6 +81,27 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         color: var(--staff-text-strong, #0f172a) !important;
         font-weight: 800 !important;
         box-shadow: inset 3px 0 0 var(--staff-nav-accent, #334155), 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href*="ΑΡΗΣ_ΓΗΠΕΔΟ"], [href*="%CE%91%CE%A1%CE%97%CE%A3_%CE%93%CE%97%CE%A0%CE%95%CE%94%CE%9F" i]) {
+        --staff-text: #fde047;
+        --staff-text-strong: #fde047;
+        --staff-nav-accent: #fde047;
+        --staff-hover: #3d3116;
+        background: #292419 !important;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href*="ΑΡΗΣ_ΓΗΠΕΔΟ"], [href*="%CE%91%CE%A1%CE%97%CE%A3_%CE%93%CE%97%CE%A0%CE%95%CE%94%CE%9F" i]):is(:hover, [aria-current="page"]) {
+        background: var(--staff-hover) !important;
+    }
+
+    [data-testid="stSidebarNav"] a:is([href*="ΑΡΗΣ_ΓΗΠΕΔΟ"], [href*="%CE%91%CE%A1%CE%97%CE%A3_%CE%93%CE%97%CE%A0%CE%95%CE%94%CE%9F" i])::after {
+        content: "";
+        width: 1.1rem;
+        height: 1.1rem;
+        flex: none;
+        margin-inline-start: auto;
+        background: url("data:image/png;base64,__ARIS_BADGE_PNG__") center / contain no-repeat;
     }
 
     /* Management εσωτερικό menu: st.sidebar.radio σαν HTML menu buttons */
@@ -190,7 +215,7 @@ def setup_shared_ui(show_menu=False, menu_options=None):
         display: none !important;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """.replace("__ARIS_BADGE_PNG__", _ARIS_BADGE), unsafe_allow_html=True)
     
     # --- SMART POLLING SETUP ΠΡΟΣΩΡΙΝΑ ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΟ ---
     # Υπήρχαν συνεχόμενα reruns στη σελίδα Gantt.
