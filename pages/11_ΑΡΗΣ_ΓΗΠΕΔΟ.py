@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 
 import pandas as pd
@@ -118,8 +118,11 @@ def save_attendance(entries):
 
     utils.mark_data_changed()
     utils.touch_app_sync_state()
-    utils.log_activity("ΚΑΤΑΧΩΡΙΣΗ ΠΑΡΟΥΣΙΩΝ", "stadium_attendance", f"{day:%d/%m/%Y} · {saved} παρουσίες")
-    state.stadium_saved = f"Αποθηκεύτηκαν {saved} παρουσίες."
+    worked = sum(entry["did_work"] for entry in entries)
+    absent = saved - worked
+    details = f"{worked} παρουσίες και {absent} απουσίες"
+    utils.log_activity("ΚΑΤΑΧΩΡΙΣΗ ΠΑΡΟΥΣΙΩΝ", "stadium_attendance", f"{day:%d/%m/%Y} · {details}")
+    state.stadium_saved = f"Αποθηκεύτηκαν {details}."
     st.rerun()
 
 
@@ -145,7 +148,8 @@ def render_attendance():
     else:
         st.info("Δεν βρέθηκαν για αυτή την ημέρα κίτρινες μπάρες με προσωπικό και τίτλο που περιέχει ΓΗΠΕΔΟ, ΑΡΗΣ ή ΑΓΩΝΑΣ.")
 
-    saved = _on_date(attendance)
+    day_records = _on_date(attendance)
+    saved = [row for row in day_records if row.get("did_work", True)]
     if saved:
         st.subheader("Καταχωρισμένες παρουσίες")
         st.dataframe(pd.DataFrame([
@@ -153,6 +157,9 @@ def render_attendance():
              _duration(row["worked_minutes"]), row["area"], row["notes"]) for row in saved
         ], columns=["Εργαζόμενος", "Προσέλευση", "Αποχώρηση", "Διάλειμμα (λ.)", "Ώρες", "Χώρος", "Παρατηρήσεις"]),
             hide_index=True, width="stretch")
+    absent = [row["employee_name"] for row in day_records if not row.get("did_work", True)]
+    if absent:
+        st.caption("Απουσίες βαρδιών · " + ", ".join(dict.fromkeys(absent)))
 
 
 def render_attendance_form(roster):
@@ -169,39 +176,35 @@ def render_attendance_form(roster):
     versions = [(a["id"], a.get("updated_at"), p.get("updated_at")) for a, _, p in people]
     form_key = "stadium_" + sha256(repr((day, versions)).encode()).hexdigest()[:20]
     with st.form(form_key):
-        st.caption("Συμπλήρωσε προσέλευση και αποχώρηση μόνο για τις παρουσίες που καταχωρείς.")
+        st.caption("Έλεγξε το ωράριο της μπάρας και σημείωσε όσους δεν εργάστηκαν.")
         values = []
         for index, (assignment, name, row) in enumerate(people):
-            st.markdown(f"**{name}**")
-            start_col, end_col, pause_col, area_col = st.columns([2, 2, 2, 3])
             prefix = f"{form_key}_{index}"
-            clock_in = start_col.time_input("Προσέλευση", time.fromisoformat(row["arrival"]) if row else None,
-                                            step=60, key=f"{prefix}_in")
-            clock_out = end_col.time_input("Αποχώρηση", time.fromisoformat(row["departure"]) if row else None,
-                                           step=60, key=f"{prefix}_out")
+            name_col, absent_col = st.columns([3, 2])
+            name_col.markdown(f"**{name}**")
+            absent = absent_col.checkbox("Δεν εργάστηκε", value=not row.get("did_work", True), key=f"{prefix}_absent")
+            start_col, end_col, pause_col, area_col = st.columns([2, 2, 2, 3])
+            default_in, default_out = tracking.attendance_time_defaults(assignment, row)
+            clock_in = start_col.time_input("Προσέλευση", default_in, step=60, key=f"{prefix}_in")
+            clock_out = end_col.time_input("Αποχώρηση", default_out, step=60, key=f"{prefix}_out")
             pause = pause_col.number_input("Διάλειμμα (λεπτά)", 0, 1439, value=row.get("break_minutes", 0),
                                           key=f"{prefix}_pause")
             area = area_col.text_input("Χώρος / τμήμα", row.get("area", ""), key=f"{prefix}_area")
             notes = st.text_input("Παρατηρήσεις", row.get("notes", ""), key=f"{prefix}_notes")
-            values.append((assignment, name, clock_in, clock_out, pause, area, notes, row))
+            values.append((assignment, name, clock_in, clock_out, pause, area, notes, row, not absent))
         if st.form_submit_button("Αποθήκευση παρουσιών", type="primary"):
             entries = []
             try:
-                for assignment, name, clock_in, clock_out, pause, area, notes, row in values:
-                    if clock_in is None and clock_out is None and not (pause or area.strip() or notes.strip()):
-                        continue
-                    if clock_in is None or clock_out is None:
+                for assignment, name, clock_in, clock_out, pause, area, notes, row, did_work in values:
+                    if did_work and (clock_in is None or clock_out is None):
                         raise ValueError(f"{name} · Συμπλήρωσε προσέλευση και αποχώρηση.")
                     entries.append(tracking.attendance_payload(
-                        assignment, name, clock_in, clock_out, pause, area, notes, row,
+                        assignment, name, clock_in, clock_out, pause, area, notes, row, did_work=did_work,
                     ))
             except ValueError as exc:
                 st.warning(str(exc))
                 return
-            if entries:
-                save_attendance(entries)
-            else:
-                st.info("Συμπλήρωσε τουλάχιστον μία παρουσία.")
+            save_attendance(entries)
 
 
 def render_tasks():

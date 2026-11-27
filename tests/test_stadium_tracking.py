@@ -26,6 +26,16 @@ class StadiumTrackingTests(unittest.TestCase):
         bars = tracking.stadium_bars(groups, day)
         self.assertEqual([b["AssignmentIds"] for b in bars], [["a", "b"], ["g"], ["r"], ["m"]])
 
+    def test_attendance_defaults_to_bar_unless_actual_times_were_saved(self):
+        assignment = dict(startTime="23:30", endTime="02:00")
+        self.assertEqual(tracking.attendance_time_defaults(assignment, {}), (time(23, 30), time(2)))
+        self.assertEqual(tracking.attendance_time_defaults(
+            assignment, dict(did_work=False, arrival=None, departure=None),
+        ), (time(23, 30), time(2)))
+        self.assertEqual(tracking.attendance_time_defaults(
+            assignment, dict(arrival="23:45:00", departure="01:30:00"),
+        ), (time(23, 45), time(1, 30)))
+
     def test_night_shift_and_actual_hours_keep_the_assignment_id(self):
         assignment = dict(id="a", date=date(2026, 11, 29), notes="Σημείωση [Πραγματικές ώρες: 2]")
         entry = tracking.attendance_payload(

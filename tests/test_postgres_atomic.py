@@ -40,6 +40,7 @@ class PostgresTests(unittest.TestCase):
         cls.db.execute((root / 'sql/employee_availability_rules.sql').read_text())
         cls.db.execute((root / 'sql/atomic_assignment_changes.sql').read_text())
         cls.db.execute((root / 'sql/stadium_tracking.sql').read_text())
+        cls.db.execute((root / 'sql/stadium_attendance_absence.sql').read_text())
         # Migration must be safe to apply again.
         cls.db.execute((root / 'sql/atomic_assignment_changes.sql').read_text())
 
@@ -105,6 +106,40 @@ class PostgresTests(unittest.TestCase):
         with self.assertRaisesRegex(self.pg.Error, 'Stale or cancelled assignment'):
             self.db.execute(query, (json.dumps(entries),))
         self.assertEqual(self.db.execute('select count(*) from stadium_attendance').fetchone()[0], 2)
+
+    def test_stadium_absence_removes_presence_and_can_be_reversed(self):
+        from datetime import date, time
+        import placement_hours
+        import stadium_tracking as tracking
+
+        query = 'select public.record_stadium_attendance(%s::jsonb)'
+
+        def payload(did_work):
+            row = self.expected()[0]
+            saved_at = self.db.execute(
+                "select updated_at::text from stadium_attendance where assignment_id='a'"
+            ).fetchone()
+            return tracking.attendance_payload(
+                dict(row, date=date.fromisoformat(row['date'])), 'Εργαζόμενος',
+                time(9), time(12), 0, '', '', dict(updated_at=saved_at[0]) if saved_at else {},
+                did_work=did_work,
+            )
+
+        def record(entry):
+            return self.db.execute(query, (json.dumps([entry]),)).fetchone()[0]
+
+        legacy = payload(True)
+        del legacy['did_work']
+        self.assertEqual(record(legacy), 1)
+        self.assertEqual(record(payload(False)), 1)
+        self.assertEqual(self.db.execute(
+            "select did_work, arrival, departure, worked_minutes from stadium_attendance where assignment_id='a'"
+        ).fetchone(), (False, None, None, 0))
+        row = self.expected()[0]
+        self.assertEqual(placement_hours.counted_hours(row), 0)
+        self.assertEqual((row['id'], row['employeeId'], row['startTime'], row['endTime']), ('a', 'e', '09:00', '12:00'))
+        self.assertEqual(record(payload(True)), 1)
+        self.assertEqual(placement_hours.counted_hours(self.expected()[0]), 3)
 
     def test_group_update_preserves_ids_and_unedited_columns(self):
         before, after = self.expected(), self.proposed()
