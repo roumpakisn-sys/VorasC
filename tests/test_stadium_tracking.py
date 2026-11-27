@@ -25,6 +25,31 @@ class StadiumTrackingTests(unittest.TestCase):
         }
         bars = tracking.stadium_bars(groups, day)
         self.assertEqual([b["AssignmentIds"] for b in bars], [["a", "b"], ["g"], ["r"], ["m"]])
+        self.assertIn(groups["empty_yellow"], tracking.stadium_bars(groups, day, include_unstaffed=True))
+        self.assertNotIn(groups["cancelled_yellow"], tracking.stadium_bars(groups, day, include_unstaffed=True))
+
+    def test_readiness_checks_all_bars_against_the_current_roster(self):
+        day = date(2026, 11, 29)
+        morning = dict(HasAssignedEmployee=True, AssignmentIds=["a"])
+        evening = dict(HasAssignedEmployee=True, AssignmentIds=["b"])
+        unstaffed = dict(HasAssignedEmployee=False, AssignmentIds=["c"])
+        roster = [
+            dict(id="a", projectId="p", employeeId="e1", date=day),
+            dict(id="b", projectId="p", employeeId="e2", date=day),
+        ]
+        recorded = {
+            tracking.attendance_key(dict(assignment_id="a", project_id="p", employee_id="e1",
+                                         work_date=str(day), did_work=False)),
+            ("b", "p", "old_employee", str(day)),
+        }
+        self.assertEqual(tracking.match_readiness([], roster, recorded), (tracking.MATCH_NO_SHIFT, None))
+        self.assertEqual(tracking.match_readiness([morning, unstaffed], roster, recorded),
+                         (tracking.MATCH_NO_STAFF, unstaffed))
+        self.assertEqual(tracking.match_readiness([morning, evening], roster, recorded),
+                         (tracking.MATCH_PENDING, evening))
+        recorded.add(("b", "p", "e2", str(day)))
+        self.assertEqual(tracking.match_readiness([morning, evening], roster, recorded),
+                         (tracking.MATCH_COMPLETE, morning))
 
     def test_attendance_defaults_to_bar_unless_actual_times_were_saved(self):
         assignment = dict(startTime="23:30", endTime="02:00")

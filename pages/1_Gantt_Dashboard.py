@@ -92,6 +92,7 @@ if "view_week_date" not in st.session_state:
 
 def clear_bar_selection():
     st.session_state.pop("gantt_search_target", None)
+    st.session_state.pop("gantt_search_pending", None)
     st.session_state.clicked_key = None
     st.session_state.trigger_scroll = False
     st.session_state.last_clicked_safe_id = ""
@@ -107,9 +108,15 @@ def open_search_result(day, assignment_id):
     st.session_state.date_picker = day
     if is_full_admin and st.session_state.get("gantt_presentation_mode"):
         st.session_state.gantt_presentation_mode = False
-    st.session_state.gantt_search_target = (day, assignment_id)
-    st.session_state.gantt_search_pending = True
+    if assignment_id is not None:
+        st.session_state.gantt_search_target = (day, assignment_id)
+        st.session_state.gantt_search_pending = True
     st.session_state.pop("gantt_customer_pending_only", None)
+
+
+if is_full_admin and (stadium_target := st.session_state.pop("stadium_gantt_target", None)):
+    st.session_state.gantt_staff_transfer_mode = False
+    open_search_result(*stadium_target)
 
 
 def preserve_context_notes(original_notes, edited_notes):
