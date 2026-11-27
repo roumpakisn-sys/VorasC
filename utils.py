@@ -290,8 +290,13 @@ def save_assignment_batch(before, proposed, project=None, keep_worker_ids=False)
     """Update session and undo history only after the atomic write is confirmed."""
     from assignment_audit import format_assignment_changes
     from assignment_store import AssignmentSaveError, preserve_ids, save_changes, undo_actions
+    from gantt_helpers import assignment_absence_names, record_assignment_absence
     if keep_worker_ids:
         proposed = preserve_ids(before, proposed)
+        original_notes = {str(row['id']): row.get('notes') for row in before}
+        for row in proposed:
+            for name in sorted(assignment_absence_names(original_notes.get(str(row['id'])))):
+                row['notes'] = record_assignment_absence(row.get('notes'), name)
     try:
         result = save_changes(supabase, before, proposed, project=project)
     except AssignmentSaveError as exc:
@@ -420,6 +425,13 @@ def db_update(table, id_val, new_data, old_data=None, track=True):
     if track and not old_data:
         table_data = st.session_state.get(table, [])
         old_data = next((r for r in table_data if r.get('id') == id_val), None)
+    if table == 'assignments' and old_data and not new_data.get('employeeId'):
+        pending_leave = st.session_state.get('pending_leave') or {}
+        employee_id = old_data.get('employeeId')
+        if (employee_id and employee_id == pending_leave.get('employeeId')
+                and any(row.get('id') == id_val for row in st.session_state.get('leave_conflicts') or ())):
+            from gantt_helpers import record_assignment_absence
+            new_data['notes'] = record_assignment_absence(new_data.get('notes'), get_employee_name(employee_id))
     if track and old_data:
         add_transaction([{'type': 'update', 'table': table, 'old_records': [old_data], 'new_records': [new_data]}])
     if supabase:

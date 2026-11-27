@@ -26,3 +26,24 @@ def clean_conflict_leave_notes(notes):
     clean = re.sub(r"\[(?:Άδεια|Εμπλοκή):.*?\]", "", notes or "")
     clean = re.sub(r"\s*\|\s*", " ", clean).strip()
     return clean
+
+
+def assignment_color(assignment, project):
+    """Resolve the displayed Gantt color, including legacy rows without an override."""
+    return assignment.get("colorHex") or (project or {}).get("color") or "#999999"
+
+
+def assignment_absence_names(notes):
+    text = notes or ""
+    named_leaves = re.findall(r"\[Άδεια:\s*([^\]]+)\]", text, flags=re.IGNORECASE)
+    recurring_leaves = re.findall(r"\[Μη διαθέσιμος:\s*([^\]]+?)\s*—\s*Άδεια\s*\]", text, flags=re.IGNORECASE)
+    return {name.strip() for name in (*named_leaves, *recurring_leaves) if name.strip()}
+
+
+def record_assignment_absence(notes, employee_name):
+    """Attach the existing internal leave annotation before reassigning a shift."""
+    text = notes or ""
+    name = " ".join(str(employee_name or "").replace("[", " ").replace("]", " ").split())
+    if not name or any(name.casefold() == saved.casefold() for saved in assignment_absence_names(text)):
+        return text
+    return f"{text.rstrip()} [Άδεια: {name}]".strip()

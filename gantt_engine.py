@@ -4,6 +4,7 @@ import textwrap
 import re
 import placement_roles
 import placement_details
+from gantt_helpers import assignment_color
 
 
 def get_local_today():
@@ -105,7 +106,7 @@ def generate_gantt_chart(
             proj = get_project_info(project_id, proj_map)
             project_name = proj.get("name", "Άγνωστο") if proj else "Άγνωστο"
 
-            c_hex = a.get("colorHex") or (proj.get("color") if proj else "#999999") or "#999999"
+            c_hex = assignment_color(a, proj)
             c_name = a.get("colorName", "Προεπιλογή")
             notes = a.get("notes", "") or ""
             _, support_roles = placement_roles.split_notes(notes)
